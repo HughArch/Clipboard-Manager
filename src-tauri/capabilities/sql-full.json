@@ -1,0 +1,11 @@
+{
+    "identifier": "sql-full",
+    "windows": ["main"],
+    "permissions": [
+      "sql:default",
+      "sql:allow-load",
+      "sql:allow-execute",
+      "sql:allow-close",
+      "sql:allow-select"
+    ]
+  }

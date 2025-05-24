@@ -1,0 +1,10 @@
+[[set]]
+identifier = "sql-full"
+description = "Full SQL plugin access for all commands"
+permissions = [
+  "sql:default",
+  "sql:allow-load",
+  "sql:allow-execute",
+  "sql:allow-close",
+  "sql:allow-select"
+]
