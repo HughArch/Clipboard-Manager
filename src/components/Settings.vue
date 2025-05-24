@@ -1,7 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } from '@headlessui/vue'
-import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { invoke } from '@tauri-apps/api/core'
 
 interface AppSettings {
@@ -39,6 +37,10 @@ onMounted(async () => {
 
 const handleSubmit = async () => {
   try {
+    // 保存设置
+    await invoke('save_settings', { settings: settings.value })
+    // 更新快捷键
+    await invoke('register_shortcut', { shortcut: settings.value.hotkey })
     emit('save-settings', settings.value)
     emit('update:show', false)
   } catch (error) {
@@ -92,6 +94,9 @@ const handleSubmit = async () => {
               placeholder="e.g. Ctrl+Shift+V"
               class="w-full border border-gray-300 rounded-md px-3 py-2"
             />
+            <p class="mt-1 text-sm text-gray-500">
+              Format: Ctrl/Alt/Shift/Meta + Letter/Number (e.g. Ctrl+Shift+V)
+            </p>
           </div>
 
           <!-- 开机自启动 -->

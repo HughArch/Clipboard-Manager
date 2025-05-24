@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-register-shortcut"
+description = "Enables the register_shortcut command without any pre-configured scope."
+commands.allow = ["register_shortcut"]
+
+[[permission]]
+identifier = "deny-register-shortcut"
+description = "Denies the register_shortcut command without any pre-configured scope."
+commands.deny = ["register_shortcut"]

@@ -17,12 +17,27 @@
       "commands": ["load_settings"]
     },
     {
+      "identifier": "allow-greet",
+      "description": "Allows greeting",
+      "commands": ["greet"]
+    },
+    {
+      "identifier": "allow-register-shortcut",
+      "description": "Allows registering global shortcuts",
+      "commands": ["register_shortcut"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },
     {
       "identifier": "fs:allow-read-file",
       "allow": [{ "path": "$CONFIG/*" }]
-    }
+    },
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register-all",
+    "global-shortcut:allow-unregister-all"
   ]
 } 

@@ -6,9 +6,10 @@ use dirs_next::config_dir;
 use arboard::Clipboard;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle};
+use tauri::{AppHandle, Manager};
 use base64::{engine::general_purpose, Engine as _};
 use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut, ShortcutState};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -26,7 +27,7 @@ fn settings_file_path() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-async fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+async fn save_settings(_app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
     let path = settings_file_path()?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())?;
@@ -34,7 +35,7 @@ async fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(
 }
 
 #[tauri::command]
-async fn load_settings(app: tauri::AppHandle) -> Result<AppSettings, String> {
+async fn load_settings(_app: tauri::AppHandle) -> Result<AppSettings, String> {
     let path = settings_file_path()?;
     let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let settings: AppSettings = serde_json::from_str(&content).map_err(|e| e.to_string())?;
@@ -81,6 +82,20 @@ fn start_clipboard_watcher(app: AppHandle) {
     });
 }
 
+#[tauri::command]
+async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
+    // 先尝试注销已有的快捷键
+    let _ = app.global_shortcut().unregister_all();
+    
+    // 将字符串转换为 Shortcut 类型
+    let shortcut = shortcut.parse::<Shortcut>().map_err(|e| e.to_string())?;
+    
+    // 注册快捷键
+    app.global_shortcut().register(shortcut).map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -107,12 +122,41 @@ pub fn run() {
             )
             .build()
         )
+        .plugin(tauri_plugin_global_shortcut::Builder::new()
+            .with_handler(move |app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    if let Some(window) = app.get_webview_window("main") {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+            })
+            .build()
+        )
         .setup(|app| {
             let app_handle = app.handle().clone();
-            start_clipboard_watcher(app_handle);
+            start_clipboard_watcher(app_handle.clone());
+
+            // 使用 tokio runtime 来处理异步操作
+            tauri::async_runtime::block_on(async move {
+                // 加载设置并注册默认快捷键
+                match load_settings(app_handle.clone()).await {
+                    Ok(settings) => {
+                        let _ = register_shortcut(app_handle.clone(), settings.hotkey).await;
+                    }
+                    Err(_) => {
+                        // 如果没有保存的设置，使用默认快捷键
+                        let _ = register_shortcut(app_handle.clone(), "Ctrl+Shift+V".to_string()).await;
+                    }
+                }
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
