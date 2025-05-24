@@ -13,6 +13,8 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const selectedTabIndex = ref(0)
+const lastContent = ref<{ content: string; timestamp: number } | null>(null)
+const DEBOUNCE_TIME = 3000 // 3秒内的重复内容不记录
 let db: Awaited<ReturnType<any>> | null = null
 
 const filteredHistory = computed(() => {
@@ -117,11 +119,29 @@ const handleTabChange = (index: number) => {
   selectedItem.value = null
 }
 
+// 检查是否是重复内容
+const isDuplicateContent = (content: string): boolean => {
+  if (!lastContent.value) return false
+  
+  const now = Date.now()
+  const timeDiff = now - lastContent.value.timestamp
+  
+  // 如果是相同内容且在防抖时间内
+  if (lastContent.value.content === content && timeDiff < DEBOUNCE_TIME) {
+    console.log('Duplicate content detected within', DEBOUNCE_TIME, 'ms, skipping...')
+    return true
+  }
+  
+  // 更新最后复制的内容和时间
+  lastContent.value = { content, timestamp: now }
+  return false
+}
+
 onMounted(async () => {
   try {
-    const dbPath = 'sqlite:clipboard.db';
-    console.log('Connecting to database:', dbPath);
-    db = await Database.load(dbPath);
+    const dbPath = 'sqlite:clipboard.db'
+    console.log('Connecting to database:', dbPath)
+    db = await Database.load(dbPath)
     
     // 读取历史数据
     const rows = await db.select(
@@ -134,11 +154,14 @@ onMounted(async () => {
       content: row.content,
       type: row.type,
       timestamp: row.timestamp,
-      isFavorite: row.is_favorite === 1, // 确保布尔值转换正确
+      isFavorite: row.is_favorite === 1,
       imagePath: row.image_path ?? null
     }))
 
     listen<string>('clipboard-text', async (event) => {
+      // 检查是否是短时间内的重复内容
+      if (isDuplicateContent(event.payload)) return
+
       const item = {
         content: event.payload,
         type: 'text',
@@ -158,6 +181,9 @@ onMounted(async () => {
     })
 
     listen<string>('clipboard-image', async (event) => {
+      // 检查是否是短时间内的重复内容
+      if (isDuplicateContent(event.payload)) return
+
       const item = {
         content: event.payload,
         type: 'image',
@@ -198,7 +224,7 @@ watch(selectedTabIndex, () => {
 <template>
   <div class="h-screen flex flex-col">
     <!-- Header -->
-    <header class="bg-white border-b border-gray-200 p-4">
+    <header class="bg-white border-b border-gray-200 p-4 flex-shrink-0">
       <div class="flex items-center justify-between">
         <h1 class="text-xl font-semibold">Clipboard Manager</h1>
         <div class="flex items-center space-x-4">
@@ -213,12 +239,12 @@ watch(selectedTabIndex, () => {
     </header>
 
     <!-- Main Content -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
-      <div class="w-1/3 border-r border-gray-200 flex flex-col">
+      <div class="w-1/3 border-r border-gray-200 flex flex-col min-h-0">
         <!-- Tabs -->
-        <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col flex-1" @change="handleTabChange">
-          <div class="border-b border-gray-200">
+        <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col h-full" @change="handleTabChange">
+          <div class="border-b border-gray-200 flex-shrink-0">
             <TabList class="flex">
               <!-- All 标签页 -->
               <Tab v-slot="{ selected }" as="template">
@@ -249,10 +275,10 @@ watch(selectedTabIndex, () => {
             </TabList>
           </div>
 
-          <TabPanels class="flex-1">
-            <TabPanel class="flex-1 flex flex-col">
+          <TabPanels class="flex-1 min-h-0">
+            <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-200">
+              <div class="p-4 border-b border-gray-200 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
@@ -267,7 +293,7 @@ watch(selectedTabIndex, () => {
               </div>
 
               <!-- History List -->
-              <div class="flex-1 overflow-y-auto">
+              <div class="flex-1 overflow-y-auto min-h-0">
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
@@ -296,9 +322,9 @@ watch(selectedTabIndex, () => {
               </div>
             </TabPanel>
 
-            <TabPanel class="flex-1 flex flex-col">
+            <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-200">
+              <div class="p-4 border-b border-gray-200 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
@@ -313,7 +339,7 @@ watch(selectedTabIndex, () => {
               </div>
 
               <!-- Favorites List -->
-              <div class="flex-1 overflow-y-auto">
+              <div class="flex-1 overflow-y-auto min-h-0">
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
@@ -345,34 +371,36 @@ watch(selectedTabIndex, () => {
       </div>
 
       <!-- Right Content -->
-      <div class="flex-1 p-4 overflow-y-auto">
-        <div v-if="selectedItem" class="h-full">
-          <div class="mb-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-lg font-semibold">
-                {{ selectedItem.type === 'text' ? 'Text Content' : 'Image Preview' }}
-              </h2>
-              <span class="text-sm text-gray-500">
-                {{ new Date(selectedItem.timestamp).toLocaleString() }}
-              </span>
-            </div>
-          </div>
-          
-          <div class="bg-white rounded-lg border border-gray-200 p-4">
-            <template v-if="selectedItem.type === 'text'">
-              <p class="whitespace-pre-wrap">{{ selectedItem.content }}</p>
-            </template>
-            <template v-else>
-              <img
-                :src="selectedItem.content"
-                alt="Clipboard image"
-                class="max-w-full h-auto rounded-lg"
-              />
-            </template>
+      <div class="flex-1 flex flex-col min-h-0">
+        <div class="p-4 border-b border-gray-200 flex-shrink-0">
+          <div class="flex items-center justify-between">
+            <h2 class="text-lg font-semibold">
+              {{ selectedItem?.type === 'text' ? 'Text Content' : 'Image Preview' }}
+            </h2>
+            <span class="text-sm text-gray-500" v-if="selectedItem">
+              {{ new Date(selectedItem.timestamp).toLocaleString() }}
+            </span>
           </div>
         </div>
-        <div v-else class="h-full flex items-center justify-center text-gray-500">
-          Select an item to preview
+        
+        <div class="flex-1 p-4 overflow-y-auto min-h-0">
+          <div v-if="selectedItem" class="h-full">
+            <div class="bg-white rounded-lg border border-gray-200 p-4">
+              <template v-if="selectedItem.type === 'text'">
+                <p class="whitespace-pre-wrap break-words">{{ selectedItem.content }}</p>
+              </template>
+              <template v-else>
+                <img
+                  :src="selectedItem.content"
+                  alt="Clipboard image"
+                  class="max-w-full h-auto rounded-lg"
+                />
+              </template>
+            </div>
+          </div>
+          <div v-else class="h-full flex items-center justify-center text-gray-500">
+            Select an item to preview
+          </div>
         </div>
       </div>
     </div>
@@ -383,6 +411,25 @@ watch(selectedTabIndex, () => {
 </template>
 
 <style>
+/* 确保滚动条样式统一 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
 /* 确保图标大小正确 */
 .heroicon {
   width: 1.5rem;
