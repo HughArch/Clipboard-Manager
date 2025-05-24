@@ -38,6 +38,9 @@
       "allow-load": [
         "sqlite:*"
       ]
+    },
+    "fs": {
+      "scope": ["$CONFIG/*"]
     }
   }
 }

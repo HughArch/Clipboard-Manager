@@ -5,7 +5,38 @@ import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import Database from '@tauri-apps/plugin-sql'
+
+// 定义设置类型
+interface AppSettings {
+  max_history_items: number
+  max_history_time: number
+  hotkey: string
+  auto_start: boolean
+}
+
+// 保存设置的函数
+const saveSettings = async (settings: AppSettings) => {
+  try {
+    await invoke('save_settings', { settings })
+    console.log('Settings saved successfully')
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    throw error // 让调用者处理错误
+  }
+}
+
+// 提供给 Settings 组件的方法
+const handleSaveSettings = async (settings: AppSettings) => {
+  try {
+    await saveSettings(settings)
+    // 可以在这里添加成功提示
+  } catch (error) {
+    // 可以在这里添加错误提示
+    throw error
+  }
+}
 
 // Mock data
 const clipboardHistory = ref<any[]>([])
@@ -406,7 +437,7 @@ watch(selectedTabIndex, () => {
     </div>
 
     <!-- Settings Modal -->
-    <Settings v-model:show="showSettings" />
+    <Settings v-model:show="showSettings" @save-settings="handleSaveSettings" />
   </div>
 </template>
 

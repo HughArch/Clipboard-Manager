@@ -1,0 +1,28 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "sql:default",
+    {
+      "identifier": "allow-save-settings",
+      "description": "Allows saving application settings",
+      "commands": ["save_settings"]
+    },
+    {
+      "identifier": "allow-load-settings",
+      "description": "Allows loading application settings",
+      "commands": ["load_settings"]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "$CONFIG/*" }]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$CONFIG/*" }]
+    }
+  ]
+} 

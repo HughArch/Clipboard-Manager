@@ -4,144 +4,126 @@ import { Dialog, DialogPanel, DialogTitle, TransitionChild, TransitionRoot } fro
 import { XMarkIcon } from '@heroicons/vue/24/outline'
 import { invoke } from '@tauri-apps/api/core'
 
-const props = defineProps<{
+interface AppSettings {
+  max_history_items: number
+  max_history_time: number
+  hotkey: string
+  auto_start: boolean
+}
+
+defineProps<{
   show: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
+  (e: 'save-settings', settings: AppSettings): void
 }>()
 
-const settings = ref({
+const settings = ref<AppSettings>({
   max_history_items: 100,
-  max_history_time: 24, // hours
+  max_history_time: 30,
   hotkey: 'Ctrl+Shift+V',
-  auto_start: true
+  auto_start: false
 })
 
-async function loadSettings() {
+// 加载设置
+onMounted(async () => {
   try {
-    const result = await invoke('load_settings')
-    if (result && typeof result === 'object') {
-      Object.assign(settings.value, result as object)
-    }
-  } catch (e) {
-    // ignore if not found
-    // 可选：console.warn('加载设置失败，使用默认值', e)
+    const savedSettings = await invoke<AppSettings>('load_settings')
+    settings.value = savedSettings
+  } catch (error) {
+    console.error('Failed to load settings:', error)
   }
-}
+})
 
-async function saveSettings() {
+const handleSubmit = async () => {
   try {
-    await invoke('save_settings', { settings: settings.value })
+    emit('save-settings', settings.value)
     emit('update:show', false)
-  } catch (e) {
-    // 打印详细错误
-    console.error('保存失败', e)
-    alert('保存失败: ' + (e && e.toString ? e.toString() : e))
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+    // 这里可以添加错误提示
   }
 }
-
-onMounted(loadSettings)
 </script>
 
 <template>
-  <TransitionRoot appear :show="show" as="template">
-    <Dialog as="div" @close="emit('update:show', false)" class="relative z-10">
-      <TransitionChild
-        as="template"
-        enter="duration-300 ease-out"
-        enter-from="opacity-0"
-        enter-to="opacity-100"
-        leave="duration-200 ease-in"
-        leave-from="opacity-100"
-        leave-to="opacity-0"
-      >
-        <div class="fixed inset-0 bg-black bg-opacity-25" />
-      </TransitionChild>
+  <div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md">
+      <div class="p-6">
+        <h2 class="text-xl font-semibold mb-4">Settings</h2>
+        
+        <form @submit.prevent="handleSubmit">
+          <!-- 最大历史记录数 -->
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Max History Items
+            </label>
+            <input
+              v-model.number="settings.max_history_items"
+              type="number"
+              min="1"
+              class="w-full border border-gray-300 rounded-md px-3 py-2"
+            />
+          </div>
 
-      <div class="fixed inset-0 overflow-y-auto">
-        <div class="flex min-h-full items-center justify-center p-4 text-center">
-          <TransitionChild
-            as="template"
-            enter="duration-300 ease-out"
-            enter-from="opacity-0 scale-95"
-            enter-to="opacity-100 scale-100"
-            leave="duration-200 ease-in"
-            leave-from="opacity-100 scale-100"
-            leave-to="opacity-0 scale-95"
-          >
-            <DialogPanel class="w-full max-w-md transform overflow-hidden rounded-2xl bg-white p-6 text-left align-middle shadow-xl transition-all">
-              <DialogTitle as="h3" class="text-lg font-medium leading-6 text-gray-900 flex justify-between items-center">
-                Settings
-                <button
-                  type="button"
-                  class="text-gray-400 hover:text-gray-500"
-                  @click="emit('update:show', false)"
-                >
-                  <XMarkIcon class="h-6 w-6" />
-                </button>
-              </DialogTitle>
+          <!-- 最大保存时间（天） -->
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Max History Time (days)
+            </label>
+            <input
+              v-model.number="settings.max_history_time"
+              type="number"
+              min="1"
+              class="w-full border border-gray-300 rounded-md px-3 py-2"
+            />
+          </div>
 
-              <div class="mt-4 space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700">最大保留条目</label>
-                  <input
-                    v-model.number="settings.max_history_items"
-                    type="number"
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+          <!-- 快捷键 -->
+          <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Hotkey
+            </label>
+            <input
+              v-model="settings.hotkey"
+              type="text"
+              placeholder="e.g. Ctrl+Shift+V"
+              class="w-full border border-gray-300 rounded-md px-3 py-2"
+            />
+          </div>
 
-                <div>
-                  <label class="block text-sm font-medium text-gray-700">最大保留时长 (时)</label>
-                  <input
-                    v-model.number="settings.max_history_time"
-                    type="number"
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  />
-                </div>
+          <!-- 开机自启动 -->
+          <div class="mb-6">
+            <label class="flex items-center">
+              <input
+                v-model="settings.auto_start"
+                type="checkbox"
+                class="rounded border-gray-300 text-blue-600"
+              />
+              <span class="ml-2 text-sm text-gray-700">Start with system</span>
+            </label>
+          </div>
 
-                <div>
-                  <label class="block text-sm font-medium text-gray-700">快捷键</label>
-                  <input
-                    v-model="settings.hotkey"
-                    type="text"
-                    class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                    readonly
-                  />
-                </div>
-
-                <div class="flex items-center">
-                  <input
-                    v-model="settings.auto_start"
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label class="ml-2 block text-sm text-gray-900">开机启动</label>
-                </div>
-              </div>
-
-              <div class="mt-6 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  @click="emit('update:show', false)"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-primary"
-                  @click="saveSettings"
-                >
-                  Save
-                </button>
-              </div>
-            </DialogPanel>
-          </TransitionChild>
-        </div>
+          <!-- 按钮组 -->
+          <div class="flex justify-end space-x-3">
+            <button
+              type="button"
+              class="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md"
+              @click="$emit('update:show', false)"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+            >
+              Save
+            </button>
+          </div>
+        </form>
       </div>
-    </Dialog>
-  </TransitionRoot>
+    </div>
+  </div>
 </template> 
