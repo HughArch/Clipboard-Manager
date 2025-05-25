@@ -11,6 +11,10 @@ use base64::{engine::general_purpose, Engine as _};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut, ShortcutState};
 use std::env;
+use chrono;
+use sqlx::{self, Row, SqlitePool, sqlite::SqliteConnectOptions};
+use tokio;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -20,6 +24,11 @@ pub struct AppSettings {
     pub auto_start: bool,
 }
 
+// 数据库连接池状态管理
+struct DatabaseState {
+    pool: SqlitePool,
+}
+
 const SETTINGS_FILE: &str = "clipboard_settings.json";
 
 fn settings_file_path() -> Result<PathBuf, String> {
@@ -27,11 +36,64 @@ fn settings_file_path() -> Result<PathBuf, String> {
     Ok(dir.join(SETTINGS_FILE))
 }
 
+// 初始化数据库连接
+async fn init_database(app: &AppHandle) -> Result<SqlitePool, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    
+    // 确保目录存在
+    if let Err(e) = std::fs::create_dir_all(&app_data_dir) {
+        return Err(format!("无法创建应用数据目录: {}", e));
+    }
+    
+    let db_path = app_data_dir.join("clipboard.db");
+    
+    let options = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .create_if_missing(true);
+    
+    let pool = SqlitePool::connect_with(options)
+        .await
+        .map_err(|e| format!("无法连接到数据库: {}", e))?;
+    
+    // 运行迁移
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS clipboard_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            is_favorite INTEGER NOT NULL DEFAULT 0,
+            image_path TEXT
+        )"
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("无法创建数据库表: {}", e))?;
+    
+    // 创建索引
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建索引: {}", e))?;
+    
+    println!("数据库初始化完成");
+    Ok(pool)
+}
+
 #[tauri::command]
-async fn save_settings(_app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+async fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
+    println!("保存设置: {:?}", settings);
     let path = settings_file_path()?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())?;
+    
+    println!("设置已保存，开始执行清理");
+    // 保存设置后自动清理过期数据
+    match cleanup_expired_data(&app, &settings).await {
+        Ok(_) => println!("清理操作完成"),
+        Err(e) => println!("清理操作失败: {}", e),
+    }
+    
     Ok(())
 }
 
@@ -202,6 +264,146 @@ async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
     get_windows_auto_start_status(app_name)
 }
 
+// 清理过期的剪贴板历史数据
+async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
+    println!("开始清理过期数据，设置：max_items={}, max_time={}", settings.max_history_items, settings.max_history_time);
+    
+    // 获取数据库连接池
+    let db_state = match app.try_state::<Mutex<DatabaseState>>() {
+        Some(state) => state,
+        None => {
+            println!("数据库状态还未初始化，跳过清理");
+            return Ok(());
+        }
+    };
+    
+    let db_guard = db_state.lock().await;
+    let db = &db_guard.pool;
+    
+    println!("数据库连接可用，开始清理操作");
+    
+    // 首先查看数据库中的所有记录
+    match sqlx::query("SELECT id, timestamp, is_favorite FROM clipboard_history ORDER BY timestamp DESC LIMIT 5")
+        .fetch_all(db)
+        .await {
+        Ok(rows) => {
+            println!("数据库中的前5条记录:");
+            for row in rows {
+                let id: i64 = row.get("id");
+                let timestamp: String = row.get("timestamp");
+                let is_favorite: i64 = row.get("is_favorite");
+                println!("  ID: {}, 时间戳: {}, 收藏: {}", id, timestamp, is_favorite);
+            }
+        }
+        Err(e) => {
+            println!("查询记录失败: {}", e);
+        }
+    }
+    
+    // 1. 按时间清理：删除超过指定天数的记录（但保留收藏的）
+    // 使用 ISO 格式的时间戳，与前端保持一致
+    let days_ago = chrono::Utc::now() - chrono::Duration::days(settings.max_history_time as i64);
+    let timestamp_cutoff = days_ago.to_rfc3339(); // 使用 ISO 8601 格式
+    
+    println!("时间清理：删除 {} 之前的记录", timestamp_cutoff);
+    
+    let time_cleanup_query = "
+        DELETE FROM clipboard_history 
+        WHERE timestamp < ? AND is_favorite = 0
+    ";
+    
+    match sqlx::query(time_cleanup_query)
+        .bind(&timestamp_cutoff)
+        .execute(db)
+        .await {
+        Ok(result) => {
+            println!("按时间清理完成，删除了 {} 条记录", result.rows_affected());
+        }
+        Err(e) => {
+            println!("按时间清理失败: {}", e);
+            return Err(format!("按时间清理数据失败: {}", e));
+        }
+    }
+    
+    // 2. 按数量清理：保留最新的指定数量记录（收藏的不计入数量限制）
+    // 首先获取当前非收藏记录的总数
+    let count_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE is_favorite = 0";
+    let count_result = match sqlx::query(count_query)
+        .fetch_one(db)
+        .await {
+        Ok(result) => result,
+        Err(e) => {
+            println!("查询记录数量失败: {}", e);
+            return Err(format!("查询记录数量失败: {}", e));
+        }
+    };
+    
+    let current_count: i64 = count_result.get("count");
+    println!("当前非收藏记录数量: {}, 最大允许: {}", current_count, settings.max_history_items);
+    
+    if current_count > settings.max_history_items as i64 {
+        let excess_count = current_count - settings.max_history_items as i64;
+        println!("需要删除 {} 条多余记录", excess_count);
+        
+        // 删除最旧的非收藏记录
+        let count_cleanup_query = "
+            DELETE FROM clipboard_history 
+            WHERE is_favorite = 0 
+            AND id IN (
+                SELECT id FROM clipboard_history 
+                WHERE is_favorite = 0 
+                ORDER BY timestamp ASC 
+                LIMIT ?
+            )
+        ";
+        
+        match sqlx::query(count_cleanup_query)
+            .bind(excess_count)
+            .execute(db)
+            .await {
+            Ok(result) => {
+                println!("按数量清理完成，删除了 {} 条记录", result.rows_affected());
+            }
+            Err(e) => {
+                println!("按数量清理失败: {}", e);
+                return Err(format!("按数量清理数据失败: {}", e));
+            }
+        }
+    } else {
+        println!("记录数量未超出限制，无需按数量清理");
+    }
+    
+    // 清理后再次查看记录数量
+    match sqlx::query("SELECT COUNT(*) as total, COUNT(CASE WHEN is_favorite = 1 THEN 1 END) as favorites FROM clipboard_history")
+        .fetch_one(db)
+        .await {
+        Ok(row) => {
+            let total: i64 = row.get("total");
+            let favorites: i64 = row.get("favorites");
+            println!("清理后统计：总记录数: {}, 收藏数: {}", total, favorites);
+        }
+        Err(e) => {
+            println!("查询清理后统计失败: {}", e);
+        }
+    }
+    
+    println!("数据清理完成");
+    Ok(())
+}
+
+#[tauri::command]
+async fn cleanup_history(app: AppHandle) -> Result<(), String> {
+    // 加载当前设置
+    let settings = load_settings(app.clone()).await.unwrap_or_else(|_| AppSettings {
+        max_history_items: 100,
+        max_history_time: 30,
+        hotkey: "Ctrl+Shift+V".to_string(),
+        auto_start: false,
+    });
+    
+    cleanup_expired_data(&app, &settings).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -247,26 +449,53 @@ pub fn run() {
             let app_handle = app.handle().clone();
             start_clipboard_watcher(app_handle.clone());
 
-            // 使用 tokio runtime 来处理异步操作
-            tauri::async_runtime::block_on(async move {
-                // 加载设置并注册默认快捷键
-                match load_settings(app_handle.clone()).await {
-                    Ok(settings) => {
-                        let _ = register_shortcut(app_handle.clone(), settings.hotkey).await;
-                        // 应用自启动设置
-                        let _ = set_auto_start(app_handle.clone(), settings.auto_start).await;
+            // 异步初始化数据库和其他操作
+            let app_handle_for_delayed = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                // 等待一小段时间确保应用完全启动
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                
+                // 初始化数据库
+                match init_database(&app_handle_for_delayed).await {
+                    Ok(pool) => {
+                        // 将数据库连接池注册为应用状态
+                        app_handle_for_delayed.manage(Mutex::new(DatabaseState { pool }));
+                        println!("数据库状态已注册");
+                        
+                        // 加载设置并注册默认快捷键
+                        match load_settings(app_handle_for_delayed.clone()).await {
+                            Ok(settings) => {
+                                let _ = register_shortcut(app_handle_for_delayed.clone(), settings.hotkey.clone()).await;
+                                // 应用自启动设置
+                                let _ = set_auto_start(app_handle_for_delayed.clone(), settings.auto_start).await;
+                                // 启动时清理过期数据
+                                let _ = cleanup_expired_data(&app_handle_for_delayed, &settings).await;
+                            }
+                            Err(_) => {
+                                // 如果没有保存的设置，使用默认快捷键
+                                let _ = register_shortcut(app_handle_for_delayed.clone(), "Ctrl+Shift+V".to_string()).await;
+                                // 默认不启用自启动
+                                let _ = set_auto_start(app_handle_for_delayed.clone(), false).await;
+                                // 使用默认设置清理数据
+                                let default_settings = AppSettings {
+                                    max_history_items: 100,
+                                    max_history_time: 30,
+                                    hotkey: "Ctrl+Shift+V".to_string(),
+                                    auto_start: false,
+                                };
+                                let _ = cleanup_expired_data(&app_handle_for_delayed, &default_settings).await;
+                            }
+                        }
                     }
-                    Err(_) => {
-                        // 如果没有保存的设置，使用默认快捷键
-                        let _ = register_shortcut(app_handle.clone(), "Ctrl+Shift+V".to_string()).await;
-                        // 默认不启用自启动
-                        let _ = set_auto_start(app_handle.clone(), false).await;
+                    Err(e) => {
+                        println!("数据库初始化失败: {}", e);
                     }
                 }
             });
+            
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

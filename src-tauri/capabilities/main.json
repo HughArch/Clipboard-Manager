@@ -37,6 +37,11 @@
       "commands": ["get_auto_start_status"]
     },
     {
+      "identifier": "allow-cleanup-history",
+      "description": "Allows cleaning up expired clipboard history",
+      "commands": ["cleanup_history"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },
