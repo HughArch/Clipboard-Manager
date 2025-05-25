@@ -15,6 +15,7 @@ use chrono;
 use sqlx::{self, Row, SqlitePool, sqlite::SqliteConnectOptions};
 use tokio;
 use tokio::sync::Mutex;
+use enigo::{Enigo, Key, Keyboard, Settings};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -404,6 +405,96 @@ async fn cleanup_history(app: AppHandle) -> Result<(), String> {
     cleanup_expired_data(&app, &settings).await
 }
 
+// 粘贴内容到系统剪贴板并自动粘贴
+#[tauri::command]
+async fn paste_to_clipboard(content: String, content_type: String) -> Result<(), String> {
+    let mut clipboard = Clipboard::new().map_err(|e| format!("无法访问剪贴板: {}", e))?;
+    
+    match content_type.as_str() {
+        "text" => {
+            clipboard.set_text(content).map_err(|e| format!("无法设置文本到剪贴板: {}", e))?;
+            println!("文本已复制到剪贴板");
+        }
+        "image" => {
+            // 处理 base64 图片数据
+            if content.starts_with("data:image/") {
+                // 提取 base64 部分
+                if let Some(base64_start) = content.find("base64,") {
+                    let base64_data = &content[base64_start + 7..];
+                    
+                    // 解码 base64
+                    let image_data = general_purpose::STANDARD
+                        .decode(base64_data)
+                        .map_err(|e| format!("无法解码图片数据: {}", e))?;
+                    
+                    // 解析图片
+                    let img = image::load_from_memory(&image_data)
+                        .map_err(|e| format!("无法加载图片: {}", e))?;
+                    
+                    // 转换为 RGBA 格式
+                    let rgba_img = img.to_rgba8();
+                    let (width, height) = rgba_img.dimensions();
+                    
+                    // 创建 arboard 图片数据
+                    let img_data = arboard::ImageData {
+                        width: width as usize,
+                        height: height as usize,
+                        bytes: rgba_img.into_raw().into(),
+                    };
+                    
+                    clipboard.set_image(img_data).map_err(|e| format!("无法设置图片到剪贴板: {}", e))?;
+                    println!("图片已复制到剪贴板");
+                } else {
+                    return Err("无效的图片数据格式".to_string());
+                }
+            } else {
+                return Err("不支持的图片格式".to_string());
+            }
+        }
+        _ => {
+            return Err(format!("不支持的内容类型: {}", content_type));
+        }
+    }
+    
+    // 等待一段时间确保剪贴板内容已设置且焦点已切换
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    
+    // 自动模拟 Ctrl+V 粘贴操作
+    match simulate_paste().await {
+        Ok(_) => {
+            println!("自动粘贴操作完成");
+        }
+        Err(e) => {
+            println!("自动粘贴失败: {}", e);
+            // 即使自动粘贴失败，也不返回错误，因为内容已经复制到剪贴板
+        }
+    }
+    
+    Ok(())
+}
+
+// 模拟 Ctrl+V 按键操作
+async fn simulate_paste() -> Result<(), String> {
+    // 在新线程中执行按键模拟，避免阻塞异步运行时
+    let result = tokio::task::spawn_blocking(|| {
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
+        
+        // 模拟 Ctrl+V
+        enigo.key(Key::Control, enigo::Direction::Press).map_err(|e| format!("按下Ctrl键失败: {}", e))?;
+        enigo.key(Key::Unicode('v'), enigo::Direction::Press).map_err(|e| format!("按下V键失败: {}", e))?;
+        enigo.key(Key::Unicode('v'), enigo::Direction::Release).map_err(|e| format!("释放V键失败: {}", e))?;
+        enigo.key(Key::Control, enigo::Direction::Release).map_err(|e| format!("释放Ctrl键失败: {}", e))?;
+        
+        Ok::<(), String>(())
+    }).await;
+    
+    match result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(format!("按键模拟任务失败: {}", e)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -495,7 +586,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

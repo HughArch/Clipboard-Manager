@@ -6,6 +6,7 @@ import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import Database from '@tauri-apps/plugin-sql'
 
 // 定义设置类型
@@ -123,33 +124,6 @@ const openDevTools = () => {
   }))
 }
 
-const handleKeyDown = (e: KeyboardEvent) => {
-  if (!filteredHistory.value.length) return
-
-  const currentIndex = filteredHistory.value.findIndex(item => item.id === selectedItem.value?.id)
-  let newIndex = currentIndex
-
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    newIndex = currentIndex > 0 ? currentIndex - 1 : filteredHistory.value.length - 1
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    newIndex = currentIndex < filteredHistory.value.length - 1 ? currentIndex + 1 : 0
-  }
-
-  if (newIndex !== currentIndex) {
-    selectedItem.value = filteredHistory.value[newIndex]
-  }
-}
-
-const handleTabChange = (index: number) => {
-  console.log('Tab changed to:', index)
-  selectedTabIndex.value = index
-  // 重置搜索和选中状态
-  searchQuery.value = ''
-  selectedItem.value = null
-}
-
 // 检查是否是重复内容
 const isDuplicateContent = (content: string): boolean => {
   if (!lastContent.value) return false
@@ -166,6 +140,79 @@ const isDuplicateContent = (content: string): boolean => {
   // 更新最后复制的内容和时间
   lastContent.value = { content, timestamp: now }
   return false
+}
+
+// 粘贴内容到系统剪贴板
+const pasteToClipboard = async (item: any) => {
+  if (!item) return
+  
+  try {
+    console.log('Pasting item to clipboard:', item.type, item.id)
+    
+    // 先隐藏窗口，让焦点回到之前的应用
+    const appWindow = getCurrentWindow()
+    await appWindow.hide()
+    console.log('Window hidden before paste')
+    
+    // 等待一小段时间确保焦点已经切换
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
+    // 然后执行粘贴操作（包含复制到剪贴板和自动粘贴）
+    await invoke('paste_to_clipboard', {
+      content: item.content,
+      contentType: item.type
+    })
+    console.log('Successfully pasted to clipboard and auto-pasted')
+    
+  } catch (error) {
+    console.error('Failed to paste to clipboard:', error)
+    // 如果出错，重新显示窗口
+    try {
+      const appWindow = getCurrentWindow()
+      await appWindow.show()
+    } catch (showError) {
+      console.error('Failed to show window after error:', showError)
+    }
+  }
+}
+
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (!filteredHistory.value.length) return
+
+  const currentIndex = filteredHistory.value.findIndex(item => item.id === selectedItem.value?.id)
+  let newIndex = currentIndex
+
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    newIndex = currentIndex > 0 ? currentIndex - 1 : filteredHistory.value.length - 1
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    newIndex = currentIndex < filteredHistory.value.length - 1 ? currentIndex + 1 : 0
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    // 按Enter键粘贴当前选中的项目
+    if (selectedItem.value) {
+      pasteToClipboard(selectedItem.value)
+    }
+    return
+  }
+
+  if (newIndex !== currentIndex) {
+    selectedItem.value = filteredHistory.value[newIndex]
+  }
+}
+
+// 处理双击事件
+const handleDoubleClick = (item: any) => {
+  pasteToClipboard(item)
+}
+
+const handleTabChange = (index: number) => {
+  console.log('Tab changed to:', index)
+  selectedTabIndex.value = index
+  // 重置搜索和选中状态
+  searchQuery.value = ''
+  selectedItem.value = null
 }
 
 onMounted(async () => {
@@ -331,6 +378,7 @@ watch(selectedTabIndex, () => {
                   class="p-4 border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
                   :class="{ 'bg-blue-50': selectedItem?.id === item.id }"
                   @click="selectedItem = item"
+                  @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-center justify-between">
                     <div class="flex-1 min-w-0">
@@ -377,6 +425,7 @@ watch(selectedTabIndex, () => {
                   class="p-4 border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
                   :class="{ 'bg-blue-50': selectedItem?.id === item.id }"
                   @click="selectedItem = item"
+                  @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-center justify-between">
                     <div class="flex-1 min-w-0">

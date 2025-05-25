@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "sql:default",
+    "core:window:allow-hide",
     {
       "identifier": "allow-save-settings",
       "description": "Allows saving application settings",
@@ -40,6 +41,11 @@
       "identifier": "allow-cleanup-history",
       "description": "Allows cleaning up expired clipboard history",
       "commands": ["cleanup_history"]
+    },
+    {
+      "identifier": "allow-paste-to-clipboard",
+      "description": "Allows pasting content to system clipboard",
+      "commands": ["paste_to_clipboard"]
     },
     {
       "identifier": "fs:allow-write-file",

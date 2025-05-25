@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-paste-to-clipboard"
+description = "Enables the paste_to_clipboard command without any pre-configured scope."
+commands.allow = ["paste_to_clipboard"]
+
+[[permission]]
+identifier = "deny-paste-to-clipboard"
+description = "Denies the paste_to_clipboard command without any pre-configured scope."
+commands.deny = ["paste_to_clipboard"]
