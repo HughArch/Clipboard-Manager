@@ -49,6 +49,32 @@ const lastContent = ref<{ content: string; timestamp: number } | null>(null)
 const DEBOUNCE_TIME = 3000 // 3秒内的重复内容不记录
 let db: Awaited<ReturnType<any>> | null = null
 
+// 搜索框引用
+const searchInputRef = ref<HTMLInputElement | null>(null)
+
+// 自动聚焦搜索框
+const focusSearchInput = async () => {
+  await nextTick()
+  if (searchInputRef.value) {
+    searchInputRef.value.focus()
+    console.log('Search input focused')
+  }
+}
+
+// 滚动到选中的条目
+const scrollToSelectedItem = async (itemId: number) => {
+  await nextTick()
+  const selectedElement = document.querySelector(`[data-item-id="${itemId}"]`)
+  if (selectedElement) {
+    selectedElement.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+      inline: 'nearest'
+    })
+    console.log('Scrolled to selected item:', itemId)
+  }
+}
+
 const filteredHistory = computed(() => {
   console.log('Computing filteredHistory, selectedTabIndex:', selectedTabIndex.value)
   console.log('Current clipboardHistory:', clipboardHistory.value.map(item => ({ id: item.id, isFavorite: item.isFavorite })))
@@ -199,6 +225,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
   if (newIndex !== currentIndex) {
     selectedItem.value = filteredHistory.value[newIndex]
+    // 滚动到新选中的条目
+    if (selectedItem.value) {
+      scrollToSelectedItem(selectedItem.value.id)
+    }
   }
 }
 
@@ -213,6 +243,9 @@ const handleTabChange = (index: number) => {
   // 重置搜索和选中状态
   searchQuery.value = ''
   selectedItem.value = null
+  
+  // 切换标签页后自动聚焦搜索框
+  focusSearchInput()
 }
 
 onMounted(async () => {
@@ -281,6 +314,9 @@ onMounted(async () => {
     })
 
     window.addEventListener('keydown', handleKeyDown)
+    
+    // 组件挂载后自动聚焦搜索框
+    await focusSearchInput()
   } catch (error) {
     console.error('Database error:', error)
   }
@@ -300,16 +336,29 @@ watch(selectedTabIndex, () => {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col">
+  <div class="h-screen flex flex-col bg-gray-50">
     <!-- Header -->
-    <header class="bg-white border-b border-gray-200 p-4 flex-shrink-0">
+    <header class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0 shadow-sm">
       <div class="flex items-center justify-between">
-        <h1 class="text-xl font-semibold">Clipboard Manager</h1>
-        <div class="flex items-center space-x-4">
-          <button class="btn btn-secondary" @click="openDevTools">
+        <div class="flex items-center space-x-3">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+          </div>
+          <h1 class="text-xl font-semibold text-gray-900">Clipboard Manager</h1>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button 
+            class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            @click="openDevTools"
+          >
             Dev Tools
           </button>
-          <button class="btn btn-secondary" @click="showSettings = !showSettings">
+          <button 
+            class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
+            @click="showSettings = !showSettings"
+          >
             <Cog6ToothIcon class="w-5 h-5" />
           </button>
         </div>
@@ -319,35 +368,43 @@ watch(selectedTabIndex, () => {
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
-      <div class="w-1/3 border-r border-gray-200 flex flex-col min-h-0">
+      <div class="w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
         <!-- Tabs -->
         <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col h-full" @change="handleTabChange">
-          <div class="border-b border-gray-200 flex-shrink-0">
+          <div class="border-b border-gray-200 flex-shrink-0 bg-gray-50">
             <TabList class="flex">
               <!-- All 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px"
+                  class="flex-1 px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-all duration-200"
                   :class="[
                     selected
-                      ? 'text-primary-600 border-primary-600'
-                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+                      ? 'text-blue-600 border-blue-600 bg-white'
+                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
                   ]"
                 >
-                  All
+                  <span class="flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                    </svg>
+                    <span>All</span>
+                  </span>
                 </button>
               </Tab>
               <!-- Favorites 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px"
+                  class="flex-1 px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-all duration-200"
                   :class="[
                     selected
-                      ? 'text-primary-600 border-primary-600'
-                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300'
+                      ? 'text-blue-600 border-blue-600 bg-white'
+                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
                   ]"
                 >
-                  Favorites
+                  <span class="flex items-center space-x-2">
+                    <StarIcon class="w-4 h-4" />
+                    <span>Favorites</span>
+                  </span>
                 </button>
               </Tab>
             </TabList>
@@ -356,16 +413,17 @@ watch(selectedTabIndex, () => {
           <TabPanels class="flex-1 min-h-0">
             <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-200 flex-shrink-0">
+              <div class="p-4 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
                     type="text"
                     placeholder="Search clipboard history..."
-                    class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm"
+                    ref="searchInputRef"
                   />
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MagnifyingGlassIcon class="h-5 w-5 text-gray-400" />
+                    <MagnifyingGlassIcon class="h-4 w-4 text-gray-400" />
                   </div>
                 </div>
               </div>
@@ -375,44 +433,71 @@ watch(selectedTabIndex, () => {
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
-                  class="p-4 border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
-                  :class="{ 'bg-blue-50': selectedItem?.id === item.id }"
+                  :data-item-id="item.id"
+                  class="group px-4 py-3 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  :class="{ 
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id
+                  }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
                 >
-                  <div class="flex items-center justify-between">
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm truncate">
-                        {{ item.type === 'text' ? item.content : 'Image' }}
+                  <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0 mr-3">
+                      <div class="flex items-center space-x-2 mb-1">
+                        <div class="flex items-center space-x-1">
+                          <div 
+                            class="w-2 h-2 rounded-full"
+                            :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+                          ></div>
+                          <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            {{ item.type }}
+                          </span>
+                        </div>
+                      </div>
+                      <p class="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                        {{ item.type === 'text' ? item.content : 'Image content' }}
                       </p>
-                      <p class="text-xs text-gray-500">
+                      <p class="text-xs text-gray-500 mt-1">
                         {{ new Date(item.timestamp).toLocaleString() }}
                       </p>
                     </div>
                     <button
-                      class="ml-2 text-gray-400 hover:text-yellow-500"
+                      class="flex-shrink-0 p-1 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': item.isFavorite }"
                       @click.stop="toggleFavorite(item)"
                     >
-                      <StarIcon v-if="!item.isFavorite" class="w-5 h-5" />
-                      <StarIconSolid v-else class="w-5 h-5 text-yellow-500" />
+                      <StarIcon v-if="!item.isFavorite" class="w-4 h-4" />
+                      <StarIconSolid v-else class="w-4 h-4 text-yellow-500" />
                     </button>
                   </div>
+                </div>
+                
+                <!-- Empty state -->
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
+                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                    <MagnifyingGlassIcon class="w-8 h-8 text-gray-400" />
+                  </div>
+                  <p class="text-gray-500 text-sm text-center">
+                    {{ searchQuery ? 'No items match your search' : 'No clipboard history yet' }}
+                  </p>
                 </div>
               </div>
             </TabPanel>
 
             <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-200 flex-shrink-0">
+              <div class="p-4 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
                     type="text"
                     placeholder="Search favorites..."
-                    class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm"
+                    ref="searchInputRef"
                   />
                   <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MagnifyingGlassIcon class="h-5 w-5 text-gray-400" />
+                    <MagnifyingGlassIcon class="h-4 w-4 text-gray-400" />
                   </div>
                 </div>
               </div>
@@ -422,27 +507,55 @@ watch(selectedTabIndex, () => {
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
-                  class="p-4 border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
-                  :class="{ 'bg-blue-50': selectedItem?.id === item.id }"
+                  :data-item-id="item.id"
+                  class="group px-4 py-3 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  :class="{ 
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id
+                  }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
                 >
-                  <div class="flex items-center justify-between">
-                    <div class="flex-1 min-w-0">
-                      <p class="text-sm truncate">
-                        {{ item.type === 'text' ? item.content : 'Image' }}
+                  <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0 mr-3">
+                      <div class="flex items-center space-x-2 mb-1">
+                        <div class="flex items-center space-x-1">
+                          <div 
+                            class="w-2 h-2 rounded-full"
+                            :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+                          ></div>
+                          <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            {{ item.type }}
+                          </span>
+                        </div>
+                      </div>
+                      <p class="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                        {{ item.type === 'text' ? item.content : 'Image content' }}
                       </p>
-                      <p class="text-xs text-gray-500">
+                      <p class="text-xs text-gray-500 mt-1">
                         {{ new Date(item.timestamp).toLocaleString() }}
                       </p>
                     </div>
                     <button
-                      class="ml-2 text-yellow-500 hover:text-gray-400"
+                      class="flex-shrink-0 p-1 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
                       @click.stop="toggleFavorite(item)"
                     >
-                      <StarIconSolid class="w-5 h-5" />
+                      <StarIconSolid class="w-4 h-4" />
                     </button>
                   </div>
+                </div>
+                
+                <!-- Empty state for favorites -->
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
+                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                    <StarIcon class="w-8 h-8 text-gray-400" />
+                  </div>
+                  <p class="text-gray-500 text-sm text-center">
+                    {{ searchQuery ? 'No favorites match your search' : 'No favorites yet' }}
+                  </p>
+                  <p class="text-gray-400 text-xs text-center mt-1">
+                    Click the star icon to add items to favorites
+                  </p>
                 </div>
               </div>
             </TabPanel>
@@ -451,35 +564,55 @@ watch(selectedTabIndex, () => {
       </div>
 
       <!-- Right Content -->
-      <div class="flex-1 flex flex-col min-h-0">
-        <div class="p-4 border-b border-gray-200 flex-shrink-0">
+      <div class="flex-1 flex flex-col min-h-0 bg-white">
+        <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
           <div class="flex items-center justify-between">
-            <h2 class="text-lg font-semibold">
-              {{ selectedItem?.type === 'text' ? 'Text Content' : 'Image Preview' }}
-            </h2>
+            <div class="flex items-center space-x-3">
+              <div 
+                v-if="selectedItem"
+                class="w-3 h-3 rounded-full"
+                :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+              ></div>
+              <h2 class="text-lg font-semibold text-gray-900">
+                {{ selectedItem?.type === 'text' ? 'Text Content' : selectedItem?.type === 'image' ? 'Image Preview' : 'Select an Item' }}
+              </h2>
+            </div>
             <span class="text-sm text-gray-500" v-if="selectedItem">
               {{ new Date(selectedItem.timestamp).toLocaleString() }}
             </span>
           </div>
         </div>
         
-        <div class="flex-1 p-4 overflow-y-auto min-h-0">
+        <div class="flex-1 p-6 overflow-y-auto min-h-0">
           <div v-if="selectedItem" class="h-full">
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
+            <div class="bg-gray-50 rounded-xl border border-gray-200 p-6 min-h-full">
               <template v-if="selectedItem.type === 'text'">
-                <p class="whitespace-pre-wrap break-words">{{ selectedItem.content }}</p>
+                <div class="prose prose-sm max-w-none">
+                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-sm leading-relaxed">{{ selectedItem.content }}</pre>
+                </div>
               </template>
               <template v-else>
-                <img
-                  :src="selectedItem.content"
-                  alt="Clipboard image"
-                  class="max-w-full h-auto rounded-lg"
-                />
+                <div class="flex items-center justify-center">
+                  <img
+                    :src="selectedItem.content"
+                    alt="Clipboard image"
+                    class="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+                  />
+                </div>
               </template>
             </div>
           </div>
-          <div v-else class="h-full flex items-center justify-center text-gray-500">
-            Select an item to preview
+          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
+            <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+              <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
+              </svg>
+            </div>
+            <p class="text-lg font-medium mb-2">Select an item to preview</p>
+            <p class="text-sm text-center max-w-sm">
+              Choose any item from the clipboard history to see its content here. 
+              Double-click or press Enter to paste it.
+            </p>
           </div>
         </div>
       </div>
@@ -493,8 +626,8 @@ watch(selectedTabIndex, () => {
 <style>
 /* 确保滚动条样式统一 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -503,17 +636,80 @@ watch(selectedTabIndex, () => {
 
 ::-webkit-scrollbar-thumb {
   background: #d1d5db;
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
 }
 
+/* 文本截断样式 */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 平滑过渡效果 */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 渐变背景 */
+.bg-gradient-to-br {
+  background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
+}
+
 /* 确保图标大小正确 */
 .heroicon {
   width: 1.5rem;
   height: 1.5rem;
+}
+
+/* 改进的焦点样式 */
+input:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* 按钮悬停效果 */
+button:hover {
+  transform: translateY(-1px);
+}
+
+/* 卡片阴影效果 */
+.shadow-sm {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.shadow-lg {
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* 改进的选中状态 */
+.bg-blue-100 {
+  background-color: rgb(219 234 254);
+}
+
+.border-blue-200 {
+  border-color: rgb(191 219 254);
+}
+
+/* 空状态样式 */
+.empty-state {
+  opacity: 0.6;
+}
+
+/* 响应式字体 */
+@media (max-width: 768px) {
+  .text-xl {
+    font-size: 1.125rem;
+  }
+  
+  .w-96 {
+    width: 20rem;
+  }
 }
 </style>
 
