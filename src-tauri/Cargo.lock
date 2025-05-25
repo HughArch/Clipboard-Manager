@@ -3,6 +3,28 @@
 version = 4
 
 [[package]]
+name = "Clipboard-Manager"
+version = "1.0.0"
+dependencies = [
+ "arboard",
+ "base64 0.21.7",
+ "chrono",
+ "dirs-next",
+ "enigo",
+ "image 0.24.9",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-fs",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "tauri-plugin-sql",
+ "tokio",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4454,28 +4476,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows 0.61.1",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "base64 0.21.7",
- "chrono",
- "dirs-next",
- "enigo",
- "image 0.24.9",
- "serde",
- "serde_json",
- "sqlx",
- "tauri",
- "tauri-build",
- "tauri-plugin-fs",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "tauri-plugin-sql",
- "tokio",
 ]
 
 [[package]]

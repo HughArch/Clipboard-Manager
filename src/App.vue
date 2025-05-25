@@ -190,6 +190,18 @@ const pasteToClipboard = async (item: any) => {
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  // 处理标签页切换（左右箭头键）
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    handleTabChange(0)
+    return
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    handleTabChange(1)
+    return
+  }
+
+  // 如果没有历史记录，只处理标签页切换
   if (!filteredHistory.value.length) return
 
   const currentIndex = filteredHistory.value.findIndex(item => item.id === selectedItem.value?.id)
