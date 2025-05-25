@@ -137,19 +137,6 @@ const toggleFavorite = async (item: any) => {
   }
 }
 
-const openDevTools = () => {
-  // 使用快捷键打开开发者工具
-  document.dispatchEvent(new KeyboardEvent('keydown', {
-    key: 'i',
-    code: 'KeyI',
-    ctrlKey: true,
-    shiftKey: true,
-    keyCode: 73,
-    which: 73,
-    bubbles: true
-  }))
-}
-
 // 检查是否是重复内容
 const isDuplicateContent = (content: string): boolean => {
   if (!lastContent.value) return false
@@ -343,6 +330,20 @@ watch(selectedTabIndex, () => {
   // 重置选中项
   selectedItem.value = null
 })
+
+// 开发者工具函数（生产环境已注释，开发时可取消注释）
+// const openDevTools = () => {
+//   // 使用快捷键打开开发者工具
+//   document.dispatchEvent(new KeyboardEvent('keydown', {
+//     key: 'i',
+//     code: 'KeyI',
+//     ctrlKey: true,
+//     shiftKey: true,
+//     keyCode: 73,
+//     which: 73,
+//     bubbles: true
+//   }))
+// }
 </script>
 
 <template>
@@ -359,12 +360,13 @@ watch(selectedTabIndex, () => {
           <h1 class="text-xl font-semibold text-gray-900">Clipboard Manager</h1>
         </div>
         <div class="flex items-center space-x-3">
-          <button 
+          <!-- 开发者工具按钮（生产环境已注释，开发时可取消注释） -->
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="openDevTools"
           >
             Dev Tools
-          </button>
+          </button> -->
           <button 
             class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="showSettings = !showSettings"
