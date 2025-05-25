@@ -7,6 +7,9 @@
     "core:default",
     "sql:default",
     "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-visible",
     {
       "identifier": "allow-save-settings",
       "description": "Allows saving application settings",
@@ -19,7 +22,7 @@
     },
     {
       "identifier": "allow-greet",
-      "description": "Allows greeting",
+      "description": "Allows greeting command",
       "commands": ["greet"]
     },
     {
@@ -39,12 +42,12 @@
     },
     {
       "identifier": "allow-cleanup-history",
-      "description": "Allows cleaning up expired clipboard history",
+      "description": "Allows cleaning up clipboard history",
       "commands": ["cleanup_history"]
     },
     {
       "identifier": "allow-paste-to-clipboard",
-      "description": "Allows pasting content to system clipboard",
+      "description": "Allows pasting content to clipboard",
       "commands": ["paste_to_clipboard"]
     },
     {
@@ -59,6 +62,8 @@
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register-all",
-    "global-shortcut:allow-unregister-all"
+    "global-shortcut:allow-unregister-all",
+    "core:tray:default",
+    "core:menu:default"
   ]
 } 

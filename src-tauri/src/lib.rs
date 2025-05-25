@@ -16,6 +16,8 @@ use sqlx::{self, Row, SqlitePool, sqlite::SqliteConnectOptions};
 use tokio;
 use tokio::sync::Mutex;
 use enigo::{Enigo, Key, Keyboard, Settings};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::menu::{Menu, MenuItem};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -539,6 +541,81 @@ pub fn run() {
         .setup(|app| {
             let app_handle = app.handle().clone();
             start_clipboard_watcher(app_handle.clone());
+
+            // 创建系统托盘菜单
+            let show_hide_item = MenuItem::with_id(app, "toggle", "显示/隐藏", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_hide_item, &quit_item])?;
+
+            // 创建系统托盘
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .menu_on_left_click(false)
+                .tooltip("Clipboard Manager")
+                .on_tray_icon_event(|tray, event| {
+                    match event {
+                        TrayIconEvent::Click { 
+                            button: tauri::tray::MouseButton::Left,
+                            button_state: tauri::tray::MouseButtonState::Up,
+                            ..
+                        } => {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                match window.is_visible() {
+                                    Ok(true) => {
+                                        let _ = window.hide();
+                                    }
+                                    Ok(false) => {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
+                                    Err(_) => {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
+                                }
+                            }
+                        }
+                        TrayIconEvent::DoubleClick { 
+                            button: tauri::tray::MouseButton::Left,
+                            ..
+                        } => {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        _ => {}
+                    }
+                })
+                .on_menu_event(|app, event| {
+                    match event.id().as_ref() {
+                        "toggle" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                match window.is_visible() {
+                                    Ok(true) => {
+                                        let _ = window.hide();
+                                    }
+                                    Ok(false) => {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
+                                    Err(_) => {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                    }
+                                }
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    }
+                })
+                .build(app)?;
 
             // 异步初始化数据库和其他操作
             let app_handle_for_delayed = app_handle.clone();

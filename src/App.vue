@@ -315,6 +315,16 @@ onMounted(async () => {
 
     window.addEventListener('keydown', handleKeyDown)
     
+    // 处理窗口关闭事件，隐藏到托盘而不是关闭
+    const appWindow = getCurrentWindow()
+    await appWindow.onCloseRequested(async (event) => {
+      // 阻止默认的关闭行为
+      event.preventDefault()
+      // 隐藏窗口到系统托盘
+      await appWindow.hide()
+      console.log('Window hidden to system tray')
+    })
+    
     // 组件挂载后自动聚焦搜索框
     await focusSearchInput()
   } catch (error) {
