@@ -27,6 +27,16 @@
       "commands": ["register_shortcut"]
     },
     {
+      "identifier": "allow-set-auto-start",
+      "description": "Allows setting auto-start functionality",
+      "commands": ["set_auto_start"]
+    },
+    {
+      "identifier": "allow-get-auto-start-status",
+      "description": "Allows getting auto-start status",
+      "commands": ["get_auto_start_status"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

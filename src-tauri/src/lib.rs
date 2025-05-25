@@ -10,6 +10,7 @@ use tauri::{AppHandle, Manager};
 use base64::{engine::general_purpose, Engine as _};
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut, ShortcutState};
+use std::env;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -96,6 +97,111 @@ async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), Strin
     Ok(())
 }
 
+// 获取应用程序的可执行文件路径
+fn get_app_exe_path() -> Result<PathBuf, String> {
+    env::current_exe().map_err(|e| format!("无法获取应用程序路径: {}", e))
+}
+
+// Windows 注册表操作
+#[cfg(target_os = "windows")]
+fn set_windows_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
+    use std::process::Command;
+    
+    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+    
+    if enable {
+        // 添加到启动项
+        let output = Command::new("reg")
+            .args(&[
+                "add",
+                key_path,
+                "/v",
+                app_name,
+                "/t",
+                "REG_SZ",
+                "/d",
+                &format!("\"{}\"", exe_path.display()),
+                "/f"
+            ])
+            .output()
+            .map_err(|e| format!("执行注册表命令失败: {}", e))?;
+            
+        if !output.status.success() {
+            return Err(format!("添加启动项失败: {}", String::from_utf8_lossy(&output.stderr)));
+        }
+    } else {
+        // 从启动项移除
+        let output = Command::new("reg")
+            .args(&[
+                "delete",
+                key_path,
+                "/v",
+                app_name,
+                "/f"
+            ])
+            .output()
+            .map_err(|e| format!("执行注册表命令失败: {}", e))?;
+            
+        // 注意：如果键不存在，reg delete 会返回错误，但这是正常的
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("无法找到指定的注册表项或值") && !stderr.contains("The system was unable to find the specified registry key or value") {
+                return Err(format!("移除启动项失败: {}", stderr));
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+// 检查 Windows 自启动状态
+#[cfg(target_os = "windows")]
+fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
+    use std::process::Command;
+    
+    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+    
+    let output = Command::new("reg")
+        .args(&[
+            "query",
+            key_path,
+            "/v",
+            app_name
+        ])
+        .output()
+        .map_err(|e| format!("查询注册表失败: {}", e))?;
+        
+    // 如果查询成功且输出包含应用名称，说明自启动已启用
+    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).contains(app_name))
+}
+
+// 非 Windows 系统的占位实现
+#[cfg(not(target_os = "windows"))]
+fn set_windows_auto_start(_enable: bool, _app_name: &str, _exe_path: &PathBuf) -> Result<(), String> {
+    Err("当前系统不支持自启动功能".to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
+    Ok(false)
+}
+
+#[tauri::command]
+async fn set_auto_start(_app: AppHandle, enable: bool) -> Result<(), String> {
+    let app_name = "ClipboardManager"; // 应用程序在注册表中的名称
+    let exe_path = get_app_exe_path()?;
+    
+    set_windows_auto_start(enable, app_name, &exe_path)?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
+    let app_name = "ClipboardManager";
+    get_windows_auto_start_status(app_name)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -147,16 +253,20 @@ pub fn run() {
                 match load_settings(app_handle.clone()).await {
                     Ok(settings) => {
                         let _ = register_shortcut(app_handle.clone(), settings.hotkey).await;
+                        // 应用自启动设置
+                        let _ = set_auto_start(app_handle.clone(), settings.auto_start).await;
                     }
                     Err(_) => {
                         // 如果没有保存的设置，使用默认快捷键
                         let _ = register_shortcut(app_handle.clone(), "Ctrl+Shift+V".to_string()).await;
+                        // 默认不启用自启动
+                        let _ = set_auto_start(app_handle.clone(), false).await;
                     }
                 }
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

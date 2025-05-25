@@ -30,6 +30,14 @@ onMounted(async () => {
   try {
     const savedSettings = await invoke<AppSettings>('load_settings')
     settings.value = savedSettings
+    
+    // 获取当前自启动状态，确保界面显示与实际状态一致
+    try {
+      const autoStartStatus = await invoke<boolean>('get_auto_start_status')
+      settings.value.auto_start = autoStartStatus
+    } catch (error) {
+      console.warn('Failed to get auto-start status:', error)
+    }
   } catch (error) {
     console.error('Failed to load settings:', error)
   }
@@ -41,6 +49,8 @@ const handleSubmit = async () => {
     await invoke('save_settings', { settings: settings.value })
     // 更新快捷键
     await invoke('register_shortcut', { shortcut: settings.value.hotkey })
+    // 更新自启动设置
+    await invoke('set_auto_start', { enable: settings.value.auto_start })
     emit('save-settings', settings.value)
     emit('update:show', false)
   } catch (error) {
