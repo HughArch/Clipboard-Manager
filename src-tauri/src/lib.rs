@@ -497,30 +497,74 @@ async fn simulate_paste() -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+async fn reset_database(app: AppHandle) -> Result<(), String> {
+    println!("开始重置数据库...");
+    
+    // 尝试获取数据库状态
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        // 删除所有表
+        sqlx::query("DROP TABLE IF EXISTS clipboard_history").execute(pool).await
+            .map_err(|e| format!("删除表失败: {}", e))?;
+        
+        // 删除迁移信息表（Tauri SQL插件使用的内部表）
+        sqlx::query("DROP TABLE IF EXISTS _sqlx_migrations").execute(pool).await
+            .map_err(|e| format!("删除迁移表失败: {}", e))?;
+        
+        println!("数据库表已删除");
+        
+        // 重新创建表
+        sqlx::query("
+            CREATE TABLE IF NOT EXISTS clipboard_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                type TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                is_favorite INTEGER NOT NULL DEFAULT 0,
+                image_path TEXT
+            )
+        ").execute(pool).await
+            .map_err(|e| format!("重新创建表失败: {}", e))?;
+        
+        // 重新创建索引
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
+            .execute(pool).await
+            .map_err(|e| format!("创建索引失败: {}", e))?;
+        
+        println!("数据库重置完成");
+        Ok(())
+    } else {
+        Err("无法访问数据库状态".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default()
-            .add_migrations(
+                .add_migrations(
                 "sqlite:clipboard.db",
-                vec![Migration {
-                    version: 1,
-                    description: "create clipboard_history table",
-                    sql: "
-                        CREATE TABLE IF NOT EXISTS clipboard_history (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            content TEXT NOT NULL,
-                            type TEXT NOT NULL,
-                            timestamp TEXT NOT NULL,
-                            is_favorite INTEGER NOT NULL DEFAULT 0,
-                            image_path TEXT
-                        );
-                        CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content);
-                    ".into(),
-                    kind: MigrationKind::Up,
-                }],
-            )
+                    vec![Migration {
+                        version: 1,
+                        description: "create clipboard_history table",
+                        sql: "
+                            CREATE TABLE IF NOT EXISTS clipboard_history (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                content TEXT NOT NULL,
+                                type TEXT NOT NULL,
+                                timestamp TEXT NOT NULL,
+                                is_favorite INTEGER NOT NULL DEFAULT 0,
+                                image_path TEXT
+                            );
+                            CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content);
+                        ".into(),
+                        kind: MigrationKind::Up,
+                    }],
+                )
             .build()
         )
         .plugin(tauri_plugin_global_shortcut::Builder::new()
@@ -663,7 +707,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -45,12 +45,33 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const selectedTabIndex = ref(0)
-const lastContent = ref<{ content: string; timestamp: number } | null>(null)
-const DEBOUNCE_TIME = 3000 // 3秒内的重复内容不记录
 let db: Awaited<ReturnType<any>> | null = null
 
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
+// 存储Tauri事件监听器的unlisten函数
+const unlistenFocus = ref<(() => void) | null>(null)
+
+// 清理搜索框并选中第一个条目的函数
+const resetToDefault = async () => {
+  // 清理搜索框内容
+  searchQuery.value = ''
+  
+  // 等待下一个tick以确保过滤后的历史列表已更新
+  await nextTick()
+  
+  // 选中第一个条目（如果存在）
+  if (filteredHistory.value.length > 0) {
+    selectedItem.value = filteredHistory.value[0]
+    console.log('Selected first item:', selectedItem.value.id)
+    
+    // 滚动到选中的条目
+    await scrollToSelectedItem(selectedItem.value.id)
+  } else {
+    selectedItem.value = null
+    console.log('No items available to select')
+  }
+}
 
 // 自动聚焦搜索框
 const focusSearchInput = async () => {
@@ -58,6 +79,24 @@ const focusSearchInput = async () => {
   if (searchInputRef.value) {
     searchInputRef.value.focus()
     console.log('Search input focused')
+  }
+}
+
+// 处理窗口焦点事件，当窗口显示/获得焦点时重置状态
+const handleWindowFocus = async () => {
+  console.log('Window focused, resetting to default state')
+  await resetToDefault()
+  await focusSearchInput()
+}
+
+// 隐藏应用窗口
+const hideWindow = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    await appWindow.hide()
+    console.log('Window hidden via Esc key')
+  } catch (error) {
+    console.error('Failed to hide window:', error)
   }
 }
 
@@ -137,22 +176,42 @@ const toggleFavorite = async (item: any) => {
   }
 }
 
-// 检查是否是重复内容
-const isDuplicateContent = (content: string): boolean => {
-  if (!lastContent.value) return false
-  
-  const now = Date.now()
-  const timeDiff = now - lastContent.value.timestamp
-  
-  // 如果是相同内容且在防抖时间内
-  if (lastContent.value.content === content && timeDiff < DEBOUNCE_TIME) {
-    console.log('Duplicate content detected within', DEBOUNCE_TIME, 'ms, skipping...')
-    return true
+// 检查是否是重复内容，如果是则返回已有条目的ID
+const checkDuplicateContent = (content: string): number | null => {
+  // 在当前历史记录中查找相同内容的条目
+  const existingItem = clipboardHistory.value.find(item => item.content === content)
+  return existingItem ? existingItem.id : null
+}
+
+// 将已有条目移动到最前面并更新时间戳
+const moveItemToFront = async (itemId: number) => {
+  try {
+    const newTimestamp = new Date().toISOString()
+    
+    // 更新数据库中的时间戳
+    await db.execute(
+      `UPDATE clipboard_history SET timestamp = ? WHERE id = ?`,
+      [newTimestamp, itemId]
+    )
+    console.log('Database timestamp updated for item:', itemId)
+    
+    // 在内存中找到该条目
+    const itemIndex = clipboardHistory.value.findIndex(item => item.id === itemId)
+    if (itemIndex !== -1) {
+      // 取出该条目并更新时间戳
+      const item = { ...clipboardHistory.value[itemIndex], timestamp: newTimestamp }
+      
+      // 从原位置移除
+      clipboardHistory.value.splice(itemIndex, 1)
+      
+      // 添加到最前面
+      clipboardHistory.value.unshift(item)
+      
+      console.log('Item moved to front:', itemId, 'new timestamp:', newTimestamp)
+    }
+  } catch (error) {
+    console.error('Failed to move item to front:', error)
   }
-  
-  // 更新最后复制的内容和时间
-  lastContent.value = { content, timestamp: now }
-  return false
 }
 
 // 粘贴内容到系统剪贴板
@@ -190,6 +249,13 @@ const pasteToClipboard = async (item: any) => {
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  // 处理Esc键隐藏窗口
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    hideWindow()
+    return
+  }
+
   // 处理标签页切换（左右箭头键）
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
@@ -269,8 +335,13 @@ onMounted(async () => {
     }))
 
     listen<string>('clipboard-text', async (event) => {
-      // 检查是否是短时间内的重复内容
-      if (isDuplicateContent(event.payload)) return
+      // 检查是否是重复内容
+      const duplicateItemId = checkDuplicateContent(event.payload)
+      if (duplicateItemId) {
+        console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
+        await moveItemToFront(duplicateItemId)
+        return
+      }
 
       const item = {
         content: event.payload,
@@ -291,8 +362,13 @@ onMounted(async () => {
     })
 
     listen<string>('clipboard-image', async (event) => {
-      // 检查是否是短时间内的重复内容
-      if (isDuplicateContent(event.payload)) return
+      // 检查是否是重复内容
+      const duplicateItemId = checkDuplicateContent(event.payload)
+      if (duplicateItemId) {
+        console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
+        await moveItemToFront(duplicateItemId)
+        return
+      }
 
       const item = {
         content: event.payload,
@@ -316,6 +392,18 @@ onMounted(async () => {
     
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
+    
+    // 监听窗口焦点事件
+    const unlistenFocusFunc = await appWindow.onFocusChanged(({ payload: focused }) => {
+      if (focused) {
+        console.log('Window focused via Tauri API, resetting to default state')
+        handleWindowFocus()
+      }
+    })
+    
+    // 将unlisten函数存储到ref中
+    unlistenFocus.value = unlistenFocusFunc
+    
     await appWindow.onCloseRequested(async (event) => {
       // 阻止默认的关闭行为
       event.preventDefault()
@@ -333,6 +421,11 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
+  
+  // 清理Tauri窗口焦点事件监听器
+  if (unlistenFocus.value) {
+    unlistenFocus.value()
+  }
 })
 
 // 监听标签页变化
@@ -356,6 +449,22 @@ watch(selectedTabIndex, () => {
 //     bubbles: true
 //   }))
 // }
+
+// 重置数据库函数（仅用于开发环境修复迁移冲突）
+// const resetDatabase = async () => {
+//   if (confirm('确定要重置数据库吗？这将删除所有剪贴板历史记录！')) {
+//     try {
+//       await invoke('reset_database')
+//       console.log('数据库重置成功')
+//       alert('数据库重置成功！请重启应用程序。')
+//       // 重新加载页面以重新初始化
+//       window.location.reload()
+//     } catch (error) {
+//       console.error('重置数据库失败:', error)
+//       alert('重置数据库失败: ' + error)
+//     }
+//   }
+// }
 </script>
 
 <template>
@@ -378,6 +487,13 @@ watch(selectedTabIndex, () => {
             @click="openDevTools"
           >
             Dev Tools
+          </button>
+          <button 
+            class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
+            @click="resetDatabase"
+            title="重置数据库（修复迁移冲突）"
+          >
+            Reset DB
           </button> -->
           <button 
             class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"

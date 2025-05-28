@@ -9,7 +9,8 @@ fn main() {
                 "set_auto_start", 
                 "get_auto_start_status", 
                 "cleanup_history", 
-                "paste_to_clipboard"
+                "paste_to_clipboard",
+                "reset_database"
             ]))
     ).unwrap();
 }

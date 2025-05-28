@@ -51,6 +51,11 @@
       "commands": ["paste_to_clipboard"]
     },
     {
+      "identifier": "allow-reset-database",
+      "description": "Allows resetting the database in case of migration conflicts",
+      "commands": ["reset_database"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },
