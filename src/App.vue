@@ -45,6 +45,7 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const selectedTabIndex = ref(0)
+const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
 let db: Awaited<ReturnType<any>> | null = null
 
 // 搜索框引用
@@ -179,7 +180,13 @@ const toggleFavorite = async (item: any) => {
 // 检查是否是重复内容，如果是则返回已有条目的ID
 const checkDuplicateContent = (content: string): number | null => {
   // 在当前历史记录中查找相同内容的条目
-  const existingItem = clipboardHistory.value.find(item => item.content === content)
+  // 对于图片，使用 imagePath 进行比较；对于文本，使用 content 进行比较
+  const existingItem = clipboardHistory.value.find(item => {
+    if (item.type === 'image' && item.imagePath) {
+      return item.imagePath === content
+    }
+    return item.content === content
+  })
   return existingItem ? existingItem.id : null
 }
 
@@ -230,8 +237,13 @@ const pasteToClipboard = async (item: any) => {
     await new Promise(resolve => setTimeout(resolve, 50))
     
     // 然后执行粘贴操作（包含复制到剪贴板和自动粘贴）
+    // 对于图片，如果有完整图片内容，使用完整内容，否则使用缩略图
+    const contentToPaste = item.type === 'image' && fullImageContent.value 
+      ? fullImageContent.value 
+      : item.content
+    
     await invoke('paste_to_clipboard', {
-      content: item.content,
+      content: contentToPaste,
       contentType: item.type
     })
     console.log('Successfully pasted to clipboard and auto-pasted')
@@ -362,30 +374,40 @@ onMounted(async () => {
     })
 
     listen<string>('clipboard-image', async (event) => {
-      // 检查是否是重复内容
-      const duplicateItemId = checkDuplicateContent(event.payload)
-      if (duplicateItemId) {
-        console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
-        await moveItemToFront(duplicateItemId)
-        return
-      }
+      try {
+        // 解析事件数据
+        const eventData = JSON.parse(event.payload)
+        const imagePath = eventData.path
+        const thumbnail = eventData.thumbnail
+        
+        // 检查是否是重复内容（使用文件路径作为内容标识）
+        const duplicateItemId = checkDuplicateContent(imagePath)
+        if (duplicateItemId) {
+          console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
+          await moveItemToFront(duplicateItemId)
+          return
+        }
 
-      const item = {
-        content: event.payload,
-        type: 'image',
-        timestamp: new Date().toISOString(),
-        isFavorite: false,
-        imagePath: null
+        const item = {
+          content: thumbnail, // 使用缩略图用于列表显示
+          type: 'image',
+          timestamp: new Date().toISOString(),
+          isFavorite: false,
+          imagePath: imagePath // 存储完整图片的路径
+        }
+        
+        // 插入新记录到数据库
+        await db.execute(
+          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path) 
+           VALUES (?, ?, ?, ?, ?)`,
+          [item.content, item.type, item.timestamp, 0, item.imagePath]
+        )
+        const rows = await db.select(`SELECT last_insert_rowid() as id`)
+        const id = rows[0]?.id || Date.now()
+        clipboardHistory.value.unshift(Object.assign({ id }, item))
+      } catch (error) {
+        console.error('Failed to process clipboard image:', error)
       }
-      // 插入新记录到数据库
-      await db.execute(
-        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path) 
-         VALUES (?, ?, ?, ?, ?)`,
-        [item.content, item.type, item.timestamp, 0, item.imagePath]
-      )
-      const rows = await db.select(`SELECT last_insert_rowid() as id`)
-      const id = rows[0]?.id || Date.now()
-      clipboardHistory.value.unshift(Object.assign({ id }, item))
     })
 
     window.addEventListener('keydown', handleKeyDown)
@@ -434,37 +456,56 @@ watch(selectedTabIndex, () => {
   searchQuery.value = ''
   // 重置选中项
   selectedItem.value = null
+  // 清除完整图片内容
+  fullImageContent.value = null
+})
+
+// 监听选中项变化，当选中图片时加载完整图片
+watch(selectedItem, async (newItem) => {
+  if (newItem && newItem.type === 'image' && newItem.imagePath) {
+    try {
+      console.log('Loading full image from path:', newItem.imagePath)
+      const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
+      fullImageContent.value = fullImage
+    } catch (error) {
+      console.error('Failed to load full image:', error)
+      // 如果加载失败，使用缩略图作为后备
+      fullImageContent.value = newItem.content
+    }
+  } else {
+    fullImageContent.value = null
+  }
 })
 
 // 开发者工具函数（生产环境已注释，开发时可取消注释）
-// const openDevTools = () => {
-//   // 使用快捷键打开开发者工具
-//   document.dispatchEvent(new KeyboardEvent('keydown', {
-//     key: 'i',
-//     code: 'KeyI',
-//     ctrlKey: true,
-//     shiftKey: true,
-//     keyCode: 73,
-//     which: 73,
-//     bubbles: true
-//   }))
-// }
+const openDevTools = () => {
+  // 使用快捷键打开开发者工具
+  document.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'i',
+    code: 'KeyI',
+    ctrlKey: true,
+    shiftKey: true,
+    keyCode: 73,
+    which: 73,
+    bubbles: true
+  }))
+}
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
-// const resetDatabase = async () => {
-//   if (confirm('确定要重置数据库吗？这将删除所有剪贴板历史记录！')) {
-//     try {
-//       await invoke('reset_database')
-//       console.log('数据库重置成功')
-//       alert('数据库重置成功！请重启应用程序。')
-//       // 重新加载页面以重新初始化
-//       window.location.reload()
-//     } catch (error) {
-//       console.error('重置数据库失败:', error)
-//       alert('重置数据库失败: ' + error)
-//     }
-//   }
-// }
+const resetDatabase = async () => {
+  if (confirm('确定要重置数据库吗？这将删除所有剪贴板历史记录！')) {
+    try {
+      await invoke('reset_database')
+      console.log('数据库重置成功')
+      alert('数据库重置成功！请重启应用程序。')
+      // 重新加载页面以重新初始化
+      window.location.reload()
+    } catch (error) {
+      console.error('重置数据库失败:', error)
+      alert('重置数据库失败: ' + error)
+    }
+  }
+}
 </script>
 
 <template>
@@ -482,7 +523,7 @@ watch(selectedTabIndex, () => {
         </div>
         <div class="flex items-center space-x-3">
           <!-- 开发者工具按钮（生产环境已注释，开发时可取消注释） -->
-          <!-- <button 
+          <button 
             class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="openDevTools"
           >
@@ -494,7 +535,7 @@ watch(selectedTabIndex, () => {
             title="重置数据库（修复迁移冲突）"
           >
             Reset DB
-          </button> -->
+          </button>
           <button 
             class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="showSettings = !showSettings"
@@ -733,8 +774,13 @@ watch(selectedTabIndex, () => {
               </template>
               <template v-else>
                 <div class="flex items-center justify-center">
+                  <div v-if="!fullImageContent" class="flex flex-col items-center justify-center py-8">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                    <p class="text-gray-500 text-sm">Loading full image...</p>
+                  </div>
                   <img
-                    :src="selectedItem.content"
+                    v-else
+                    :src="fullImageContent"
                     alt="Clipboard image"
                     class="max-w-full max-h-full object-contain rounded-lg shadow-lg"
                   />

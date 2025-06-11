@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-image-file"
+description = "Enables the load_image_file command without any pre-configured scope."
+commands.allow = ["load_image_file"]
+
+[[permission]]
+identifier = "deny-load-image-file"
+description = "Denies the load_image_file command without any pre-configured scope."
+commands.deny = ["load_image_file"]

@@ -132,15 +132,38 @@ fn start_clipboard_watcher(app: AppHandle) {
                 let hash = image.bytes.iter().fold(0u64, |acc, &b| acc.wrapping_add(b as u64));
                 if hash != last_image_hash {
                     last_image_hash = hash;
-                    // 转为 base64
-                    let img = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.to_vec()).unwrap();
-                    let mut buf = vec![];
-                    image::codecs::png::PngEncoder::new(&mut buf)
-                        .encode(&img, img.width(), img.height(), image::ColorType::Rgba8)
-                        .unwrap();
-                    let b64 = general_purpose::STANDARD.encode(&buf);
-                    let data_url = format!("data:image/png;base64,{}", b64);
-                    app.emit("clipboard-image", data_url).ok();
+                    
+                    // 获取应用数据目录
+                    if let Ok(app_data_dir) = app.path().app_data_dir() {
+                        let images_dir = app_data_dir.join("images");
+                        if std::fs::create_dir_all(&images_dir).is_ok() {
+                            // 生成唯一的文件名
+                            let timestamp = chrono::Utc::now().timestamp_millis();
+                            let filename = format!("clipboard_{}.png", timestamp);
+                            let image_path = images_dir.join(&filename);
+                            
+                            // 转换图片并保存到文件
+                            let img = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.to_vec()).unwrap();
+                            if img.save(&image_path).is_ok() {
+                                // 创建一个小的 base64 缩略图用于即时显示
+                                let thumbnail = image::imageops::resize(&img, 200, 200, image::imageops::FilterType::Lanczos3);
+                                let mut thumb_buf = vec![];
+                                if image::codecs::png::PngEncoder::new(&mut thumb_buf)
+                                    .encode(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)
+                                    .is_ok() {
+                                    let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
+                                    let thumb_data_url = format!("data:image/png;base64,{}", thumb_b64);
+                                    
+                                    // 发送事件，包含文件路径和缩略图
+                                    let event_data = serde_json::json!({
+                                        "path": image_path.to_string_lossy(),
+                                        "thumbnail": thumb_data_url
+                                    });
+                                    app.emit("clipboard-image", event_data.to_string()).ok();
+                                }
+                            }
+                        }
+                    }
                 }
             }
             thread::sleep(Duration::from_millis(800));
@@ -310,6 +333,40 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     
     println!("时间清理：删除 {} 之前的记录", timestamp_cutoff);
     
+    // 首先获取需要删除的图片文件路径
+    let time_images_query = "
+        SELECT image_path FROM clipboard_history 
+        WHERE timestamp < ? AND is_favorite = 0 AND image_path IS NOT NULL
+    ";
+    
+    let time_expired_images = match sqlx::query(time_images_query)
+        .bind(&timestamp_cutoff)
+        .fetch_all(db)
+        .await {
+        Ok(rows) => {
+            let mut paths = Vec::new();
+            for row in rows {
+                if let Ok(path) = row.try_get::<String, &str>("image_path") {
+                    paths.push(path);
+                }
+            }
+            paths
+        }
+        Err(e) => {
+            println!("查询过期图片路径失败: {}", e);
+            Vec::new()
+        }
+    };
+    
+    // 删除过期的图片文件
+    for image_path in &time_expired_images {
+        if let Err(e) = std::fs::remove_file(image_path) {
+            println!("删除图片文件失败 {}: {}", image_path, e);
+        } else {
+            println!("已删除图片文件: {}", image_path);
+        }
+    }
+    
     let time_cleanup_query = "
         DELETE FROM clipboard_history 
         WHERE timestamp < ? AND is_favorite = 0
@@ -320,7 +377,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         .execute(db)
         .await {
         Ok(result) => {
-            println!("按时间清理完成，删除了 {} 条记录", result.rows_affected());
+            println!("按时间清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), time_expired_images.len());
         }
         Err(e) => {
             println!("按时间清理失败: {}", e);
@@ -348,6 +405,47 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         let excess_count = current_count - settings.max_history_items as i64;
         println!("需要删除 {} 条多余记录", excess_count);
         
+        // 首先获取需要删除的记录的图片路径
+        let count_images_query = "
+            SELECT image_path FROM clipboard_history 
+            WHERE is_favorite = 0 
+            AND image_path IS NOT NULL
+            AND id IN (
+                SELECT id FROM clipboard_history 
+                WHERE is_favorite = 0 
+                ORDER BY timestamp ASC 
+                LIMIT ?
+            )
+        ";
+        
+        let count_expired_images = match sqlx::query(count_images_query)
+            .bind(excess_count)
+            .fetch_all(db)
+            .await {
+            Ok(rows) => {
+                let mut paths = Vec::new();
+                for row in rows {
+                    if let Ok(path) = row.try_get::<String, &str>("image_path") {
+                        paths.push(path);
+                    }
+                }
+                paths
+            }
+            Err(e) => {
+                println!("查询需删除图片路径失败: {}", e);
+                Vec::new()
+            }
+        };
+        
+        // 删除图片文件
+        for image_path in &count_expired_images {
+            if let Err(e) = std::fs::remove_file(image_path) {
+                println!("删除图片文件失败 {}: {}", image_path, e);
+            } else {
+                println!("已删除图片文件: {}", image_path);
+            }
+        }
+        
         // 删除最旧的非收藏记录
         let count_cleanup_query = "
             DELETE FROM clipboard_history 
@@ -365,7 +463,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
             .execute(db)
             .await {
             Ok(result) => {
-                println!("按数量清理完成，删除了 {} 条记录", result.rows_affected());
+                println!("按数量清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), count_expired_images.len());
             }
             Err(e) => {
                 println!("按数量清理失败: {}", e);
@@ -390,6 +488,60 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         }
     }
     
+    // 3. 清理孤立的图片文件（数据库中没有对应记录的文件）
+    if let Ok(app_data_dir) = app.path().app_data_dir() {
+        let images_dir = app_data_dir.join("images");
+        if images_dir.exists() {
+            match std::fs::read_dir(&images_dir) {
+                Ok(entries) => {
+                    let mut orphaned_files = Vec::new();
+                    
+                    for entry in entries {
+                        if let Ok(entry) = entry {
+                            let file_path = entry.path();
+                            if file_path.is_file() {
+                                let file_path_str = file_path.to_string_lossy().to_string();
+                                
+                                // 检查数据库中是否存在此文件路径的记录
+                                let check_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE image_path = ?";
+                                match sqlx::query(check_query)
+                                    .bind(&file_path_str)
+                                    .fetch_one(db)
+                                    .await {
+                                    Ok(row) => {
+                                        let count: i64 = row.get("count");
+                                        if count == 0 {
+                                            orphaned_files.push(file_path_str);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("检查孤立文件失败: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 删除孤立的图片文件
+                    for orphaned_file in &orphaned_files {
+                        if let Err(e) = std::fs::remove_file(orphaned_file) {
+                            println!("删除孤立图片文件失败 {}: {}", orphaned_file, e);
+                        } else {
+                            println!("已删除孤立图片文件: {}", orphaned_file);
+                        }
+                    }
+                    
+                    if !orphaned_files.is_empty() {
+                        println!("清理了 {} 个孤立的图片文件", orphaned_files.len());
+                    }
+                }
+                Err(e) => {
+                    println!("无法读取图片目录: {}", e);
+                }
+            }
+        }
+    }
+    
     println!("数据清理完成");
     Ok(())
 }
@@ -405,6 +557,27 @@ async fn cleanup_history(app: AppHandle) -> Result<(), String> {
     });
     
     cleanup_expired_data(&app, &settings).await
+}
+
+// 读取图片文件并返回 base64 数据
+#[tauri::command]
+async fn load_image_file(image_path: String) -> Result<String, String> {
+    let path = PathBuf::from(&image_path);
+    
+    // 检查文件是否存在
+    if !path.exists() {
+        return Err("图片文件不存在".to_string());
+    }
+    
+    // 读取图片文件
+    let image_data = std::fs::read(&path)
+        .map_err(|e| format!("无法读取图片文件: {}", e))?;
+    
+    // 转换为 base64
+    let b64 = general_purpose::STANDARD.encode(&image_data);
+    let data_url = format!("data:image/png;base64,{}", b64);
+    
+    Ok(data_url)
 }
 
 // 粘贴内容到系统剪贴板并自动粘贴
@@ -505,6 +678,47 @@ async fn reset_database(app: AppHandle) -> Result<(), String> {
     if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
         let db_guard = db_state.lock().await;
         let pool = &db_guard.pool;
+        
+        // 首先获取所有图片文件路径
+        let all_images = match sqlx::query("SELECT image_path FROM clipboard_history WHERE image_path IS NOT NULL")
+            .fetch_all(pool)
+            .await {
+            Ok(rows) => {
+                let mut paths = Vec::new();
+                for row in rows {
+                    if let Ok(path) = row.try_get::<String, &str>("image_path") {
+                        paths.push(path);
+                    }
+                }
+                paths
+            }
+            Err(e) => {
+                println!("查询图片路径失败: {}", e);
+                Vec::new()
+            }
+        };
+        
+        // 删除所有图片文件
+        for image_path in &all_images {
+            if let Err(e) = std::fs::remove_file(image_path) {
+                println!("删除图片文件失败 {}: {}", image_path, e);
+            } else {
+                println!("已删除图片文件: {}", image_path);
+            }
+        }
+        println!("已删除 {} 个图片文件", all_images.len());
+        
+        // 删除整个图片目录（如果存在且为空）
+        if let Ok(app_data_dir) = app.path().app_data_dir() {
+            let images_dir = app_data_dir.join("images");
+            if images_dir.exists() {
+                if let Err(e) = std::fs::remove_dir(&images_dir) {
+                    println!("删除图片目录失败（可能不为空）: {}", e);
+                } else {
+                    println!("已删除图片目录: {:?}", images_dir);
+                }
+            }
+        }
         
         // 删除所有表
         sqlx::query("DROP TABLE IF EXISTS clipboard_history").execute(pool).await
@@ -707,7 +921,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
