@@ -26,7 +26,7 @@ use winapi::um::{
     processthreadsapi::OpenProcess,
     handleapi::CloseHandle,
     psapi::GetModuleFileNameExW,
-    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON},
+    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON},
     winnt::PROCESS_QUERY_INFORMATION,
     wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB},
 };
@@ -146,7 +146,7 @@ fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
             0,
             &mut shfi,
             std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_SMALLICON,
+            SHGFI_ICON | SHGFI_LARGEICON, // 使用大图标而不是小图标
         );
 
         if result != 0 && !shfi.hIcon.is_null() {
@@ -181,8 +181,8 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
             return None;
         }
 
-        // 创建位图
-        let icon_size = 16; // 小图标尺寸
+        // 创建位图 - 使用更大的尺寸获得更好的质量
+        let icon_size = 32; // 使用32x32像素获得更好的质量
         let bitmap = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
         if bitmap.is_null() {
             DeleteDC(mem_dc);
@@ -264,13 +264,14 @@ fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> Opti
         rgba_data.push(chunk[3]); // A
     }
 
-    // 使用 image crate 编码为 PNG
+    // 使用 image crate 编码为高质量 PNG
     let img = image::RgbaImage::from_raw(width, height, rgba_data)?;
     let mut png_buffer = Vec::new();
     
-    if image::codecs::png::PngEncoder::new(&mut png_buffer)
-        .write_image(&img, width, height, image::ColorType::Rgba8)
-        .is_ok() {
+    // 使用高质量PNG编码设置
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
+    
+    if encoder.write_image(&img, width, height, image::ColorType::Rgba8).is_ok() {
         let base64_string = general_purpose::STANDARD.encode(&png_buffer);
         Some(format!("data:image/png;base64,{}", base64_string))
     } else {

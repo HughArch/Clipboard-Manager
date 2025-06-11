@@ -1007,6 +1007,20 @@ button:hover {
 .leading-snug {
   line-height: 1.375;
 }
+
+/* 优化图标渲染质量 */
+img[alt*="source"] {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+/* 为源应用图标优化渲染 */
+.source-app-icon {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
 </style>
 
 <style scoped>
