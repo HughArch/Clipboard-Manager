@@ -48,6 +48,28 @@ const selectedTabIndex = ref(0)
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
 let db: Awaited<ReturnType<any>> | null = null
 
+// 格式化时间显示
+const formatTime = (timestamp: string) => {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffMins = Math.floor(diffMs / (1000 * 60))
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+  
+  if (diffMins < 1) return 'Just now'
+  if (diffMins < 60) return `${diffMins}m ago`
+  if (diffHours < 24) return `${diffHours}h ago`
+  if (diffDays < 7) return `${diffDays}d ago`
+  
+  // 超过一周显示日期
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric',
+    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {})
+  })
+}
+
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
 // 存储Tauri事件监听器的unlisten函数
@@ -549,7 +571,7 @@ const resetDatabase = async () => {
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
-      <div class="w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
+      <div class="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
         <!-- Tabs -->
         <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col h-full" @change="handleTabChange">
           <div class="border-b border-gray-200 flex-shrink-0 bg-gray-50">
@@ -557,15 +579,15 @@ const resetDatabase = async () => {
               <!-- All 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="flex-1 px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-all duration-200"
+                  class="flex-1 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-all duration-200"
                   :class="[
                     selected
                       ? 'text-blue-600 border-blue-600 bg-white'
                       : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
                   ]"
                 >
-                  <span class="flex items-center space-x-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <span class="flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
                     </svg>
                     <span>All</span>
@@ -575,15 +597,15 @@ const resetDatabase = async () => {
               <!-- Favorites 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="flex-1 px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-all duration-200"
+                  class="flex-1 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-all duration-200"
                   :class="[
                     selected
                       ? 'text-blue-600 border-blue-600 bg-white'
                       : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
                   ]"
                 >
-                  <span class="flex items-center space-x-2">
-                    <StarIcon class="w-4 h-4" />
+                  <span class="flex items-center space-x-1.5">
+                    <StarIcon class="w-3.5 h-3.5" />
                     <span>Favorites</span>
                   </span>
                 </button>
@@ -594,17 +616,17 @@ const resetDatabase = async () => {
           <TabPanels class="flex-1 min-h-0">
             <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-100 flex-shrink-0">
+              <div class="p-3 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
                     type="text"
                     placeholder="Search clipboard history..."
-                    class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm"
+                    class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-xs"
                     ref="searchInputRef"
                   />
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MagnifyingGlassIcon class="h-4 w-4 text-gray-400" />
+                  <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                    <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
                   </div>
                 </div>
               </div>
@@ -615,7 +637,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
-                  class="group px-4 py-3 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
                     'hover:bg-gray-50': selectedItem?.id !== item.id
@@ -624,42 +646,42 @@ const resetDatabase = async () => {
                   @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0 mr-3">
-                      <div class="flex items-center space-x-2 mb-1">
+                    <div class="flex-1 min-w-0 mr-2">
+                      <div class="flex items-center justify-between mb-1">
                         <div class="flex items-center space-x-1">
                           <div 
-                            class="w-2 h-2 rounded-full"
+                            class="w-1.5 h-1.5 rounded-full"
                             :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
                           ></div>
                           <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
                             {{ item.type }}
                           </span>
                         </div>
+                        <span class="text-xs text-gray-400">
+                          {{ formatTime(item.timestamp) }}
+                        </span>
                       </div>
-                      <p class="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                      <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
                         {{ item.type === 'text' ? item.content : 'Image content' }}
-                      </p>
-                      <p class="text-xs text-gray-500 mt-1">
-                        {{ new Date(item.timestamp).toLocaleString() }}
                       </p>
                     </div>
                     <button
-                      class="flex-shrink-0 p-1 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                       :class="{ 'opacity-100': item.isFavorite }"
                       @click.stop="toggleFavorite(item)"
                     >
-                      <StarIcon v-if="!item.isFavorite" class="w-4 h-4" />
-                      <StarIconSolid v-else class="w-4 h-4 text-yellow-500" />
+                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
                     </button>
                   </div>
                 </div>
                 
                 <!-- Empty state -->
-                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
-                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <MagnifyingGlassIcon class="w-8 h-8 text-gray-400" />
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
+                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <MagnifyingGlassIcon class="w-6 h-6 text-gray-400" />
                   </div>
-                  <p class="text-gray-500 text-sm text-center">
+                  <p class="text-gray-500 text-xs text-center">
                     {{ searchQuery ? 'No items match your search' : 'No clipboard history yet' }}
                   </p>
                 </div>
@@ -668,17 +690,17 @@ const resetDatabase = async () => {
 
             <TabPanel class="h-full flex flex-col min-h-0">
               <!-- Search -->
-              <div class="p-4 border-b border-gray-100 flex-shrink-0">
+              <div class="p-3 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
                   <input
                     v-model="searchQuery"
                     type="text"
                     placeholder="Search favorites..."
-                    class="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-sm"
+                    class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-xs"
                     ref="searchInputRef"
                   />
-                  <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MagnifyingGlassIcon class="h-4 w-4 text-gray-400" />
+                  <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                    <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
                   </div>
                 </div>
               </div>
@@ -689,7 +711,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
-                  class="group px-4 py-3 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
                     'hover:bg-gray-50': selectedItem?.id !== item.id
@@ -698,40 +720,40 @@ const resetDatabase = async () => {
                   @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0 mr-3">
-                      <div class="flex items-center space-x-2 mb-1">
+                    <div class="flex-1 min-w-0 mr-2">
+                      <div class="flex items-center justify-between mb-1">
                         <div class="flex items-center space-x-1">
                           <div 
-                            class="w-2 h-2 rounded-full"
+                            class="w-1.5 h-1.5 rounded-full"
                             :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
                           ></div>
                           <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
                             {{ item.type }}
                           </span>
                         </div>
+                        <span class="text-xs text-gray-400">
+                          {{ formatTime(item.timestamp) }}
+                        </span>
                       </div>
-                      <p class="text-sm text-gray-900 line-clamp-2 leading-relaxed">
+                      <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
                         {{ item.type === 'text' ? item.content : 'Image content' }}
-                      </p>
-                      <p class="text-xs text-gray-500 mt-1">
-                        {{ new Date(item.timestamp).toLocaleString() }}
                       </p>
                     </div>
                     <button
-                      class="flex-shrink-0 p-1 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
+                      class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
                       @click.stop="toggleFavorite(item)"
                     >
-                      <StarIconSolid class="w-4 h-4" />
+                      <StarIconSolid class="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
                 
                 <!-- Empty state for favorites -->
-                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-12 px-4">
-                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <StarIcon class="w-8 h-8 text-gray-400" />
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
+                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <StarIcon class="w-6 h-6 text-gray-400" />
                   </div>
-                  <p class="text-gray-500 text-sm text-center">
+                  <p class="text-gray-500 text-xs text-center">
                     {{ searchQuery ? 'No favorites match your search' : 'No favorites yet' }}
                   </p>
                   <p class="text-gray-400 text-xs text-center mt-1">
@@ -746,30 +768,30 @@ const resetDatabase = async () => {
 
       <!-- Right Content -->
       <div class="flex-1 flex flex-col min-h-0 bg-white">
-        <div class="px-6 py-4 border-b border-gray-200 flex-shrink-0">
+        <div class="px-4 py-3 border-b border-gray-200 flex-shrink-0">
           <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-3">
+            <div class="flex items-center space-x-2">
               <div 
                 v-if="selectedItem"
-                class="w-3 h-3 rounded-full"
+                class="w-2.5 h-2.5 rounded-full"
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
-              <h2 class="text-lg font-semibold text-gray-900">
+              <h2 class="text-base font-semibold text-gray-900">
                 {{ selectedItem?.type === 'text' ? 'Text Content' : selectedItem?.type === 'image' ? 'Image Preview' : 'Select an Item' }}
               </h2>
             </div>
-            <span class="text-sm text-gray-500" v-if="selectedItem">
-              {{ new Date(selectedItem.timestamp).toLocaleString() }}
+            <span class="text-xs text-gray-500" v-if="selectedItem">
+              {{ formatTime(selectedItem.timestamp) }}
             </span>
           </div>
         </div>
         
-        <div class="flex-1 p-6 overflow-y-auto min-h-0">
+        <div class="flex-1 p-4 overflow-y-auto min-h-0">
           <div v-if="selectedItem" class="h-full">
-            <div class="bg-gray-50 rounded-xl border border-gray-200 p-6 min-h-full">
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 min-h-full">
               <template v-if="selectedItem.type === 'text'">
                 <div class="prose prose-sm max-w-none">
-                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-sm leading-relaxed">{{ selectedItem.content }}</pre>
+                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal">{{ selectedItem.content }}</pre>
                 </div>
               </template>
               <template v-else>
@@ -789,13 +811,13 @@ const resetDatabase = async () => {
             </div>
           </div>
           <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
-            <div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-              <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
               </svg>
             </div>
-            <p class="text-lg font-medium mb-2">Select an item to preview</p>
-            <p class="text-sm text-center max-w-sm">
+            <p class="text-base font-medium mb-2">Select an item to preview</p>
+            <p class="text-xs text-center max-w-sm">
               Choose any item from the clipboard history to see its content here. 
               Double-click or press Enter to paste it.
             </p>
@@ -887,15 +909,37 @@ button:hover {
   opacity: 0.6;
 }
 
-/* 响应式字体 */
+/* 响应式字体和布局 */
 @media (max-width: 768px) {
   .text-xl {
     font-size: 1.125rem;
   }
-  
-  .w-96 {
-    width: 20rem;
+}
+
+/* 超紧凑模式 */
+@media (max-width: 1024px) {
+  .w-80 {
+    width: 18rem;
   }
+}
+
+/* 文本行数限制 */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 确保小字体清晰度 */
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+/* 更紧凑的行高 */
+.leading-snug {
+  line-height: 1.375;
 }
 </style>
 
