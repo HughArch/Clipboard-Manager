@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use base64::{engine::general_purpose, Engine as _};
+use image::ImageEncoder;
 use tauri_plugin_sql::{Migration, MigrationKind};
 use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut, ShortcutState};
 use std::env;
@@ -18,6 +19,23 @@ use tokio::sync::Mutex;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem};
+
+#[cfg(target_os = "windows")]
+use winapi::um::{
+    winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, GetDC, ReleaseDC, DestroyIcon, DrawIconEx},
+    processthreadsapi::OpenProcess,
+    handleapi::CloseHandle,
+    psapi::GetModuleFileNameExW,
+    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON},
+    winnt::PROCESS_QUERY_INFORMATION,
+    wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB},
+};
+#[cfg(target_os = "windows")]
+use std::ptr;
+#[cfg(target_os = "windows")]
+use std::ffi::OsString;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStringExt;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -37,6 +55,235 @@ const SETTINGS_FILE: &str = "clipboard_settings.json";
 fn settings_file_path() -> Result<PathBuf, String> {
     let dir = config_dir().ok_or("无法获取设置文件路径")?;
     Ok(dir.join(SETTINGS_FILE))
+}
+
+#[derive(Debug, Serialize, Clone)]
+struct SourceAppInfo {
+    name: String,
+    icon: Option<String>, // base64 encoded icon
+}
+
+// 获取当前活动窗口的应用程序信息
+#[cfg(target_os = "windows")]
+fn get_active_window_info() -> SourceAppInfo {
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return SourceAppInfo {
+                name: "Unknown".to_string(),
+                icon: None,
+            };
+        }
+
+        // 获取窗口标题
+        let mut window_title = [0u16; 512];
+        let title_len = GetWindowTextW(hwnd, window_title.as_mut_ptr(), window_title.len() as i32);
+        
+        // 获取进程ID
+        let mut process_id = 0;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        
+        // 打开进程句柄
+        let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, process_id);
+        if process_handle.is_null() {
+            let title = if title_len > 0 {
+                OsString::from_wide(&window_title[..title_len as usize])
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                "Unknown".to_string()
+            };
+            return SourceAppInfo {
+                name: title,
+                icon: None,
+            };
+        }
+
+        // 获取进程可执行文件路径
+        let mut exe_path = [0u16; 512];
+        let path_len = GetModuleFileNameExW(process_handle, ptr::null_mut(), exe_path.as_mut_ptr(), exe_path.len() as u32);
+        
+        CloseHandle(process_handle);
+
+        let app_name = if path_len > 0 {
+            let path_os = OsString::from_wide(&exe_path[..path_len as usize]);
+            let path_str = path_os.to_string_lossy();
+            // 提取文件名（不包含扩展名）
+            if let Some(file_name) = std::path::Path::new(&*path_str).file_stem() {
+                file_name.to_string_lossy().to_string()
+            } else {
+                "Unknown".to_string()
+            }
+        } else if title_len > 0 {
+            // 如果无法获取进程路径，使用窗口标题
+            OsString::from_wide(&window_title[..title_len as usize])
+                .to_string_lossy()
+                .to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        // 获取应用程序图标
+        let icon_base64 = if path_len > 0 {
+            get_app_icon_base64(&exe_path[..path_len as usize])
+        } else {
+            None
+        };
+
+        SourceAppInfo {
+            name: app_name,
+            icon: icon_base64,
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
+    unsafe {
+        let mut shfi: SHFILEINFOW = std::mem::zeroed();
+        let result = SHGetFileInfoW(
+            exe_path.as_ptr(),
+            0,
+            &mut shfi,
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_SMALLICON,
+        );
+
+        if result != 0 && !shfi.hIcon.is_null() {
+            // 将 HICON 转换为 base64
+            let icon_base64 = hicon_to_base64(shfi.hIcon);
+            
+            // 清理图标资源
+            DestroyIcon(shfi.hIcon);
+            
+            icon_base64
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
+    use std::mem;
+    
+    unsafe {
+        // 获取屏幕 DC
+        let screen_dc = GetDC(ptr::null_mut());
+        if screen_dc.is_null() {
+            return None;
+        }
+
+        // 创建兼容的内存 DC
+        let mem_dc = CreateCompatibleDC(screen_dc);
+        if mem_dc.is_null() {
+            ReleaseDC(ptr::null_mut(), screen_dc);
+            return None;
+        }
+
+        // 创建位图
+        let icon_size = 16; // 小图标尺寸
+        let bitmap = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
+        if bitmap.is_null() {
+            DeleteDC(mem_dc);
+            ReleaseDC(ptr::null_mut(), screen_dc);
+            return None;
+        }
+
+        // 选择位图到内存 DC
+        let old_bitmap = SelectObject(mem_dc, bitmap as *mut winapi::ctypes::c_void);
+        
+        // 绘制图标到位图
+        let draw_result = winapi::um::winuser::DrawIconEx(
+            mem_dc, 
+            0, 
+            0, 
+            hicon, 
+            icon_size, 
+            icon_size, 
+            0, 
+            ptr::null_mut(), 
+            0x0003 // DI_NORMAL
+        );
+        if draw_result == 0 {
+            SelectObject(mem_dc, old_bitmap);
+            DeleteObject(bitmap as *mut winapi::ctypes::c_void);
+            DeleteDC(mem_dc);
+            ReleaseDC(ptr::null_mut(), screen_dc);
+            return None;
+        }
+
+        // 准备位图信息结构
+        let mut bitmap_info: BITMAPINFO = mem::zeroed();
+        bitmap_info.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bitmap_info.bmiHeader.biWidth = icon_size;
+        bitmap_info.bmiHeader.biHeight = -icon_size; // 负值表示自上而下
+        bitmap_info.bmiHeader.biPlanes = 1;
+        bitmap_info.bmiHeader.biBitCount = 32; // RGBA
+        bitmap_info.bmiHeader.biCompression = BI_RGB;
+
+        // 分配缓冲区
+        let buffer_size = (icon_size * icon_size * 4) as usize;
+        let mut buffer: Vec<u8> = vec![0; buffer_size];
+
+        // 获取位图数据
+        let lines = GetDIBits(
+            mem_dc,
+            bitmap,
+            0,
+            icon_size as u32,
+            buffer.as_mut_ptr() as *mut winapi::ctypes::c_void,
+            &mut bitmap_info,
+            DIB_RGB_COLORS,
+        );
+
+        // 清理资源
+        SelectObject(mem_dc, old_bitmap);
+        DeleteObject(bitmap as *mut winapi::ctypes::c_void);
+        DeleteDC(mem_dc);
+        ReleaseDC(ptr::null_mut(), screen_dc);
+
+        if lines == 0 {
+            return None;
+        }
+
+        // 转换 BGRA 到 RGBA 并编码为 PNG
+        convert_bgra_to_png_base64(&buffer, icon_size as u32, icon_size as u32)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> Option<String> {
+    // 转换 BGRA 到 RGBA
+    let mut rgba_data = Vec::with_capacity(bgra_data.len());
+    for chunk in bgra_data.chunks_exact(4) {
+        // BGRA -> RGBA
+        rgba_data.push(chunk[2]); // R
+        rgba_data.push(chunk[1]); // G
+        rgba_data.push(chunk[0]); // B
+        rgba_data.push(chunk[3]); // A
+    }
+
+    // 使用 image crate 编码为 PNG
+    let img = image::RgbaImage::from_raw(width, height, rgba_data)?;
+    let mut png_buffer = Vec::new();
+    
+    if image::codecs::png::PngEncoder::new(&mut png_buffer)
+        .write_image(&img, width, height, image::ColorType::Rgba8)
+        .is_ok() {
+        let base64_string = general_purpose::STANDARD.encode(&png_buffer);
+        Some(format!("data:image/png;base64,{}", base64_string))
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_active_window_info() -> SourceAppInfo {
+    SourceAppInfo {
+        name: "Unknown".to_string(),
+        icon: None,
+    }
 }
 
 // 初始化数据库连接
@@ -66,12 +313,47 @@ async fn init_database(app: &AppHandle) -> Result<SqlitePool, String> {
             type TEXT NOT NULL,
             timestamp TEXT NOT NULL,
             is_favorite INTEGER NOT NULL DEFAULT 0,
-            image_path TEXT
+            image_path TEXT,
+            source_app_name TEXT,
+            source_app_icon TEXT
         )"
     )
     .execute(&pool)
     .await
     .map_err(|e| format!("无法创建数据库表: {}", e))?;
+
+    // 迁移：添加新的列（如果不存在）
+    // 检查并添加 source_app_name 列
+    let add_source_app_name = sqlx::query(
+        "ALTER TABLE clipboard_history ADD COLUMN source_app_name TEXT"
+    )
+    .execute(&pool)
+    .await;
+    
+    if let Err(e) = add_source_app_name {
+        // 如果列已存在，SQLite会返回错误，这是正常的
+        if !e.to_string().contains("duplicate column name") {
+            println!("添加 source_app_name 列时的警告: {}", e);
+        }
+    } else {
+        println!("已添加 source_app_name 列");
+    }
+
+    // 检查并添加 source_app_icon 列
+    let add_source_app_icon = sqlx::query(
+        "ALTER TABLE clipboard_history ADD COLUMN source_app_icon TEXT"
+    )
+    .execute(&pool)
+    .await;
+    
+    if let Err(e) = add_source_app_icon {
+        // 如果列已存在，SQLite会返回错误，这是正常的
+        if !e.to_string().contains("duplicate column name") {
+            println!("添加 source_app_icon 列时的警告: {}", e);
+        }
+    } else {
+        println!("已添加 source_app_icon 列");
+    }
     
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
@@ -124,7 +406,17 @@ fn start_clipboard_watcher(app: AppHandle) {
             if let Ok(text) = clipboard.get_text() {
                 if text != last_text {
                     last_text = text.clone();
-                    app.emit("clipboard-text", text).ok();
+                    
+                    // 获取源应用信息
+                    let source_info = get_active_window_info();
+                    
+                    // 发送事件，包含文本内容和源应用信息
+                    let event_data = serde_json::json!({
+                        "content": text,
+                        "source_app_name": source_info.name,
+                        "source_app_icon": source_info.icon
+                    });
+                    app.emit("clipboard-text", event_data.to_string()).ok();
                 }
             }
             // 检查图片
@@ -154,10 +446,15 @@ fn start_clipboard_watcher(app: AppHandle) {
                                     let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
                                     let thumb_data_url = format!("data:image/png;base64,{}", thumb_b64);
                                     
-                                    // 发送事件，包含文件路径和缩略图
+                                    // 获取源应用信息
+                                    let source_info = get_active_window_info();
+                                    
+                                    // 发送事件，包含文件路径、缩略图和源应用信息
                                     let event_data = serde_json::json!({
                                         "path": image_path.to_string_lossy(),
-                                        "thumbnail": thumb_data_url
+                                        "thumbnail": thumb_data_url,
+                                        "source_app_name": source_info.name,
+                                        "source_app_icon": source_info.icon
                                     });
                                     app.emit("clipboard-image", event_data.to_string()).ok();
                                 }

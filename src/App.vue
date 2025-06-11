@@ -355,7 +355,7 @@ onMounted(async () => {
     
     // 读取历史数据
     const rows = await db.select(
-      `SELECT id, content, type, timestamp, is_favorite, image_path 
+      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
        FROM clipboard_history 
        ORDER BY id DESC`
     )
@@ -365,34 +365,48 @@ onMounted(async () => {
       type: row.type,
       timestamp: row.timestamp,
       isFavorite: row.is_favorite === 1,
-      imagePath: row.image_path ?? null
+      imagePath: row.image_path ?? null,
+      sourceAppName: row.source_app_name ?? 'Unknown',
+      sourceAppIcon: row.source_app_icon ?? null
     }))
 
     listen<string>('clipboard-text', async (event) => {
-      // 检查是否是重复内容
-      const duplicateItemId = checkDuplicateContent(event.payload)
-      if (duplicateItemId) {
-        console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
-        await moveItemToFront(duplicateItemId)
-        return
-      }
+      try {
+        // 解析事件数据
+        const eventData = JSON.parse(event.payload)
+        const content = eventData.content
+        const sourceAppName = eventData.source_app_name || 'Unknown'
+        const sourceAppIcon = eventData.source_app_icon || null
+        
+        // 检查是否是重复内容
+        const duplicateItemId = checkDuplicateContent(content)
+        if (duplicateItemId) {
+          console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
+          await moveItemToFront(duplicateItemId)
+          return
+        }
 
-      const item = {
-        content: event.payload,
-        type: 'text',
-        timestamp: new Date().toISOString(),
-        isFavorite: false,
-        imagePath: null
+        const item = {
+          content: content,
+          type: 'text',
+          timestamp: new Date().toISOString(),
+          isFavorite: false,
+          imagePath: null,
+          sourceAppName: sourceAppName,
+          sourceAppIcon: sourceAppIcon
+        }
+        // 插入新记录到数据库
+        await db.execute(
+          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
+        )
+        const rows = await db.select(`SELECT last_insert_rowid() as id`)
+        const id = rows[0]?.id || Date.now()
+        clipboardHistory.value.unshift(Object.assign({ id }, item))
+      } catch (error) {
+        console.error('Failed to process clipboard text:', error)
       }
-      // 插入新记录到数据库
-      await db.execute(
-        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path) 
-         VALUES (?, ?, ?, ?, ?)`,
-        [item.content, item.type, item.timestamp, 0, item.imagePath]
-      )
-      const rows = await db.select(`SELECT last_insert_rowid() as id`)
-      const id = rows[0]?.id || Date.now()
-      clipboardHistory.value.unshift(Object.assign({ id }, item))
     })
 
     listen<string>('clipboard-image', async (event) => {
@@ -401,6 +415,8 @@ onMounted(async () => {
         const eventData = JSON.parse(event.payload)
         const imagePath = eventData.path
         const thumbnail = eventData.thumbnail
+        const sourceAppName = eventData.source_app_name || 'Unknown'
+        const sourceAppIcon = eventData.source_app_icon || null
         
         // 检查是否是重复内容（使用文件路径作为内容标识）
         const duplicateItemId = checkDuplicateContent(imagePath)
@@ -415,14 +431,16 @@ onMounted(async () => {
           type: 'image',
           timestamp: new Date().toISOString(),
           isFavorite: false,
-          imagePath: imagePath // 存储完整图片的路径
+          imagePath: imagePath, // 存储完整图片的路径
+          sourceAppName: sourceAppName,
+          sourceAppIcon: sourceAppIcon
         }
         
         // 插入新记录到数据库
         await db.execute(
-          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path) 
-           VALUES (?, ?, ?, ?, ?)`,
-          [item.content, item.type, item.timestamp, 0, item.imagePath]
+          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
         )
         const rows = await db.select(`SELECT last_insert_rowid() as id`)
         const id = rows[0]?.id || Date.now()
@@ -646,24 +664,48 @@ const resetDatabase = async () => {
                   @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0 mr-2">
-                      <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center space-x-1">
-                          <div 
-                            class="w-1.5 h-1.5 rounded-full"
-                            :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
-                          ></div>
-                          <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                            {{ item.type }}
+                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                      <!-- 源应用图标 -->
+                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
+                        <img 
+                          v-if="item.sourceAppIcon" 
+                          :src="item.sourceAppIcon" 
+                          :alt="item.sourceAppName"
+                          class="w-6 h-6 rounded object-contain"
+                        />
+                        <div 
+                          v-else 
+                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          :title="item.sourceAppName"
+                        >
+                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                          </svg>
+                        </div>
+                      </div>
+                      
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center space-x-1">
+                            <div 
+                              class="w-1.5 h-1.5 rounded-full"
+                              :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+                            ></div>
+                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              {{ item.type }}
+                            </span>
+                            <span class="text-xs text-gray-400">
+                              · {{ item.sourceAppName }}
+                            </span>
+                          </div>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
                           </span>
                         </div>
-                        <span class="text-xs text-gray-400">
-                          {{ formatTime(item.timestamp) }}
-                        </span>
+                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          {{ item.type === 'text' ? item.content : 'Image content' }}
+                        </p>
                       </div>
-                      <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                        {{ item.type === 'text' ? item.content : 'Image content' }}
-                      </p>
                     </div>
                     <button
                       class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
@@ -720,24 +762,48 @@ const resetDatabase = async () => {
                   @dblclick="handleDoubleClick(item)"
                 >
                   <div class="flex items-start justify-between">
-                    <div class="flex-1 min-w-0 mr-2">
-                      <div class="flex items-center justify-between mb-1">
-                        <div class="flex items-center space-x-1">
-                          <div 
-                            class="w-1.5 h-1.5 rounded-full"
-                            :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
-                          ></div>
-                          <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                            {{ item.type }}
+                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                      <!-- 源应用图标 -->
+                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
+                        <img 
+                          v-if="item.sourceAppIcon" 
+                          :src="item.sourceAppIcon" 
+                          :alt="item.sourceAppName"
+                          class="w-6 h-6 rounded object-contain"
+                        />
+                        <div 
+                          v-else 
+                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          :title="item.sourceAppName"
+                        >
+                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                          </svg>
+                        </div>
+                      </div>
+                      
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center space-x-1">
+                            <div 
+                              class="w-1.5 h-1.5 rounded-full"
+                              :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+                            ></div>
+                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              {{ item.type }}
+                            </span>
+                            <span class="text-xs text-gray-400">
+                              · {{ item.sourceAppName }}
+                            </span>
+                          </div>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
                           </span>
                         </div>
-                        <span class="text-xs text-gray-400">
-                          {{ formatTime(item.timestamp) }}
-                        </span>
+                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          {{ item.type === 'text' ? item.content : 'Image content' }}
+                        </p>
                       </div>
-                      <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                        {{ item.type === 'text' ? item.content : 'Image content' }}
-                      </p>
                     </div>
                     <button
                       class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
