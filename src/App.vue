@@ -1021,6 +1021,25 @@ img[alt*="source"] {
   image-rendering: crisp-edges;
   image-rendering: pixelated;
 }
+
+/* 优化所有源应用图标的显示 */
+img[alt$="sourceAppName"] {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: auto;
+  filter: contrast(1.1) brightness(1.05);
+  width: 32px !important;
+  height: 32px !important;
+  max-width: 32px;
+  max-height: 32px;
+}
+
+/* 更新图标容器尺寸 */
+.source-icon-container {
+  width: 32px !important;
+  height: 32px !important;
+  flex-shrink: 0;
+}
 </style>
 
 <style scoped>

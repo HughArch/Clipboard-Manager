@@ -22,13 +22,13 @@ use tauri::menu::{Menu, MenuItem};
 
 #[cfg(target_os = "windows")]
 use winapi::um::{
-    winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, GetDC, ReleaseDC, DestroyIcon, DrawIconEx},
+    winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, GetDC, ReleaseDC, DestroyIcon, DrawIconEx, FillRect},
     processthreadsapi::OpenProcess,
     handleapi::CloseHandle,
     psapi::GetModuleFileNameExW,
-    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON},
+    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, ExtractIconExW},
     winnt::PROCESS_QUERY_INFORMATION,
-    wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB},
+    wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB, CreateSolidBrush},
 };
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -140,22 +140,45 @@ fn get_active_window_info() -> SourceAppInfo {
 #[cfg(target_os = "windows")]
 fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
     unsafe {
+        // 方法1: 尝试使用 ExtractIconEx 获取最高质量图标
+        let mut large_icons: [winapi::shared::windef::HICON; 1] = [ptr::null_mut()];
+        let mut small_icons: [winapi::shared::windef::HICON; 1] = [ptr::null_mut()];
+        
+        let icon_count = ExtractIconExW(
+            exe_path.as_ptr(),
+            0, // 提取第一个图标
+            large_icons.as_mut_ptr(),
+            small_icons.as_mut_ptr(),
+            1
+        );
+
+        if icon_count > 0 && !large_icons[0].is_null() {
+            let icon_base64 = hicon_to_base64(large_icons[0]);
+            
+            // 清理图标资源
+            DestroyIcon(large_icons[0]);
+            if !small_icons[0].is_null() {
+                DestroyIcon(small_icons[0]);
+            }
+            
+            if icon_base64.is_some() {
+                return icon_base64;
+            }
+        }
+
+        // 方法2: 如果 ExtractIconEx 失败，回退到 SHGetFileInfoW
         let mut shfi: SHFILEINFOW = std::mem::zeroed();
         let result = SHGetFileInfoW(
             exe_path.as_ptr(),
             0,
             &mut shfi,
             std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_LARGEICON, // 使用大图标而不是小图标
+            SHGFI_ICON | SHGFI_LARGEICON,
         );
 
         if result != 0 && !shfi.hIcon.is_null() {
-            // 将 HICON 转换为 base64
             let icon_base64 = hicon_to_base64(shfi.hIcon);
-            
-            // 清理图标资源
             DestroyIcon(shfi.hIcon);
-            
             icon_base64
         } else {
             None
@@ -181,8 +204,8 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
             return None;
         }
 
-        // 创建位图 - 使用更大的尺寸获得更好的质量
-        let icon_size = 32; // 使用32x32像素获得更好的质量
+        // 创建位图 - 使用更大的尺寸获得最佳质量
+        let icon_size = 48; // 使用48x48像素获得最佳质量
         let bitmap = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
         if bitmap.is_null() {
             DeleteDC(mem_dc);
@@ -193,7 +216,18 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
         // 选择位图到内存 DC
         let old_bitmap = SelectObject(mem_dc, bitmap as *mut winapi::ctypes::c_void);
         
-        // 绘制图标到位图
+        // 先填充白色背景，确保透明区域正确处理
+        let white_brush = winapi::um::wingdi::CreateSolidBrush(0xFFFFFF); // 白色
+        let rect = winapi::shared::windef::RECT {
+            left: 0,
+            top: 0,
+            right: icon_size,
+            bottom: icon_size,
+        };
+        winapi::um::winuser::FillRect(mem_dc, &rect, white_brush);
+        winapi::um::wingdi::DeleteObject(white_brush as *mut winapi::ctypes::c_void);
+
+        // 绘制图标到位图，使用高质量绘制选项
         let draw_result = winapi::um::winuser::DrawIconEx(
             mem_dc, 
             0, 
