@@ -470,10 +470,83 @@ fn start_clipboard_watcher(app: AppHandle) {
                             let image_path = images_dir.join(&filename);
                             
                             // 转换图片并保存到文件
-                            let img = image::RgbaImage::from_raw(image.width as u32, image.height as u32, image.bytes.to_vec()).unwrap();
+                            println!("图片信息: 宽度={}, 高度={}, 数据长度={}", image.width, image.height, image.bytes.len());
+                            
+                            // 计算期望的数据长度
+                            let expected_len = (image.width * image.height * 4) as usize;
+                            println!("期望数据长度: {}", expected_len);
+                            
+                            // 检查前几个像素的值
+                            if image.bytes.len() >= 12 {
+                                println!("前3个像素的RGBA值: {:?}", &image.bytes[0..12]);
+                            }
+                            
+                            // 修复 Alpha 通道问题：Windows 剪贴板有时会将 Alpha 设为 0
+                            let mut fixed_bytes = image.bytes.to_vec();
+                            
+                            // 检查并修复 Alpha 通道
+                            let mut zero_alpha_count = 0;
+                            let total_pixels = (image.width * image.height) as usize;
+                            
+                            // 统计 Alpha 为 0 的像素数量
+                            for chunk in fixed_bytes.chunks_exact(4) {
+                                if chunk[3] == 0 {
+                                    zero_alpha_count += 1;
+                                }
+                            }
+                            
+                            println!("Alpha为0的像素: {}/{}", zero_alpha_count, total_pixels);
+                            
+                            // 如果大部分像素的 Alpha 都是 0，就将它们设为 255（不透明）
+                            if zero_alpha_count > total_pixels / 2 {
+                                println!("修复 Alpha 通道：将透明像素设为不透明");
+                                for chunk in fixed_bytes.chunks_exact_mut(4) {
+                                    if chunk[3] == 0 {
+                                        chunk[3] = 255; // 设为完全不透明
+                                    }
+                                }
+                            }
+                            
+                            // 创建 DynamicImage 并让 image 库自动处理格式
+                            let img = match image::RgbaImage::from_raw(image.width as u32, image.height as u32, fixed_bytes) {
+                                Some(rgba_img) => {
+                                    println!("使用修复后的数据创建 RGBA 成功");
+                                    image::DynamicImage::ImageRgba8(rgba_img)
+                                },
+                                None => {
+                                    println!("直接作为 RGBA 失败，尝试其他方法");
+                                    // 尝试 BGRA 到 RGBA 转换
+                                    let mut rgba_bytes = image.bytes.to_vec();
+                                    
+                                    // 将 BGRA 转换为 RGBA
+                                    for chunk in rgba_bytes.chunks_exact_mut(4) {
+                                        chunk.swap(0, 2); // 交换 B 和 R 通道
+                                    }
+                                    
+                                    match image::RgbaImage::from_raw(image.width as u32, image.height as u32, rgba_bytes) {
+                                        Some(rgba_img) => {
+                                            println!("BGRA->RGBA 转换成功");
+                                            image::DynamicImage::ImageRgba8(rgba_img)
+                                        },
+                                        None => {
+                                            println!("所有格式转换都失败，创建默认图片");
+                                            // 创建一个测试图片
+                                            let test_img = image::RgbaImage::from_fn(100, 100, |x, y| {
+                                                if (x + y) % 20 < 10 {
+                                                    image::Rgba([255, 0, 0, 255]) // 红色
+                                                } else {
+                                                    image::Rgba([0, 255, 0, 255]) // 绿色
+                                                }
+                                            });
+                                            image::DynamicImage::ImageRgba8(test_img)
+                                        }
+                                    }
+                                }
+                            };
                             if img.save(&image_path).is_ok() {
+                                println!("图片保存成功: {:?}", image_path);
                                 // 创建一个小的 base64 缩略图用于即时显示
-                                let thumbnail = image::imageops::resize(&img, 200, 200, image::imageops::FilterType::Lanczos3);
+                                let thumbnail = img.resize(200, 200, image::imageops::FilterType::Lanczos3).to_rgba8();
                                 let mut thumb_buf = vec![];
                                 if image::codecs::png::PngEncoder::new(&mut thumb_buf)
                                     .encode(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)

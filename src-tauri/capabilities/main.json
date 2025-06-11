@@ -56,6 +56,11 @@
       "commands": ["reset_database"]
     },
     {
+      "identifier": "allow-load-image-file",
+      "description": "Allows loading full image files from disk",
+      "commands": ["load_image_file"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },
