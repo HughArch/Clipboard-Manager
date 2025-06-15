@@ -1195,6 +1195,10 @@ pub fn run() {
                         } else {
                             let _ = window.show();
                             let _ = window.set_focus();
+                            // 添加小延迟确保窗口完全显示
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+                            // 再次设置焦点，确保焦点在 webview 上
+                            let _ = window.set_focus();
                         }
                     }
                 }
@@ -1232,9 +1236,17 @@ pub fn run() {
                                     Ok(false) => {
                                         let _ = window.show();
                                         let _ = window.set_focus();
+                                        // 添加小延迟确保窗口完全显示
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        // 再次设置焦点，确保焦点在 webview 上
+                                        let _ = window.set_focus();
                                     }
                                     Err(_) => {
                                         let _ = window.show();
+                                        let _ = window.set_focus();
+                                        // 添加小延迟确保窗口完全显示
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        // 再次设置焦点，确保焦点在 webview 上
                                         let _ = window.set_focus();
                                     }
                                 }
@@ -1264,9 +1276,17 @@ pub fn run() {
                                     Ok(false) => {
                                         let _ = window.show();
                                         let _ = window.set_focus();
+                                        // 添加小延迟确保窗口完全显示
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        // 再次设置焦点，确保焦点在 webview 上
+                                        let _ = window.set_focus();
                                     }
                                     Err(_) => {
                                         let _ = window.show();
+                                        let _ = window.set_focus();
+                                        // 添加小延迟确保窗口完全显示
+                                        std::thread::sleep(std::time::Duration::from_millis(50));
+                                        // 再次设置焦点，确保焦点在 webview 上
                                         let _ = window.set_focus();
                                     }
                                 }

@@ -9,6 +9,9 @@ import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Database from '@tauri-apps/plugin-sql'
 
+// 窗口最大化状态
+const isMaximized = ref(false)
+
 // 定义设置类型
 interface AppSettings {
   max_history_items: number
@@ -120,6 +123,44 @@ const hideWindow = async () => {
     console.log('Window hidden via Esc key')
   } catch (error) {
     console.error('Failed to hide window:', error)
+  }
+}
+
+// 最小化窗口
+const minimizeWindow = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    await appWindow.minimize()
+    console.log('Window minimized')
+  } catch (error) {
+    console.error('Failed to minimize window:', error)
+  }
+}
+
+// 切换最大化状态
+const toggleMaximize = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    if (isMaximized.value) {
+      await appWindow.unmaximize()
+      isMaximized.value = false
+    } else {
+      await appWindow.maximize()
+      isMaximized.value = true
+    }
+    console.log('Window maximized state:', isMaximized.value)
+  } catch (error) {
+    console.error('Failed to toggle maximize:', error)
+  }
+}
+
+// 检查窗口是否最大化
+const checkMaximizedState = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    isMaximized.value = await appWindow.isMaximized()
+  } catch (error) {
+    console.error('Failed to check maximized state:', error)
   }
 }
 
@@ -283,6 +324,12 @@ const pasteToClipboard = async (item: any) => {
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  // 防止 Alt 键触发系统菜单
+  if (e.altKey) {
+    e.preventDefault()
+    return
+  }
+
   // 处理Esc键隐藏窗口
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -476,6 +523,19 @@ onMounted(async () => {
     
     // 组件挂载后自动聚焦搜索框
     await focusSearchInput()
+    
+    // 检查初始最大化状态
+    await checkMaximizedState()
+    
+    // 监听窗口大小变化事件
+    const unlistenResize = await appWindow.listen('tauri://resize', async () => {
+      await checkMaximizedState()
+    })
+    
+    // 存储 unlisten 函数以便清理
+    onUnmounted(() => {
+      unlistenResize()
+    })
   } catch (error) {
     console.error('Database error:', error)
   }
@@ -550,6 +610,47 @@ const resetDatabase = async () => {
 
 <template>
   <div class="h-screen flex flex-col bg-gray-50">
+    <!-- Custom Title Bar -->
+    <div class="bg-white border-b border-gray-200 flex items-center justify-between h-8 select-none" data-tauri-drag-region>
+      <div class="flex items-center px-3" data-tauri-drag-region>
+        <span class="text-xs text-gray-600">Clipboard Manager</span>
+      </div>
+      <div class="flex">
+        <button 
+          @click="minimizeWindow"
+          class="w-10 h-8 hover:bg-gray-100 flex items-center justify-center transition-colors"
+          title="Minimize"
+        >
+          <svg class="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"></path>
+          </svg>
+        </button>
+        <button 
+          @click="toggleMaximize"
+          class="w-10 h-8 hover:bg-gray-100 flex items-center justify-center transition-colors"
+          :title="isMaximized ? 'Restore' : 'Maximize'"
+        >
+          <!-- 最大化图标 -->
+          <svg v-if="!isMaximized" class="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect x="5" y="5" width="14" height="14" stroke-width="2" rx="1"></rect>
+          </svg>
+          <!-- 还原图标 -->
+          <svg v-else class="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-width="2" d="M8 8h8v8H8z M12 4h8v8h-8z"></path>
+          </svg>
+        </button>
+        <button 
+          @click="hideWindow"
+          class="w-10 h-8 hover:bg-red-100 hover:text-red-600 flex items-center justify-center transition-colors"
+          title="Close"
+        >
+          <svg class="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Header -->
     <header class="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0 shadow-sm">
       <div class="flex items-center justify-between">
@@ -898,6 +999,16 @@ const resetDatabase = async () => {
 </template>
 
 <style>
+/* 自定义标题栏样式 */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+[data-tauri-drag-region] button {
+  -webkit-app-region: no-drag;
+}
+
 /* 确保滚动条样式统一 */
 ::-webkit-scrollbar {
   width: 6px;

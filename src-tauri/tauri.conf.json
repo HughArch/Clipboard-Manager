@@ -23,7 +23,7 @@
         "closable": true,
         "skipTaskbar": false,
         "alwaysOnTop": false,
-        "decorations": true,
+        "decorations": false,
         "transparent": false,
         "visible": true,
         "devtools": false
