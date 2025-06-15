@@ -585,18 +585,47 @@ watch(selectedItem, async (newItem) => {
   }
 })
 
-// 开发者工具函数（生产环境已注释，开发时可取消注释）
-const openDevTools = () => {
-  // 使用快捷键打开开发者工具
-  document.dispatchEvent(new KeyboardEvent('keydown', {
-    key: 'i',
-    code: 'KeyI',
-    ctrlKey: true,
-    shiftKey: true,
-    keyCode: 73,
-    which: 73,
-    bubbles: true
-  }))
+// 开发者工具函数
+const openDevTools = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    // 直接调用 openDevtools 方法
+    // @ts-ignore
+    if (appWindow.openDevtools) {
+      // @ts-ignore
+      appWindow.openDevtools()
+      console.log('Dev tools opened via API')
+    } else {
+      // 如果方法不存在，尝试使用键盘快捷键
+      console.log('openDevtools method not available, trying keyboard shortcut')
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'i',
+        code: 'KeyI',
+        ctrlKey: true,
+        shiftKey: true,
+        keyCode: 73,
+        which: 73,
+        bubbles: true
+      }))
+    }
+  } catch (error) {
+    console.error('Failed to open dev tools:', error)
+    // 尝试使用键盘快捷键作为后备方案
+    try {
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'i',
+        code: 'KeyI',
+        ctrlKey: true,
+        shiftKey: true,
+        keyCode: 73,
+        which: 73,
+        bubbles: true
+      }))
+    } catch (keyError) {
+      console.error('Keyboard shortcut also failed:', keyError)
+      alert('无法打开开发者工具。请确保在 tauri.conf.json 中设置了 devtools: true')
+    }
+  }
 }
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
