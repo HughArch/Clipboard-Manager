@@ -340,11 +340,19 @@ const handleKeyDown = (e: KeyboardEvent) => {
   // 处理标签页切换（左右箭头键）
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    handleTabChange(0)
+    // 程序化点击 All 标签
+    const allTab = document.querySelector('[role="tablist"] button:first-child') as HTMLButtonElement
+    if (allTab) {
+      allTab.click()
+    }
     return
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    handleTabChange(1)
+    // 程序化点击 Favorites 标签
+    const favoritesTab = document.querySelector('[role="tablist"] button:last-child') as HTMLButtonElement
+    if (favoritesTab) {
+      favoritesTab.click()
+    }
     return
   }
 
