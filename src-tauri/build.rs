@@ -11,7 +11,8 @@ fn main() {
                 "cleanup_history", 
                 "paste_to_clipboard",
                 "reset_database",
-                "load_image_file"
+                "load_image_file",
+                "clear_memory_cache"
             ]))
     ).unwrap();
 }

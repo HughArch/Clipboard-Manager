@@ -20,6 +20,10 @@ interface AppSettings {
   auto_start: boolean
 }
 
+// 内存中的历史记录限制
+const MAX_MEMORY_ITEMS = 200 // 内存中最多保留200条记录（用于初始显示）
+const MAX_IMAGE_PREVIEW_SIZE = 5 * 1024 * 1024 // 5MB
+
 // 保存设置的函数
 const saveSettings = async (settings: AppSettings) => {
   try {
@@ -50,6 +54,29 @@ const showSettings = ref(false)
 const selectedTabIndex = ref(0)
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
 let db: Awaited<ReturnType<any>> | null = null
+const isSearching = ref(false) // 添加搜索状态标识
+const isLoadingMore = ref(false) // 添加加载更多状态
+const hasMoreData = ref(true) // 是否还有更多数据
+const currentOffset = ref(0) // 当前加载的偏移量
+
+// 添加内存管理函数（仅在不搜索时限制内存中的显示数量）
+const trimMemoryHistory = () => {
+  // 如果不是在搜索状态，且历史记录超过限制，移除最旧的非收藏条目
+  if (!searchQuery.value && clipboardHistory.value.length > MAX_MEMORY_ITEMS * 2) {
+    const itemsToRemove = clipboardHistory.value.length - MAX_MEMORY_ITEMS * 2
+    let removed = 0
+    
+    // 从后往前遍历（最旧的在后面）
+    for (let i = clipboardHistory.value.length - 1; i >= 0 && removed < itemsToRemove; i--) {
+      if (!clipboardHistory.value[i].isFavorite) {
+        clipboardHistory.value.splice(i, 1)
+        removed++
+      }
+    }
+    
+    console.log(`内存优化：从显示列表中移除了 ${removed} 条旧记录（数据库中仍保留）`)
+  }
+}
 
 // 格式化时间显示
 const formatTime = (timestamp: string) => {
@@ -398,22 +425,215 @@ const handleTabChange = (index: number) => {
   searchQuery.value = ''
   selectedItem.value = null
   
+  // 重置分页状态
+  currentOffset.value = 0
+  hasMoreData.value = true
+  
+  // 重新加载对应标签页的数据
+  loadRecentHistory()
+  
   // 切换标签页后自动聚焦搜索框
   focusSearchInput()
 }
 
-onMounted(async () => {
+// 监听选中项变化，当选中图片时加载完整图片
+watch(selectedItem, async (newItem) => {
+  // 清理之前的图片内容，释放内存
+  if (fullImageContent.value) {
+    fullImageContent.value = null
+  }
+  
+  if (newItem && newItem.type === 'image' && newItem.imagePath) {
+    try {
+      console.log('Loading full image from path:', newItem.imagePath)
+      const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
+      
+      // 检查图片大小，如果过大则不在内存中保存
+      if (fullImage.length > MAX_IMAGE_PREVIEW_SIZE) {
+        console.warn('完整图片过大，使用缩略图显示')
+        fullImageContent.value = newItem.content
+      } else {
+        fullImageContent.value = fullImage
+      }
+    } catch (error) {
+      console.error('Failed to load full image:', error)
+      // 如果加载失败，使用缩略图作为后备
+      fullImageContent.value = newItem.content
+    }
+  } else {
+    fullImageContent.value = null
+  }
+})
+
+// 添加定期内存清理
+let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
+
+// 添加数据库搜索函数
+const searchFromDatabase = async () => {
+  if (!db || !searchQuery.value.trim()) {
+    return
+  }
+  
+  isSearching.value = true
+  
   try {
-    const dbPath = 'sqlite:clipboard.db'
-    console.log('Connecting to database:', dbPath)
-    db = await Database.load(dbPath)
+    const query = searchQuery.value.toLowerCase()
+    const isFavoritesTab = selectedTabIndex.value === 1
     
-    // 读取历史数据
-    const rows = await db.select(
-      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
-       FROM clipboard_history 
-       ORDER BY id DESC`
-    )
+    // 构建SQL查询
+    let sql = `
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+      FROM clipboard_history 
+      WHERE LOWER(content) LIKE ?
+    `
+    
+    const params = [`%${query}%`]
+    
+    // 如果是收藏标签页，只搜索收藏的项目
+    if (isFavoritesTab) {
+      sql += ' AND is_favorite = 1'
+    }
+    
+    sql += ' ORDER BY timestamp DESC LIMIT 500' // 限制最多返回500条结果
+    
+    const rows = await db.select(sql, params)
+    
+    // 将搜索结果转换为前端格式
+    const searchResults = rows.map((row: any) => ({
+      id: row.id,
+      content: row.content,
+      type: row.type,
+      timestamp: row.timestamp,
+      isFavorite: row.is_favorite === 1,
+      imagePath: row.image_path ?? null,
+      sourceAppName: row.source_app_name ?? 'Unknown',
+      sourceAppIcon: row.source_app_icon ?? null
+    }))
+    
+    // 更新内存中的历史记录为搜索结果
+    clipboardHistory.value = searchResults
+    
+    console.log(`数据库搜索完成，找到 ${searchResults.length} 条记录`)
+  } catch (error) {
+    console.error('数据库搜索失败:', error)
+  } finally {
+    isSearching.value = false
+  }
+}
+
+// 添加防抖函数
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  return function (...args: Parameters<T>) {
+    if (timeout) clearTimeout(timeout)
+    timeout = setTimeout(() => func(...args), wait)
+  }
+}
+
+// 创建防抖的搜索函数
+const debouncedSearch = debounce(searchFromDatabase, 300)
+
+// 监听搜索框变化
+watch(searchQuery, async (newQuery) => {
+  if (newQuery.trim()) {
+    // 如果有搜索内容，从数据库搜索
+    debouncedSearch()
+  } else {
+    // 如果搜索框为空，重新加载最近的记录
+    await loadRecentHistory()
+  }
+})
+
+// 添加加载更多记录的函数
+const loadMoreHistory = async () => {
+  if (!db || isLoadingMore.value || !hasMoreData.value || searchQuery.value.trim()) {
+    return
+  }
+  
+  isLoadingMore.value = true
+  
+  try {
+    const isFavoritesTab = selectedTabIndex.value === 1
+    
+    let sql = `
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+      FROM clipboard_history
+    `
+    
+    if (isFavoritesTab) {
+      sql += ' WHERE is_favorite = 1'
+    }
+    
+    sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+    
+    const rows = await db.select(sql, [50, currentOffset.value])
+    
+    if (rows.length === 0) {
+      hasMoreData.value = false
+      console.log('没有更多数据了')
+      return
+    }
+    
+    const newItems = rows.map((row: any) => ({
+      id: row.id,
+      content: row.content,
+      type: row.type,
+      timestamp: row.timestamp,
+      isFavorite: row.is_favorite === 1,
+      imagePath: row.image_path ?? null,
+      sourceAppName: row.source_app_name ?? 'Unknown',
+      sourceAppIcon: row.source_app_icon ?? null
+    }))
+    
+    // 追加新记录到历史列表
+    clipboardHistory.value.push(...newItems)
+    currentOffset.value += rows.length
+    
+    console.log(`加载了 ${rows.length} 条更多记录，总计 ${clipboardHistory.value.length} 条`)
+    
+    // 如果返回的记录数少于请求的数量，说明没有更多数据了
+    if (rows.length < 50) {
+      hasMoreData.value = false
+    }
+  } catch (error) {
+    console.error('加载更多记录失败:', error)
+  } finally {
+    isLoadingMore.value = false
+  }
+}
+
+// 添加滚动处理函数
+const handleScroll = (event: Event) => {
+  const target = event.target as HTMLElement
+  const scrollPosition = target.scrollTop + target.clientHeight
+  const scrollHeight = target.scrollHeight
+  
+  // 当滚动到距离底部100px时，加载更多
+  if (scrollHeight - scrollPosition < 100) {
+    loadMoreHistory()
+  }
+}
+
+// 修改加载最近历史记录的函数
+const loadRecentHistory = async () => {
+  if (!db) return
+  
+  try {
+    const isFavoritesTab = selectedTabIndex.value === 1
+    
+    let sql = `
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+      FROM clipboard_history
+    `
+    
+    if (isFavoritesTab) {
+      sql += ' WHERE is_favorite = 1'
+    }
+    
+    sql += ' ORDER BY timestamp DESC LIMIT ?'
+    
+    const rows = await db.select(sql, [MAX_MEMORY_ITEMS])
+    
     clipboardHistory.value = rows.map((row: any) => ({
       id: row.id,
       content: row.content,
@@ -424,6 +644,25 @@ onMounted(async () => {
       sourceAppName: row.source_app_name ?? 'Unknown',
       sourceAppIcon: row.source_app_icon ?? null
     }))
+    
+    // 重置分页状态
+    currentOffset.value = clipboardHistory.value.length
+    hasMoreData.value = true
+    
+    console.log(`加载了 ${clipboardHistory.value.length} 条最近的记录`)
+  } catch (error) {
+    console.error('加载历史记录失败:', error)
+  }
+}
+
+onMounted(async () => {
+  try {
+    const dbPath = 'sqlite:clipboard.db'
+    console.log('Connecting to database:', dbPath)
+    db = await Database.load(dbPath)
+    
+    // 初始加载最近的历史记录
+    await loadRecentHistory()
 
     listen<string>('clipboard-text', async (event) => {
       try {
@@ -459,6 +698,9 @@ onMounted(async () => {
         const rows = await db.select(`SELECT last_insert_rowid() as id`)
         const id = rows[0]?.id || Date.now()
         clipboardHistory.value.unshift(Object.assign({ id }, item))
+        
+        // 执行内存清理
+        trimMemoryHistory()
       } catch (error) {
         console.error('Failed to process clipboard text:', error)
       }
@@ -472,6 +714,12 @@ onMounted(async () => {
         const thumbnail = eventData.thumbnail
         const sourceAppName = eventData.source_app_name || 'Unknown'
         const sourceAppIcon = eventData.source_app_icon || null
+        
+        // 检查缩略图大小
+        if (thumbnail && thumbnail.length > MAX_IMAGE_PREVIEW_SIZE) {
+          console.warn('缩略图过大，跳过内存存储')
+          return
+        }
         
         // 检查是否是重复内容（使用文件路径作为内容标识）
         const duplicateItemId = checkDuplicateContent(imagePath)
@@ -500,6 +748,9 @@ onMounted(async () => {
         const rows = await db.select(`SELECT last_insert_rowid() as id`)
         const id = rows[0]?.id || Date.now()
         clipboardHistory.value.unshift(Object.assign({ id }, item))
+        
+        // 执行内存清理
+        trimMemoryHistory()
       } catch (error) {
         console.error('Failed to process clipboard image:', error)
       }
@@ -544,6 +795,22 @@ onMounted(async () => {
     onUnmounted(() => {
       unlistenResize()
     })
+
+    // 设置定期内存清理（每5分钟执行一次）
+    memoryCleanupInterval = setInterval(() => {
+      console.log('执行定期内存清理')
+      trimMemoryHistory()
+      
+      // 如果当前没有选中图片，清理图片内容
+      if (!selectedItem.value || selectedItem.value.type !== 'image') {
+        fullImageContent.value = null
+      }
+      
+      // 手动触发垃圾回收（如果可用）
+      if (typeof (window as any).gc === 'function') {
+        (window as any).gc()
+      }
+    }, 5 * 60 * 1000) // 5分钟
   } catch (error) {
     console.error('Database error:', error)
   }
@@ -556,6 +823,17 @@ onUnmounted(() => {
   if (unlistenFocus.value) {
     unlistenFocus.value()
   }
+  
+  // 清理定期内存清理定时器
+  if (memoryCleanupInterval) {
+    clearInterval(memoryCleanupInterval)
+  }
+  
+  // 清理图片内容
+  fullImageContent.value = null
+  
+  // 清理剪贴板历史（可选，取决于是否要在组件卸载时保留历史）
+  // clipboardHistory.value = []
 })
 
 // 监听标签页变化
@@ -566,23 +844,6 @@ watch(selectedTabIndex, () => {
   selectedItem.value = null
   // 清除完整图片内容
   fullImageContent.value = null
-})
-
-// 监听选中项变化，当选中图片时加载完整图片
-watch(selectedItem, async (newItem) => {
-  if (newItem && newItem.type === 'image' && newItem.imagePath) {
-    try {
-      console.log('Loading full image from path:', newItem.imagePath)
-      const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
-      fullImageContent.value = fullImage
-    } catch (error) {
-      console.error('Failed to load full image:', error)
-      // 如果加载失败，使用缩略图作为后备
-      fullImageContent.value = newItem.content
-    }
-  } else {
-    fullImageContent.value = null
-  }
 })
 
 // 开发者工具函数
@@ -641,6 +902,28 @@ const resetDatabase = async () => {
       console.error('重置数据库失败:', error)
       alert('重置数据库失败: ' + error)
     }
+  }
+}
+
+// 清理内存缓存函数
+const clearMemoryCache = async () => {
+  try {
+    await invoke('clear_memory_cache')
+    console.log('内存缓存已清理')
+    
+    // 同时执行前端的内存清理
+    trimMemoryHistory()
+    fullImageContent.value = null
+    
+    // 手动触发垃圾回收（如果可用）
+    if (typeof (window as any).gc === 'function') {
+      (window as any).gc()
+    }
+    
+    alert('内存缓存清理完成')
+  } catch (error) {
+    console.error('清理内存缓存失败:', error)
+    alert('清理内存缓存失败: ' + error)
   }
 }
 </script>
@@ -706,6 +989,13 @@ const resetDatabase = async () => {
             @click="openDevTools"
           >
             Dev Tools
+          </button>
+          <button 
+            class="px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors duration-200"
+            @click="clearMemoryCache"
+            title="清理内存缓存"
+          >
+            Clear Cache
           </button>
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
@@ -788,7 +1078,7 @@ const resetDatabase = async () => {
               </div>
 
               <!-- History List -->
-              <div class="flex-1 overflow-y-auto min-h-0">
+              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
@@ -865,6 +1155,20 @@ const resetDatabase = async () => {
                     {{ searchQuery ? 'No items match your search' : 'No clipboard history yet' }}
                   </p>
                 </div>
+                
+                <!-- 加载更多提示 -->
+                <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
+                  <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span class="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                    No more items
+                  </div>
+                  <div v-else class="text-xs text-gray-400">
+                    Scroll to load more
+                  </div>
+                </div>
               </div>
             </TabPanel>
 
@@ -886,7 +1190,7 @@ const resetDatabase = async () => {
               </div>
 
               <!-- Favorites List -->
-              <div class="flex-1 overflow-y-auto min-h-0">
+              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
@@ -963,6 +1267,20 @@ const resetDatabase = async () => {
                   <p class="text-gray-400 text-xs text-center mt-1">
                     Click the star icon to add items to favorites
                   </p>
+                </div>
+                
+                <!-- 加载更多提示 -->
+                <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
+                  <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span class="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                    No more items
+                  </div>
+                  <div v-else class="text-xs text-gray-400">
+                    Scroll to load more
+                  </div>
                 </div>
               </div>
             </TabPanel>

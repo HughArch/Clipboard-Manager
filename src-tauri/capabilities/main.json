@@ -14,6 +14,7 @@
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
     {
       "identifier": "allow-save-settings",
       "description": "Allows saving application settings",
@@ -63,6 +64,11 @@
       "identifier": "allow-load-image-file",
       "description": "Allows loading full image files from disk",
       "commands": ["load_image_file"]
+    },
+    {
+      "identifier": "allow-clear-memory-cache",
+      "description": "Allows clearing memory cache",
+      "commands": ["clear_memory_cache"]
     },
     {
       "identifier": "fs:allow-write-file",

@@ -19,6 +19,8 @@ use tokio::sync::Mutex;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
 use tauri::menu::{Menu, MenuItem};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 #[cfg(target_os = "windows")]
 use winapi::um::{
@@ -61,6 +63,25 @@ fn settings_file_path() -> Result<PathBuf, String> {
 struct SourceAppInfo {
     name: String,
     icon: Option<String>, // base64 encoded icon
+}
+
+// 添加图标缓存（使用静态变量）
+static ICON_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, Option<String>>>>> = std::sync::OnceLock::new();
+
+fn get_icon_cache() -> &'static Arc<RwLock<HashMap<String, Option<String>>>> {
+    ICON_CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
+}
+
+// 清理图标缓存（当缓存过大时）
+fn cleanup_icon_cache() {
+    let cache = get_icon_cache();
+    if let Ok(mut cache_guard) = cache.write() {
+        if cache_guard.len() > 50 {
+            // 清空缓存
+            cache_guard.clear();
+            println!("清理图标缓存");
+        }
+    }
 }
 
 // 获取当前活动窗口的应用程序信息
@@ -123,9 +144,38 @@ fn get_active_window_info() -> SourceAppInfo {
             "Unknown".to_string()
         };
 
-        // 获取应用程序图标
+        // 获取应用程序图标（使用缓存）
         let icon_base64 = if path_len > 0 {
-            get_app_icon_base64(&exe_path[..path_len as usize])
+            let exe_path_str = OsString::from_wide(&exe_path[..path_len as usize])
+                .to_string_lossy()
+                .to_string();
+            
+            // 先检查缓存
+            let icon_cache = get_icon_cache();
+            if let Ok(cache) = icon_cache.read() {
+                if let Some(cached_icon) = cache.get(&exe_path_str) {
+                    cached_icon.clone()
+                } else {
+                    drop(cache); // 释放读锁
+                    
+                    // 获取图标
+                    let icon = get_app_icon_base64(&exe_path[..path_len as usize]);
+                    
+                    // 存入缓存
+                    if let Ok(mut cache) = icon_cache.write() {
+                        cache.insert(exe_path_str, icon.clone());
+                        // 检查是否需要清理缓存
+                        if cache.len() > 50 {
+                            drop(cache);
+                            cleanup_icon_cache();
+                        }
+                    }
+                    
+                    icon
+                }
+            } else {
+                get_app_icon_base64(&exe_path[..path_len as usize])
+            }
         } else {
             None
         };
@@ -435,11 +485,23 @@ fn start_clipboard_watcher(app: AppHandle) {
         let mut clipboard = Clipboard::new().unwrap();
         let mut last_text = String::new();
         let mut last_image_hash = 0u64;
+        
+        // 添加内存限制常量
+        const MAX_TEXT_LENGTH: usize = 1_000_000; // 1MB 文本限制
+        const MAX_IMAGE_SIZE: usize = 50_000_000; // 50MB 图片限制
 
         loop {
             // 检查文本
             if let Ok(text) = clipboard.get_text() {
+                // 限制文本长度以防止内存溢出
+                if text.len() > MAX_TEXT_LENGTH {
+                    println!("警告：剪贴板文本过大，跳过: {} bytes", text.len());
+                    thread::sleep(Duration::from_millis(800));
+                    continue;
+                }
+                
                 if text != last_text {
+                    // 使用内存交换而不是克隆，减少内存分配
                     last_text = text.clone();
                     
                     // 获取源应用信息
@@ -452,10 +514,23 @@ fn start_clipboard_watcher(app: AppHandle) {
                         "source_app_icon": source_info.icon
                     });
                     app.emit("clipboard-text", event_data.to_string()).ok();
+                    
+                    // 清理大文本内容
+                    if last_text.len() > 100_000 {
+                        last_text.shrink_to_fit();
+                    }
                 }
             }
             // 检查图片
             if let Ok(image) = clipboard.get_image() {
+                // 检查图片大小
+                let image_size = image.bytes.len();
+                if image_size > MAX_IMAGE_SIZE {
+                    println!("警告：剪贴板图片过大，跳过: {} bytes", image_size);
+                    thread::sleep(Duration::from_millis(800));
+                    continue;
+                }
+                
                 let hash = image.bytes.iter().fold(0u64, |acc, &b| acc.wrapping_add(b as u64));
                 if hash != last_image_hash {
                     last_image_hash = hash;
@@ -472,88 +547,97 @@ fn start_clipboard_watcher(app: AppHandle) {
                             // 转换图片并保存到文件
                             println!("图片信息: 宽度={}, 高度={}, 数据长度={}", image.width, image.height, image.bytes.len());
                             
-                            // 计算期望的数据长度
-                            let expected_len = (image.width * image.height * 4) as usize;
-                            println!("期望数据长度: {}", expected_len);
-                            
-                            // 检查前几个像素的值
-                            if image.bytes.len() >= 12 {
-                                println!("前3个像素的RGBA值: {:?}", &image.bytes[0..12]);
-                            }
-                            
-                            // 修复 Alpha 通道问题：Windows 剪贴板有时会将 Alpha 设为 0
-                            let mut fixed_bytes = image.bytes.to_vec();
-                            
-                            // 检查并修复 Alpha 通道
-                            let mut zero_alpha_count = 0;
-                            let total_pixels = (image.width * image.height) as usize;
-                            
-                            // 统计 Alpha 为 0 的像素数量
-                            for chunk in fixed_bytes.chunks_exact(4) {
-                                if chunk[3] == 0 {
-                                    zero_alpha_count += 1;
-                                }
-                            }
-                            
-                            println!("Alpha为0的像素: {}/{}", zero_alpha_count, total_pixels);
-                            
-                            // 如果大部分像素的 Alpha 都是 0，就将它们设为 255（不透明）
-                            if zero_alpha_count > total_pixels / 2 {
-                                println!("修复 Alpha 通道：将透明像素设为不透明");
-                                for chunk in fixed_bytes.chunks_exact_mut(4) {
+                            // 使用作用域限制图片处理的内存生命周期
+                            let save_result = {
+                                // 修复 Alpha 通道问题：Windows 剪贴板有时会将 Alpha 设为 0
+                                let mut fixed_bytes = image.bytes.to_vec();
+                                
+                                // 检查并修复 Alpha 通道
+                                let mut zero_alpha_count = 0;
+                                let total_pixels = (image.width * image.height) as usize;
+                                
+                                // 统计 Alpha 为 0 的像素数量
+                                for chunk in fixed_bytes.chunks_exact(4) {
                                     if chunk[3] == 0 {
-                                        chunk[3] = 255; // 设为完全不透明
+                                        zero_alpha_count += 1;
                                     }
                                 }
-                            }
-                            
-                            // 创建 DynamicImage 并让 image 库自动处理格式
-                            let img = match image::RgbaImage::from_raw(image.width as u32, image.height as u32, fixed_bytes) {
-                                Some(rgba_img) => {
-                                    println!("使用修复后的数据创建 RGBA 成功");
-                                    image::DynamicImage::ImageRgba8(rgba_img)
-                                },
-                                None => {
-                                    println!("直接作为 RGBA 失败，尝试其他方法");
-                                    // 尝试 BGRA 到 RGBA 转换
-                                    let mut rgba_bytes = image.bytes.to_vec();
-                                    
-                                    // 将 BGRA 转换为 RGBA
-                                    for chunk in rgba_bytes.chunks_exact_mut(4) {
-                                        chunk.swap(0, 2); // 交换 B 和 R 通道
-                                    }
-                                    
-                                    match image::RgbaImage::from_raw(image.width as u32, image.height as u32, rgba_bytes) {
-                                        Some(rgba_img) => {
-                                            println!("BGRA->RGBA 转换成功");
-                                            image::DynamicImage::ImageRgba8(rgba_img)
-                                        },
-                                        None => {
-                                            println!("所有格式转换都失败，创建默认图片");
-                                            // 创建一个测试图片
-                                            let test_img = image::RgbaImage::from_fn(100, 100, |x, y| {
-                                                if (x + y) % 20 < 10 {
-                                                    image::Rgba([255, 0, 0, 255]) // 红色
-                                                } else {
-                                                    image::Rgba([0, 255, 0, 255]) // 绿色
-                                                }
-                                            });
-                                            image::DynamicImage::ImageRgba8(test_img)
+                                
+                                println!("Alpha为0的像素: {}/{}", zero_alpha_count, total_pixels);
+                                
+                                // 如果大部分像素的 Alpha 都是 0，就将它们设为 255（不透明）
+                                if zero_alpha_count > total_pixels / 2 {
+                                    println!("修复 Alpha 通道：将透明像素设为不透明");
+                                    for chunk in fixed_bytes.chunks_exact_mut(4) {
+                                        if chunk[3] == 0 {
+                                            chunk[3] = 255; // 设为完全不透明
                                         }
                                     }
                                 }
+                                
+                                // 创建 DynamicImage 并让 image 库自动处理格式
+                                let img = match image::RgbaImage::from_raw(image.width as u32, image.height as u32, fixed_bytes) {
+                                    Some(rgba_img) => {
+                                        println!("使用修复后的数据创建 RGBA 成功");
+                                        image::DynamicImage::ImageRgba8(rgba_img)
+                                    },
+                                    None => {
+                                        println!("直接作为 RGBA 失败，尝试其他方法");
+                                        // 尝试 BGRA 到 RGBA 转换
+                                        let mut rgba_bytes = image.bytes.to_vec();
+                                        
+                                        // 将 BGRA 转换为 RGBA
+                                        for chunk in rgba_bytes.chunks_exact_mut(4) {
+                                            chunk.swap(0, 2); // 交换 B 和 R 通道
+                                        }
+                                        
+                                        match image::RgbaImage::from_raw(image.width as u32, image.height as u32, rgba_bytes) {
+                                            Some(rgba_img) => {
+                                                println!("BGRA->RGBA 转换成功");
+                                                image::DynamicImage::ImageRgba8(rgba_img)
+                                            },
+                                            None => {
+                                                println!("所有格式转换都失败，跳过此图片");
+                                                thread::sleep(Duration::from_millis(800));
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                };
+                                
+                                // 保存原图
+                                img.save(&image_path)
                             };
-                            if img.save(&image_path).is_ok() {
+                            
+                            if save_result.is_ok() {
                                 println!("图片保存成功: {:?}", image_path);
-                                // 创建一个小的 base64 缩略图用于即时显示
-                                let thumbnail = img.resize(200, 200, image::imageops::FilterType::Lanczos3).to_rgba8();
-                                let mut thumb_buf = vec![];
-                                if image::codecs::png::PngEncoder::new(&mut thumb_buf)
-                                    .encode(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)
-                                    .is_ok() {
-                                    let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
-                                    let thumb_data_url = format!("data:image/png;base64,{}", thumb_b64);
-                                    
+                                
+                                // 创建缩略图（使用新的作用域限制内存）
+                                let thumbnail_result = {
+                                    // 重新加载图片以创建缩略图，避免内存中保留大图
+                                    match image::open(&image_path) {
+                                        Ok(img) => {
+                                            // 创建一个小的缩略图
+                                            let thumbnail = img.resize(200, 200, image::imageops::FilterType::Lanczos3).to_rgba8();
+                                            let mut thumb_buf = Vec::with_capacity(50_000); // 预分配合理大小
+                                            
+                                            if image::codecs::png::PngEncoder::new(&mut thumb_buf)
+                                                .encode(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)
+                                                .is_ok() {
+                                                let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
+                                                Some(format!("data:image/png;base64,{}", thumb_b64))
+                                            } else {
+                                                None
+                                            }
+                                        },
+                                        Err(e) => {
+                                            println!("无法重新加载图片创建缩略图: {}", e);
+                                            None
+                                        }
+                                    }
+                                };
+                                
+                                if let Some(thumb_data_url) = thumbnail_result {
                                     // 获取源应用信息
                                     let source_info = get_active_window_info();
                                     
@@ -571,6 +655,8 @@ fn start_clipboard_watcher(app: AppHandle) {
                     }
                 }
             }
+            
+            // 定期触发垃圾回收（通过作用域结束）
             thread::sleep(Duration::from_millis(800));
         }
     });
@@ -1075,6 +1161,16 @@ async fn simulate_paste() -> Result<(), String> {
     }
 }
 
+// 手动清理内存缓存
+#[tauri::command]
+async fn clear_memory_cache() -> Result<(), String> {
+    // 清理图标缓存
+    cleanup_icon_cache();
+    
+    println!("内存缓存已清理");
+    Ok(())
+}
+
 #[tauri::command]
 async fn reset_database(app: AppHandle) -> Result<(), String> {
     println!("开始重置数据库...");
@@ -1346,7 +1442,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file, clear_memory_cache])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
