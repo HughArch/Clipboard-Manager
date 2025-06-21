@@ -13,13 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
-          - platform: 'ubuntu-20.04'
-            args: ''
-          - platform: 'windows-latest'
-            args: ''
+        platform: [macos-latest, ubuntu-20.04, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -34,8 +28,6 @@ jobs:
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -58,6 +50,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Clipboard Manager ${{ github.ref_name }}'
@@ -95,4 +89,6 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeReleaseId: true
-          args: ${{ matrix.args }} 
+          projectPath: '.'
+          distPath: './dist'
+          configPath: './src-tauri/tauri.conf.json' 
