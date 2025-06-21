@@ -13,7 +13,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-20.04, windows-latest]
+        include:
+          - platform: 'macos-latest'
+            args: '--target universal-apple-darwin'
+          - platform: 'ubuntu-20.04'
+            args: ''
+          - platform: 'windows-latest'
+            args: ''
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -28,6 +34,8 @@ jobs:
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -41,7 +49,10 @@ jobs:
           cache: 'npm'
 
       - name: Install frontend dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
@@ -83,4 +94,5 @@ jobs:
             如有问题请提交 [Issue](https://github.com/${{ github.repository }}/issues)
           releaseDraft: false
           prerelease: false
-          includeReleaseId: true 
+          includeReleaseId: true
+          args: ${{ matrix.args }} 

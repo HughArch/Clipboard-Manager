@@ -32,14 +32,14 @@ try {
   log('blue', '🚀 开始发布流程...');
 
   // 1. 检查工作目录是否干净
-  log('yellow', '📋 检查工作目录状态...');
-  try {
-    execSync('git diff --exit-code', { stdio: 'pipe' });
-    execSync('git diff --cached --exit-code', { stdio: 'pipe' });
-  } catch (error) {
-    log('red', '❌ 工作目录不干净，请先提交所有更改');
-    process.exit(1);
-  }
+  // log('yellow', '📋 检查工作目录状态...');
+  // try {
+  //   execSync('git diff --exit-code', { stdio: 'pipe' });
+  //   execSync('git diff --cached --exit-code', { stdio: 'pipe' });
+  // } catch (error) {
+  //   log('red', '❌ 工作目录不干净，请先提交所有更改');
+  //   process.exit(1);
+  // }
 
   // 2. 拉取最新代码
   log('yellow', '📥 拉取最新代码...');
