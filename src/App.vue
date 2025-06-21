@@ -20,9 +20,9 @@ interface AppSettings {
   auto_start: boolean
 }
 
-// 内存中的历史记录限制
-const MAX_MEMORY_ITEMS = 200 // 内存中最多保留200条记录（用于初始显示）
-const MAX_IMAGE_PREVIEW_SIZE = 5 * 1024 * 1024 // 5MB
+// 内存中的历史记录限制 - 更严格的限制
+const MAX_MEMORY_ITEMS = 100 // 降低从200到100
+const MAX_IMAGE_PREVIEW_SIZE = 2 * 1024 * 1024 // 降低从5MB到2MB
 
 // 保存设置的函数
 const saveSettings = async (settings: AppSettings) => {
@@ -59,11 +59,16 @@ const isLoadingMore = ref(false) // 添加加载更多状态
 const hasMoreData = ref(true) // 是否还有更多数据
 const currentOffset = ref(0) // 当前加载的偏移量
 
-// 添加内存管理函数（仅在不搜索时限制内存中的显示数量）
+// 事件监听器清理函数存储
+let unlistenClipboardText: (() => void) | null = null
+let unlistenClipboardImage: (() => void) | null = null
+let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
+
+// 优化的内存管理函数（更激进的清理策略）
 const trimMemoryHistory = () => {
   // 如果不是在搜索状态，且历史记录超过限制，移除最旧的非收藏条目
-  if (!searchQuery.value && clipboardHistory.value.length > MAX_MEMORY_ITEMS * 2) {
-    const itemsToRemove = clipboardHistory.value.length - MAX_MEMORY_ITEMS * 2
+  if (!searchQuery.value && clipboardHistory.value.length > MAX_MEMORY_ITEMS) {
+    const itemsToRemove = clipboardHistory.value.length - MAX_MEMORY_ITEMS
     let removed = 0
     
     // 从后往前遍历（最旧的在后面）
@@ -76,29 +81,64 @@ const trimMemoryHistory = () => {
     
     console.log(`内存优化：从显示列表中移除了 ${removed} 条旧记录（数据库中仍保留）`)
   }
+  
+  // 强制垃圾回收（如果可用）
+  if (typeof (window as any).gc === 'function') {
+    (window as any).gc()
+  }
 }
 
-// 格式化时间显示
-const formatTime = (timestamp: string) => {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMins = Math.floor(diffMs / (1000 * 60))
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+// 优化的时间格式化函数（减少对象创建）
+const formatTime = (() => {
+  const timeCache = new Map<string, string>()
+  const maxCacheSize = 100
   
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
+  const formatFunction = (timestamp: string): string => {
+    // 检查缓存
+    if (timeCache.has(timestamp)) {
+      return timeCache.get(timestamp)!
+    }
+    
+    const date = new Date(timestamp)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    
+    let result: string
+    if (diffMins < 1) result = 'Just now'
+    else if (diffMins < 60) result = `${diffMins}m ago`
+    else if (diffHours < 24) result = `${diffHours}h ago`
+    else if (diffDays < 7) result = `${diffDays}d ago`
+    else {
+      // 超过一周显示日期
+      result = date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {})
+      })
+    }
+    
+    // 添加到缓存
+    if (timeCache.size >= maxCacheSize) {
+      // 清理旧缓存
+      const firstKey = timeCache.keys().next().value
+      timeCache.delete(firstKey)
+    }
+    timeCache.set(timestamp, result)
+    
+    return result
+  }
   
-  // 超过一周显示日期
-  return date.toLocaleDateString('en-US', { 
-    month: 'short', 
-    day: 'numeric',
-    ...(date.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {})
-  })
-}
+  // 添加清理缓存的方法
+  ;(formatFunction as any).clearCache = () => {
+    timeCache.clear()
+    console.log('时间格式化缓存已清理')
+  }
+  
+  return formatFunction as typeof formatFunction & { clearCache: () => void }
+})()
 
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -465,9 +505,6 @@ watch(selectedItem, async (newItem) => {
   }
 })
 
-// 添加定期内存清理
-let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
-
 // 添加数据库搜索函数
 const searchFromDatabase = async () => {
   if (!db || !searchQuery.value.trim()) {
@@ -664,13 +701,27 @@ onMounted(async () => {
     // 初始加载最近的历史记录
     await loadRecentHistory()
 
-    listen<string>('clipboard-text', async (event) => {
+    // 注册剪贴板文本事件监听器，并保存unlisten函数
+    unlistenClipboardText = await listen<string>('clipboard-text', async (event) => {
       try {
-        // 解析事件数据
-        const eventData = JSON.parse(event.payload)
+        // 解析事件数据 - 优化：减少JSON解析
+        let eventData: any
+        try {
+          eventData = JSON.parse(event.payload)
+        } catch (parseError) {
+          console.error('解析剪贴板文本事件数据失败:', parseError)
+          return
+        }
+        
         const content = eventData.content
         const sourceAppName = eventData.source_app_name || 'Unknown'
         const sourceAppIcon = eventData.source_app_icon || null
+        
+        // 限制内容长度
+        if (content && content.length > 100_000) {
+          console.warn('文本内容过长，跳过')
+          return
+        }
         
         // 检查是否是重复内容
         const duplicateItemId = checkDuplicateContent(content)
@@ -689,27 +740,42 @@ onMounted(async () => {
           sourceAppName: sourceAppName,
           sourceAppIcon: sourceAppIcon
         }
-        // 插入新记录到数据库
-        await db.execute(
-          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
-        )
-        const rows = await db.select(`SELECT last_insert_rowid() as id`)
-        const id = rows[0]?.id || Date.now()
-        clipboardHistory.value.unshift(Object.assign({ id }, item))
         
-        // 执行内存清理
-        trimMemoryHistory()
+        // 插入新记录到数据库
+        try {
+          await db!.execute(
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
+          )
+          const rows = await db!.select(`SELECT last_insert_rowid() as id`)
+          const id = rows[0]?.id || Date.now()
+          
+          // 添加到内存列表的开头
+          clipboardHistory.value.unshift(Object.assign({ id }, item))
+          
+          // 立即执行内存清理
+          trimMemoryHistory()
+        } catch (dbError) {
+          console.error('数据库操作失败:', dbError)
+        }
       } catch (error) {
         console.error('Failed to process clipboard text:', error)
       }
     })
 
-    listen<string>('clipboard-image', async (event) => {
+    // 注册剪贴板图片事件监听器，并保存unlisten函数
+    unlistenClipboardImage = await listen<string>('clipboard-image', async (event) => {
       try {
-        // 解析事件数据
-        const eventData = JSON.parse(event.payload)
+        // 解析事件数据 - 优化：减少JSON解析
+        let eventData: any
+        try {
+          eventData = JSON.parse(event.payload)
+        } catch (parseError) {
+          console.error('解析剪贴板图片事件数据失败:', parseError)
+          return
+        }
+        
         const imagePath = eventData.path
         const thumbnail = eventData.thumbnail
         const sourceAppName = eventData.source_app_name || 'Unknown'
@@ -740,17 +806,23 @@ onMounted(async () => {
         }
         
         // 插入新记录到数据库
-        await db.execute(
-          `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
-        )
-        const rows = await db.select(`SELECT last_insert_rowid() as id`)
-        const id = rows[0]?.id || Date.now()
-        clipboardHistory.value.unshift(Object.assign({ id }, item))
-        
-        // 执行内存清理
-        trimMemoryHistory()
+        try {
+          await db!.execute(
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
+          )
+          const rows = await db!.select(`SELECT last_insert_rowid() as id`)
+          const id = rows[0]?.id || Date.now()
+          
+          // 添加到内存列表的开头
+          clipboardHistory.value.unshift(Object.assign({ id }, item))
+          
+          // 立即执行内存清理
+          trimMemoryHistory()
+        } catch (dbError) {
+          console.error('数据库操作失败:', dbError)
+        }
       } catch (error) {
         console.error('Failed to process clipboard image:', error)
       }
@@ -796,12 +868,12 @@ onMounted(async () => {
       unlistenResize()
     })
 
-    // 设置定期内存清理（每5分钟执行一次）
+    // 设置更频繁的内存清理（每2分钟执行一次，更激进）
     memoryCleanupInterval = setInterval(() => {
       console.log('执行定期内存清理')
       trimMemoryHistory()
       
-      // 如果当前没有选中图片，清理图片内容
+      // 清理选中的完整图片内容（如果没有选中图片）
       if (!selectedItem.value || selectedItem.value.type !== 'image') {
         fullImageContent.value = null
       }
@@ -810,31 +882,81 @@ onMounted(async () => {
       if (typeof (window as any).gc === 'function') {
         (window as any).gc()
       }
-    }, 5 * 60 * 1000) // 5分钟
+      
+      // 清理时间格式化缓存
+      if (typeof formatTime === 'function' && formatTime.clearCache) {
+        formatTime.clearCache()
+      }
+    }, 2 * 60 * 1000) // 从5分钟减少到2分钟
   } catch (error) {
     console.error('Database error:', error)
   }
 })
 
 onUnmounted(() => {
+  console.log('组件卸载，开始清理资源...')
+  
+  // 清理键盘事件监听器
   window.removeEventListener('keydown', handleKeyDown)
   
   // 清理Tauri窗口焦点事件监听器
   if (unlistenFocus.value) {
     unlistenFocus.value()
+    unlistenFocus.value = null
+  }
+  
+  // 清理剪贴板事件监听器
+  if (unlistenClipboardText) {
+    unlistenClipboardText()
+    unlistenClipboardText = null
+  }
+  
+  if (unlistenClipboardImage) {
+    unlistenClipboardImage()
+    unlistenClipboardImage = null
   }
   
   // 清理定期内存清理定时器
   if (memoryCleanupInterval) {
     clearInterval(memoryCleanupInterval)
+    memoryCleanupInterval = null
   }
   
-  // 清理图片内容
+  // 清理图片内容，释放内存
   fullImageContent.value = null
   
-  // 清理剪贴板历史（可选，取决于是否要在组件卸载时保留历史）
-  // clipboardHistory.value = []
+  // 清空剪贴板历史（释放内存）
+  clipboardHistory.value.length = 0
+  
+  // 重置其他状态
+  selectedItem.value = null
+  searchQuery.value = ''
+  
+  // 清理数据库连接
+  if (db) {
+    // 注意：tauri-plugin-sql 的数据库连接通常由插件自动管理
+    db = null
+  }
+  
+  // 尝试手动触发垃圾回收
+  if (typeof (window as any).gc === 'function') {
+    console.log('手动触发垃圾回收')
+    ;(window as any).gc()
+  }
+  
+  console.log('资源清理完成')
 })
+
+// 添加剪贴板监听器重启功能
+const restartClipboardWatcher = async () => {
+  try {
+    console.log('重启剪贴板监听器...')
+    await invoke('start_new_clipboard_watcher')
+    console.log('剪贴板监听器重启成功')
+  } catch (error) {
+    console.error('重启剪贴板监听器失败:', error)
+  }
+}
 
 // 监听标签页变化
 watch(selectedTabIndex, () => {
@@ -905,22 +1027,31 @@ const resetDatabase = async () => {
   }
 }
 
-// 清理内存缓存函数
+// 增强的内存缓存清理函数
 const clearMemoryCache = async () => {
   try {
+    // 先调用后端清理
     await invoke('clear_memory_cache')
-    console.log('内存缓存已清理')
+    console.log('后端内存缓存已清理')
     
-    // 同时执行前端的内存清理
+    // 前端内存清理
     trimMemoryHistory()
     fullImageContent.value = null
     
-    // 手动触发垃圾回收（如果可用）
+    // 清理时间格式化缓存
+    if (typeof formatTime === 'function' && formatTime.clearCache) {
+      formatTime.clearCache()
+    }
+    
+    // 强制垃圾回收
     if (typeof (window as any).gc === 'function') {
       (window as any).gc()
     }
     
-    alert('内存缓存清理完成')
+    // 重启剪贴板监听器以清理可能的内存泄漏
+    await restartClipboardWatcher()
+    
+    alert('内存缓存清理完成，剪贴板监听器已重启')
   } catch (error) {
     console.error('清理内存缓存失败:', error)
     alert('清理内存缓存失败: ' + error)
@@ -989,6 +1120,13 @@ const clearMemoryCache = async () => {
             @click="openDevTools"
           >
             Dev Tools
+          </button>
+          <button 
+            class="px-3 py-2 text-sm font-medium text-green-600 hover:text-green-900 hover:bg-green-100 rounded-lg transition-colors duration-200"
+            @click="restartClipboardWatcher"
+            title="重启剪贴板监听器"
+          >
+            Restart Watcher
           </button>
           <button 
             class="px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors duration-200"

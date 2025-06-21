@@ -17,20 +17,21 @@ use sqlx::{self, Row, SqlitePool, sqlite::SqliteConnectOptions};
 use tokio;
 use tokio::sync::Mutex;
 use enigo::{Enigo, Key, Keyboard, Settings};
-use tauri::tray::{TrayIconBuilder, TrayIconEvent, MouseButton, MouseButtonState};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(target_os = "windows")]
 use winapi::um::{
-    winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, GetDC, ReleaseDC, DestroyIcon, DrawIconEx, FillRect},
+    winuser::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, GetDC, ReleaseDC, DestroyIcon},
     processthreadsapi::OpenProcess,
     handleapi::CloseHandle,
     psapi::GetModuleFileNameExW,
-    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_LARGEICON, ExtractIconExW},
+    shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, ExtractIconExW},
     winnt::PROCESS_QUERY_INFORMATION,
-    wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB, CreateSolidBrush},
+    wingdi::{CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, DeleteDC, DeleteObject, GetDIBits, BITMAPINFOHEADER, BITMAPINFO, DIB_RGB_COLORS, BI_RGB},
 };
 #[cfg(target_os = "windows")]
 use std::ptr;
@@ -52,6 +53,11 @@ struct DatabaseState {
     pool: SqlitePool,
 }
 
+// 剪贴板监听器控制
+struct ClipboardWatcherState {
+    should_stop: Arc<AtomicBool>,
+}
+
 const SETTINGS_FILE: &str = "clipboard_settings.json";
 
 fn settings_file_path() -> Result<PathBuf, String> {
@@ -65,21 +71,29 @@ struct SourceAppInfo {
     icon: Option<String>, // base64 encoded icon
 }
 
-// 添加图标缓存（使用静态变量）
+// 添加图标缓存（使用静态变量，增加缓存限制）
 static ICON_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, Option<String>>>>> = std::sync::OnceLock::new();
 
 fn get_icon_cache() -> &'static Arc<RwLock<HashMap<String, Option<String>>>> {
     ICON_CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
 }
 
-// 清理图标缓存（当缓存过大时）
+// 清理图标缓存（当缓存过大时）- 更严格的限制
 fn cleanup_icon_cache() {
     let cache = get_icon_cache();
     if let Ok(mut cache_guard) = cache.write() {
-        if cache_guard.len() > 50 {
-            // 清空缓存
-            cache_guard.clear();
-            println!("清理图标缓存");
+        if cache_guard.len() > 20 {  // 降低缓存限制从50到20
+            // 只保留最近使用的10个
+            let mut keys: Vec<String> = cache_guard.keys().cloned().collect();
+            keys.sort(); // 简单排序，在实际应用中可以使用LRU
+            
+            // 移除前面的旧缓存
+            let to_remove = keys.len() - 10;
+            for key in keys.iter().take(to_remove) {
+                cache_guard.remove(key);
+            }
+            
+            println!("清理图标缓存，保留 {} 项", cache_guard.len());
         }
     }
 }
@@ -165,7 +179,7 @@ fn get_active_window_info() -> SourceAppInfo {
                     if let Ok(mut cache) = icon_cache.write() {
                         cache.insert(exe_path_str, icon.clone());
                         // 检查是否需要清理缓存
-                        if cache.len() > 50 {
+                        if cache.len() > 20 {
                             drop(cache);
                             cleanup_icon_cache();
                         }
@@ -480,188 +494,233 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-fn start_clipboard_watcher(app: AppHandle) {
+fn start_clipboard_watcher(app: AppHandle) -> Arc<AtomicBool> {
+    let should_stop = Arc::new(AtomicBool::new(false));
+    let should_stop_clone = should_stop.clone();
+    
     thread::spawn(move || {
-        let mut clipboard = Clipboard::new().unwrap();
+        let mut clipboard = match Clipboard::new() {
+            Ok(cb) => cb,
+            Err(e) => {
+                println!("无法初始化剪贴板监听器: {}", e);
+                return;
+            }
+        };
+        
         let mut last_text = String::new();
         let mut last_image_hash = 0u64;
+        let mut cleanup_counter = 0u32;
         
         // 添加内存限制常量
-        const MAX_TEXT_LENGTH: usize = 1_000_000; // 1MB 文本限制
-        const MAX_IMAGE_SIZE: usize = 50_000_000; // 50MB 图片限制
+        const MAX_TEXT_LENGTH: usize = 500_000; // 降低文本限制从1MB到500KB
+        const MAX_IMAGE_SIZE: usize = 20_000_000; // 降低图片限制从50MB到20MB
 
-        loop {
-            // 检查文本
-            if let Ok(text) = clipboard.get_text() {
-                // 限制文本长度以防止内存溢出
-                if text.len() > MAX_TEXT_LENGTH {
-                    println!("警告：剪贴板文本过大，跳过: {} bytes", text.len());
-                    thread::sleep(Duration::from_millis(800));
-                    continue;
-                }
+        while !should_stop_clone.load(Ordering::Relaxed) {
+            // 定期清理计数器
+            cleanup_counter = cleanup_counter.wrapping_add(1);
+            
+            // 每100次循环（约80秒）执行一次内存清理
+            if cleanup_counter % 100 == 0 {
+                cleanup_icon_cache();
                 
-                if text != last_text {
-                    // 使用内存交换而不是克隆，减少内存分配
-                    last_text = text.clone();
-                    
-                    // 获取源应用信息
-                    let source_info = get_active_window_info();
-                    
-                    // 发送事件，包含文本内容和源应用信息
-                    let event_data = serde_json::json!({
-                        "content": text,
-                        "source_app_name": source_info.name,
-                        "source_app_icon": source_info.icon
-                    });
-                    app.emit("clipboard-text", event_data.to_string()).ok();
-                    
-                    // 清理大文本内容
-                    if last_text.len() > 100_000 {
-                        last_text.shrink_to_fit();
-                    }
-                }
-            }
-            // 检查图片
-            if let Ok(image) = clipboard.get_image() {
-                // 检查图片大小
-                let image_size = image.bytes.len();
-                if image_size > MAX_IMAGE_SIZE {
-                    println!("警告：剪贴板图片过大，跳过: {} bytes", image_size);
-                    thread::sleep(Duration::from_millis(800));
-                    continue;
-                }
-                
-                let hash = image.bytes.iter().fold(0u64, |acc, &b| acc.wrapping_add(b as u64));
-                if hash != last_image_hash {
-                    last_image_hash = hash;
-                    
-                    // 获取程序安装目录下的图片目录
-                    match get_app_images_dir() {
-                        Ok(images_dir) => {
-                            // 生成唯一的文件名
-                            let timestamp = chrono::Utc::now().timestamp_millis();
-                            let filename = format!("clipboard_{}.png", timestamp);
-                            let image_path = images_dir.join(&filename);
-                            
-                            // 转换图片并保存到文件
-                            println!("图片信息: 宽度={}, 高度={}, 数据长度={}", image.width, image.height, image.bytes.len());
-                            
-                            // 使用作用域限制图片处理的内存生命周期
-                            let save_result = {
-                                // 修复 Alpha 通道问题：Windows 剪贴板有时会将 Alpha 设为 0
-                                let mut fixed_bytes = image.bytes.to_vec();
-                                
-                                // 检查并修复 Alpha 通道
-                                let mut zero_alpha_count = 0;
-                                let total_pixels = (image.width * image.height) as usize;
-                                
-                                // 统计 Alpha 为 0 的像素数量
-                                for chunk in fixed_bytes.chunks_exact(4) {
-                                    if chunk[3] == 0 {
-                                        zero_alpha_count += 1;
-                                    }
-                                }
-                                
-                                println!("Alpha为0的像素: {}/{}", zero_alpha_count, total_pixels);
-                                
-                                // 如果大部分像素的 Alpha 都是 0，就将它们设为 255（不透明）
-                                if zero_alpha_count > total_pixels / 2 {
-                                    println!("修复 Alpha 通道：将透明像素设为不透明");
-                                    for chunk in fixed_bytes.chunks_exact_mut(4) {
-                                        if chunk[3] == 0 {
-                                            chunk[3] = 255; // 设为完全不透明
-                                        }
-                                    }
-                                }
-                                
-                                // 创建 DynamicImage 并让 image 库自动处理格式
-                                let img = match image::RgbaImage::from_raw(image.width as u32, image.height as u32, fixed_bytes) {
-                                    Some(rgba_img) => {
-                                        println!("使用修复后的数据创建 RGBA 成功");
-                                        image::DynamicImage::ImageRgba8(rgba_img)
-                                    },
-                                    None => {
-                                        println!("直接作为 RGBA 失败，尝试其他方法");
-                                        // 尝试 BGRA 到 RGBA 转换
-                                        let mut rgba_bytes = image.bytes.to_vec();
-                                        
-                                        // 将 BGRA 转换为 RGBA
-                                        for chunk in rgba_bytes.chunks_exact_mut(4) {
-                                            chunk.swap(0, 2); // 交换 B 和 R 通道
-                                        }
-                                        
-                                        match image::RgbaImage::from_raw(image.width as u32, image.height as u32, rgba_bytes) {
-                                            Some(rgba_img) => {
-                                                println!("BGRA->RGBA 转换成功");
-                                                image::DynamicImage::ImageRgba8(rgba_img)
-                                            },
-                                            None => {
-                                                println!("所有格式转换都失败，跳过此图片");
-                                                thread::sleep(Duration::from_millis(800));
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                };
-                                
-                                // 保存原图
-                                img.save(&image_path)
-                            };
-                            
-                            if save_result.is_ok() {
-                                println!("图片保存成功: {:?}", image_path);
-                                
-                                // 创建缩略图（使用新的作用域限制内存）
-                                let thumbnail_result = {
-                                    // 重新加载图片以创建缩略图，避免内存中保留大图
-                                    match image::open(&image_path) {
-                                        Ok(img) => {
-                                            // 创建一个小的缩略图
-                                            let thumbnail = img.resize(200, 200, image::imageops::FilterType::Lanczos3).to_rgba8();
-                                            let mut thumb_buf = Vec::with_capacity(50_000); // 预分配合理大小
-                                            
-                                            if image::codecs::png::PngEncoder::new(&mut thumb_buf)
-                                                .encode(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)
-                                                .is_ok() {
-                                                let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
-                                                Some(format!("data:image/png;base64,{}", thumb_b64))
-                                            } else {
-                                                None
-                                            }
-                                        },
-                                        Err(e) => {
-                                            println!("无法重新加载图片创建缩略图: {}", e);
-                                            None
-                                        }
-                                    }
-                                };
-                                
-                                if let Some(thumb_data_url) = thumbnail_result {
-                                    // 获取源应用信息
-                                    let source_info = get_active_window_info();
-                                    
-                                    // 发送事件，包含文件路径、缩略图和源应用信息
-                                    let event_data = serde_json::json!({
-                                        "path": image_path.to_string_lossy(),
-                                        "thumbnail": thumb_data_url,
-                                        "source_app_name": source_info.name,
-                                        "source_app_icon": source_info.icon
-                                    });
-                                    app.emit("clipboard-image", event_data.to_string()).ok();
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            println!("无法获取图片保存目录: {}", e);
-                        }
-                    }
+                // 强制收缩字符串容量
+                if last_text.capacity() > 1000 && last_text.len() < last_text.capacity() / 2 {
+                    last_text.shrink_to_fit();
                 }
             }
             
-            // 定期触发垃圾回收（通过作用域结束）
-            thread::sleep(Duration::from_millis(800));
+            // 检查文本 - 减少内存分配
+            match clipboard.get_text() {
+                Ok(text) => {
+                    // 限制文本长度以防止内存溢出
+                    if text.len() > MAX_TEXT_LENGTH {
+                        println!("警告：剪贴板文本过大，跳过: {} bytes", text.len());
+                        thread::sleep(Duration::from_millis(800));
+                        continue;
+                    }
+                    
+                    if text != last_text {
+                        // 获取源应用信息（优化：减少重复获取）
+                        let source_info = get_active_window_info();
+                        
+                        // 使用更高效的方式构建事件数据，避免过多的字符串分配
+                        let event_data = format!(
+                            r#"{{"content":"{}","source_app_name":"{}","source_app_icon":{}}}"#,
+                            text.replace('"', r#"\""#).replace('\n', r#"\n"#).replace('\r', r#"\r"#),
+                            source_info.name.replace('"', r#"\""#),
+                            match source_info.icon {
+                                Some(icon) => format!(r#""{}""#, icon),
+                                None => "null".to_string(),
+                            }
+                        );
+                        
+                        let _ = app.emit("clipboard-text", event_data);
+                        
+                        // 交换而不是克隆，减少内存分配
+                        last_text = text;
+                        
+                        // 定期清理大文本内容的容量
+                        if last_text.len() > 50_000 {
+                            last_text.shrink_to_fit();
+                        }
+                    }
+                }
+                Err(_) => {
+                    // 忽略剪贴板访问错误，继续监听
+                }
+            }
+            
+            // 检查图片 - 添加更多内存优化
+            match clipboard.get_image() {
+                Ok(image) => {
+                    // 检查图片大小
+                    let image_size = image.bytes.len();
+                    if image_size > MAX_IMAGE_SIZE {
+                        println!("警告：剪贴板图片过大，跳过: {} bytes", image_size);
+                        thread::sleep(Duration::from_millis(800));
+                        continue;
+                    }
+                    
+                    // 使用更快的哈希算法
+                    let hash = {
+                        let mut hasher = 0u64;
+                        let bytes = &image.bytes;
+                        let step = (bytes.len() / 1000).max(1); // 采样哈希，避免处理所有字节
+                        for i in (0..bytes.len()).step_by(step) {
+                            hasher = hasher.wrapping_mul(31).wrapping_add(bytes[i] as u64);
+                        }
+                        hasher
+                    };
+                    
+                    if hash != last_image_hash {
+                        last_image_hash = hash;
+                        
+                        // 获取程序安装目录下的图片目录
+                        match get_app_images_dir() {
+                            Ok(images_dir) => {
+                                // 生成唯一的文件名
+                                let timestamp = chrono::Utc::now().timestamp_millis();
+                                let filename = format!("clipboard_{}.png", timestamp);
+                                let image_path = images_dir.join(&filename);
+                                
+                                // 在限制作用域中处理图片，确保内存及时释放
+                                let processing_result = {
+                                    // 修复 Alpha 通道问题：Windows 剪贴板有时会将 Alpha 设为 0
+                                    let mut fixed_bytes = image.bytes.to_vec();
+                                    
+                                    // 检查并修复 Alpha 通道（优化：减少内存分配）
+                                    let total_pixels = (image.width * image.height) as usize;
+                                    let mut zero_alpha_count = 0;
+                                    
+                                    // 快速扫描Alpha通道
+                                    for chunk in fixed_bytes.chunks_exact(4) {
+                                        if chunk[3] == 0 {
+                                            zero_alpha_count += 1;
+                                        }
+                                    }
+                                    
+                                    // 如果大部分像素的 Alpha 都是 0，就将它们设为 255（不透明）
+                                    if zero_alpha_count > total_pixels / 2 {
+                                        for chunk in fixed_bytes.chunks_exact_mut(4) {
+                                            if chunk[3] == 0 {
+                                                chunk[3] = 255; // 设为完全不透明
+                                            }
+                                        }
+                                    }
+                                    
+                                    // 创建图片并保存
+                                    match image::RgbaImage::from_raw(image.width as u32, image.height as u32, fixed_bytes) {
+                                        Some(rgba_img) => {
+                                            let img = image::DynamicImage::ImageRgba8(rgba_img);
+                                            img.save(&image_path)
+                                        },
+                                        None => {
+                                            // 尝试 BGRA 到 RGBA 转换
+                                            let mut rgba_bytes = image.bytes.to_vec();
+                                            
+                                            // 将 BGRA 转换为 RGBA
+                                            for chunk in rgba_bytes.chunks_exact_mut(4) {
+                                                chunk.swap(0, 2); // 交换 B 和 R 通道
+                                            }
+                                            
+                                            match image::RgbaImage::from_raw(image.width as u32, image.height as u32, rgba_bytes) {
+                                                Some(rgba_img) => {
+                                                    let img = image::DynamicImage::ImageRgba8(rgba_img);
+                                                    img.save(&image_path)
+                                                },
+                                                None => {
+                                                    println!("所有格式转换都失败，跳过此图片");
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                    }
+                                };
+                                
+                                if processing_result.is_ok() {
+                                    // 创建缩略图（在新的作用域中，限制内存使用）
+                                    let thumbnail_result = {
+                                        match image::open(&image_path) {
+                                            Ok(img) => {
+                                                // 创建一个小的缩略图，限制最大尺寸
+                                                let thumbnail = img.resize(150, 150, image::imageops::FilterType::Lanczos3).to_rgba8();
+                                                let mut thumb_buf = Vec::with_capacity(30_000); // 预分配更小的缓冲区
+                                                
+                                                if image::codecs::png::PngEncoder::new(&mut thumb_buf)
+                                                    .write_image(&thumbnail, thumbnail.width(), thumbnail.height(), image::ColorType::Rgba8)
+                                                    .is_ok() {
+                                                    let thumb_b64 = general_purpose::STANDARD.encode(&thumb_buf);
+                                                    Some(format!("data:image/png;base64,{}", thumb_b64))
+                                                } else {
+                                                    None
+                                                }
+                                            },
+                                            Err(_) => None
+                                        }
+                                    };
+                                    
+                                    if let Some(thumb_data_url) = thumbnail_result {
+                                        // 获取源应用信息
+                                        let source_info = get_active_window_info();
+                                        
+                                        // 构建事件数据，减少内存分配
+                                        let event_data = format!(
+                                            r#"{{"path":"{}","thumbnail":"{}","source_app_name":"{}","source_app_icon":{}}}"#,
+                                            image_path.to_string_lossy().replace('"', r#"\""#),
+                                            thumb_data_url,
+                                            source_info.name.replace('"', r#"\""#),
+                                            match source_info.icon {
+                                                Some(icon) => format!(r#""{}""#, icon),
+                                                None => "null".to_string(),
+                                            }
+                                        );
+                                        
+                                        let _ = app.emit("clipboard-image", event_data);
+                                    }
+                                }
+                                
+                                // 明确释放图片数据内存
+                                drop(image);
+                            },
+                            Err(e) => {
+                                println!("无法获取图片保存目录: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    // 忽略图片获取错误
+                }
+            }
+            
+            // 稍微增加睡眠时间，减少CPU使用和内存压力
+            thread::sleep(Duration::from_millis(1000)); // 从800ms增加到1000ms
         }
+        
+        println!("剪贴板监听器已停止");
     });
+    
+    should_stop
 }
 
 #[tauri::command]
@@ -1193,6 +1252,37 @@ async fn clear_memory_cache() -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn stop_clipboard_watcher(app: AppHandle) -> Result<(), String> {
+    if let Some(watcher_state) = app.try_state::<ClipboardWatcherState>() {
+        watcher_state.should_stop.store(true, Ordering::Relaxed);
+        println!("剪贴板监听器停止信号已发送");
+        Ok(())
+    } else {
+        Err("无法找到剪贴板监听器状态".to_string())
+    }
+}
+
+#[tauri::command]
+async fn start_new_clipboard_watcher(app: AppHandle) -> Result<(), String> {
+    // 停止现有的监听器
+    if let Some(watcher_state) = app.try_state::<ClipboardWatcherState>() {
+        watcher_state.should_stop.store(true, Ordering::Relaxed);
+    }
+    
+    // 等待一段时间让旧监听器停止
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    
+    // 启动新的监听器
+    let should_stop = start_clipboard_watcher(app.clone());
+    
+    // 更新状态
+    app.manage(ClipboardWatcherState { should_stop });
+    
+    println!("新的剪贴板监听器已启动");
+    Ok(())
+}
+
+#[tauri::command]
 async fn reset_database(app: AppHandle) -> Result<(), String> {
     println!("开始重置数据库...");
     
@@ -1323,7 +1413,10 @@ pub fn run() {
         )
         .setup(|app| {
             let app_handle = app.handle().clone();
-            start_clipboard_watcher(app_handle.clone());
+            let should_stop = start_clipboard_watcher(app_handle.clone());
+            
+            // 将剪贴板监听器的停止控制保存到应用状态
+            app.manage(ClipboardWatcherState { should_stop: should_stop.clone() });
 
             // 创建系统托盘菜单
             let show_hide_item = MenuItem::with_id(app, "toggle", "显示/隐藏", true, None::<&str>)?;
@@ -1334,7 +1427,7 @@ pub fn run() {
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .menu_on_left_click(false)
+                .show_menu_on_left_click(false)
                 .tooltip("Clipboard Manager")
                 .on_tray_icon_event(|tray, event| {
                     match event {
@@ -1381,37 +1474,47 @@ pub fn run() {
                         _ => {}
                     }
                 })
-                .on_menu_event(|app, event| {
-                    match event.id().as_ref() {
-                        "toggle" => {
-                            if let Some(window) = app.get_webview_window("main") {
-                                match window.is_visible() {
-                                    Ok(true) => {
-                                        let _ = window.hide();
-                                    }
-                                    Ok(false) => {
-                                        let _ = window.show();
-                                        let _ = window.set_focus();
-                                        // 添加小延迟确保窗口完全显示
-                                        std::thread::sleep(std::time::Duration::from_millis(50));
-                                        // 再次设置焦点，确保焦点在 webview 上
-                                        let _ = window.set_focus();
-                                    }
-                                    Err(_) => {
-                                        let _ = window.show();
-                                        let _ = window.set_focus();
-                                        // 添加小延迟确保窗口完全显示
-                                        std::thread::sleep(std::time::Duration::from_millis(50));
-                                        // 再次设置焦点，确保焦点在 webview 上
-                                        let _ = window.set_focus();
+                .on_menu_event({
+                    let should_stop_clone = should_stop.clone();
+                    move |app, event| {
+                        match event.id().as_ref() {
+                            "toggle" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    match window.is_visible() {
+                                        Ok(true) => {
+                                            let _ = window.hide();
+                                        }
+                                        Ok(false) => {
+                                            let _ = window.show();
+                                            let _ = window.set_focus();
+                                            // 添加小延迟确保窗口完全显示
+                                            std::thread::sleep(std::time::Duration::from_millis(50));
+                                            // 再次设置焦点，确保焦点在 webview 上
+                                            let _ = window.set_focus();
+                                        }
+                                        Err(_) => {
+                                            let _ = window.show();
+                                            let _ = window.set_focus();
+                                            // 添加小延迟确保窗口完全显示
+                                            std::thread::sleep(std::time::Duration::from_millis(50));
+                                            // 再次设置焦点，确保焦点在 webview 上
+                                            let _ = window.set_focus();
+                                        }
                                     }
                                 }
                             }
+                            "quit" => {
+                                // 停止剪贴板监听器
+                                should_stop_clone.store(true, Ordering::Relaxed);
+                                println!("正在停止剪贴板监听器...");
+                                
+                                // 等待一小段时间让监听器线程停止
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                                
+                                app.exit(0);
+                            }
+                            _ => {}
                         }
-                        "quit" => {
-                            app.exit(0);
-                        }
-                        _ => {}
                     }
                 })
                 .build(app)?;
@@ -1462,7 +1565,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file, clear_memory_cache])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file, clear_memory_cache, stop_clipboard_watcher, start_new_clipboard_watcher])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
