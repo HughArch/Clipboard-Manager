@@ -45,20 +45,7 @@ try {
   log('yellow', '📥 拉取最新代码...');
   execSync('git pull origin main', { stdio: 'inherit' });
 
-  // 3. 安装依赖
-  log('yellow', '📦 安装依赖...');
-  execSync('npm install', { stdio: 'inherit' });
-
-  // 4. 运行测试（如果有的话）
-  log('yellow', '🧪 运行构建测试...');
-  try {
-    execSync('npm run build', { stdio: 'inherit' });
-  } catch (error) {
-    log('red', '❌ 构建失败，请检查代码');
-    process.exit(1);
-  }
-
-  // 5. 更新版本号
+  // 3. 更新版本号
   log('yellow', '📝 更新版本号...');
   
   let newVersion;
@@ -72,30 +59,30 @@ try {
     execSync(`npm version ${newVersion} --no-git-tag-version`, { stdio: 'inherit' });
   }
 
-  // 6. 更新 Tauri 配置文件中的版本号
+  // 4. 更新 Tauri 配置文件中的版本号
   log('yellow', '🔧 更新 Tauri 配置...');
   const tauriConfigPath = path.join(__dirname, '../src-tauri/tauri.conf.json');
   const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, 'utf8'));
   tauriConfig.version = newVersion;
   fs.writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2));
 
-  // 7. 更新 Cargo.toml 中的版本号
+  // 5. 更新 Cargo.toml 中的版本号
   log('yellow', '🦀 更新 Cargo.toml...');
   const cargoTomlPath = path.join(__dirname, '../src-tauri/Cargo.toml');
   let cargoContent = fs.readFileSync(cargoTomlPath, 'utf8');
   cargoContent = cargoContent.replace(/^version = ".*"$/m, `version = "${newVersion}"`);
   fs.writeFileSync(cargoTomlPath, cargoContent);
 
-  // 8. 提交更改
+  // 6. 提交更改
   log('yellow', '💾 提交版本更改...');
   execSync('git add .', { stdio: 'inherit' });
   execSync(`git commit -m "chore: bump version to v${newVersion}"`, { stdio: 'inherit' });
 
-  // 9. 创建标签
+  // 7. 创建标签
   log('yellow', '🏷️  创建版本标签...');
   execSync(`git tag v${newVersion}`, { stdio: 'inherit' });
 
-  // 10. 推送到远程仓库
+  // 8. 推送到远程仓库
   log('yellow', '📤 推送到远程仓库...');
   execSync('git push origin main', { stdio: 'inherit' });
   execSync(`git push origin v${newVersion}`, { stdio: 'inherit' });
