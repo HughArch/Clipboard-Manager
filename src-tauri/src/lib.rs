@@ -535,10 +535,9 @@ fn start_clipboard_watcher(app: AppHandle) {
                 if hash != last_image_hash {
                     last_image_hash = hash;
                     
-                    // 获取应用数据目录
-                    if let Ok(app_data_dir) = app.path().app_data_dir() {
-                        let images_dir = app_data_dir.join("images");
-                        if std::fs::create_dir_all(&images_dir).is_ok() {
+                    // 获取程序安装目录下的图片目录
+                    match get_app_images_dir() {
+                        Ok(images_dir) => {
                             // 生成唯一的文件名
                             let timestamp = chrono::Utc::now().timestamp_millis();
                             let filename = format!("clipboard_{}.png", timestamp);
@@ -651,6 +650,9 @@ fn start_clipboard_watcher(app: AppHandle) {
                                     app.emit("clipboard-image", event_data.to_string()).ok();
                                 }
                             }
+                        },
+                        Err(e) => {
+                            println!("无法获取图片保存目录: {}", e);
                         }
                     }
                 }
@@ -679,6 +681,26 @@ async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), Strin
 // 获取应用程序的可执行文件路径
 fn get_app_exe_path() -> Result<PathBuf, String> {
     env::current_exe().map_err(|e| format!("无法获取应用程序路径: {}", e))
+}
+
+// 获取应用程序安装目录下的图片目录
+fn get_app_images_dir() -> Result<PathBuf, String> {
+    let exe_path = get_app_exe_path()?;
+    
+    // 获取可执行文件所在的目录
+    let exe_dir = exe_path.parent()
+        .ok_or("无法获取程序目录")?;
+    
+    // 在程序目录下创建 images 文件夹
+    let images_dir = exe_dir.join("images");
+    
+    // 确保目录存在
+    if !images_dir.exists() {
+        std::fs::create_dir_all(&images_dir)
+            .map_err(|e| format!("无法创建图片目录: {}", e))?;
+    }
+    
+    Ok(images_dir)
 }
 
 // Windows 注册表操作
@@ -980,8 +1002,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     }
     
     // 3. 清理孤立的图片文件（数据库中没有对应记录的文件）
-    if let Ok(app_data_dir) = app.path().app_data_dir() {
-        let images_dir = app_data_dir.join("images");
+    if let Ok(images_dir) = get_app_images_dir() {
         if images_dir.exists() {
             match std::fs::read_dir(&images_dir) {
                 Ok(entries) => {
@@ -1210,8 +1231,7 @@ async fn reset_database(app: AppHandle) -> Result<(), String> {
         println!("已删除 {} 个图片文件", all_images.len());
         
         // 删除整个图片目录（如果存在且为空）
-        if let Ok(app_data_dir) = app.path().app_data_dir() {
-            let images_dir = app_data_dir.join("images");
+        if let Ok(images_dir) = get_app_images_dir() {
             if images_dir.exists() {
                 if let Err(e) = std::fs::remove_dir(&images_dir) {
                     println!("删除图片目录失败（可能不为空）: {}", e);
