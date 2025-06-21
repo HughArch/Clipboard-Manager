@@ -1,26 +1,23 @@
 # Cargo配置文件 - 优化构建性能
 
 [build]
-# 使用所有可用的CPU核心进行并行编译
-jobs = 0  # 0 表示使用所有可用核心
+# 使用大部分可用的CPU核心进行并行编译，但不是全部以避免系统卡死
+jobs = 4
 
 [net]
 # 网络重试配置
 retry = 10
-timeout = 300
 
 [registries.crates-io]
 protocol = "sparse"
 
 # Windows特定优化
 [target.x86_64-pc-windows-msvc]
-# 使用更快的链接器
-linker = "lld-link"
+# 注释掉可能不存在的链接器配置
+# linker = "lld-link"
 
 [env]
 # 启用增量编译缓存
 CARGO_INCREMENTAL = "1"
-# 设置更大的网络超时
-CARGO_NET_TIMEOUT = "300"
 # 启用并行前端
 CARGO_BUILD_PIPELINING = "true" 
