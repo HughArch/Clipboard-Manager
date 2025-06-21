@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-new-clipboard-watcher"
+description = "Enables the start_new_clipboard_watcher command without any pre-configured scope."
+commands.allow = ["start_new_clipboard_watcher"]
+
+[[permission]]
+identifier = "deny-start-new-clipboard-watcher"
+description = "Denies the start_new_clipboard_watcher command without any pre-configured scope."
+commands.deny = ["start_new_clipboard_watcher"]

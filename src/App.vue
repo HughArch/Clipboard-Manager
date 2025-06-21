@@ -64,6 +64,10 @@ let unlistenClipboardText: (() => void) | null = null
 let unlistenClipboardImage: (() => void) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 
+// 防重复机制：记录最近处理的图片
+let lastImageProcessTime = 0
+let lastImagePath = ''
+
 // 优化的内存管理函数（更激进的清理策略）
 const trimMemoryHistory = () => {
   // 如果不是在搜索状态，且历史记录超过限制，移除最旧的非收藏条目
@@ -781,6 +785,19 @@ onMounted(async () => {
         const sourceAppName = eventData.source_app_name || 'Unknown'
         const sourceAppIcon = eventData.source_app_icon || null
         
+        // 时间窗口重复检测（防止短时间内的重复事件）
+        const currentTime = Date.now()
+        const timeDiff = currentTime - lastImageProcessTime
+        
+        if (imagePath === lastImagePath && timeDiff < 2000) { // 2秒内的相同路径视为重复
+          console.log('检测到时间窗口内的重复图片事件，跳过:', imagePath)
+          return
+        }
+        
+        // 更新最近处理记录
+        lastImageProcessTime = currentTime
+        lastImagePath = imagePath
+        
         // 检查缩略图大小
         if (thumbnail && thumbnail.length > MAX_IMAGE_PREVIEW_SIZE) {
           console.warn('缩略图过大，跳过内存存储')
@@ -868,7 +885,7 @@ onMounted(async () => {
       unlistenResize()
     })
 
-    // 设置更频繁的内存清理（每2分钟执行一次，更激进）
+    // 设置更频繁的内存清理（每30秒执行一次，更激进的内存管理）
     memoryCleanupInterval = setInterval(() => {
       console.log('执行定期内存清理')
       trimMemoryHistory()
@@ -877,6 +894,22 @@ onMounted(async () => {
       if (!selectedItem.value || selectedItem.value.type !== 'image') {
         fullImageContent.value = null
       }
+      
+      // 更积极的历史记录清理
+      if (clipboardHistory.value.length > 200) {
+        clipboardHistory.value = clipboardHistory.value.slice(0, 150)
+        console.log('剪贴板历史记录已清理到150条')
+      }
+      
+      // 清理大文本内容
+      clipboardHistory.value.forEach(item => {
+        if (item.content && item.content.length > 3000) {
+          // 对于长文本，只保留前300字符用于显示
+          if (!item.displayContent) {
+            item.displayContent = item.content.substring(0, 300) + '...'
+          }
+        }
+      })
       
       // 手动触发垃圾回收（如果可用）
       if (typeof (window as any).gc === 'function') {
@@ -887,7 +920,7 @@ onMounted(async () => {
       if (typeof formatTime === 'function' && formatTime.clearCache) {
         formatTime.clearCache()
       }
-    }, 2 * 60 * 1000) // 从5分钟减少到2分钟
+    }, 30 * 1000) // 从2分钟减少到30秒
   } catch (error) {
     console.error('Database error:', error)
   }
@@ -1057,6 +1090,44 @@ const clearMemoryCache = async () => {
     alert('清理内存缓存失败: ' + error)
   }
 }
+
+// 强制内存清理函数（更激进）
+const forceMemoryCleanup = async () => {
+  try {
+    console.log('开始强制内存清理...')
+    
+    // 调用后端强制清理
+    const result = await invoke('force_memory_cleanup') as string
+    console.log('后端强制清理结果:', result)
+    
+    // 前端激进清理
+    clipboardHistory.value = clipboardHistory.value.slice(0, 50) // 只保留50条
+    fullImageContent.value = null
+    selectedItem.value = null
+    searchQuery.value = ''
+    
+    // 清理所有可能的缓存
+    if (typeof formatTime === 'function' && formatTime.clearCache) {
+      formatTime.clearCache()
+    }
+    
+    // 多次强制垃圾回收
+    for (let i = 0; i < 3; i++) {
+      if (typeof (window as any).gc === 'function') {
+        (window as any).gc()
+      }
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    
+    // 重启剪贴板监听器
+    await restartClipboardWatcher()
+    
+    alert(`强制内存清理完成！\n${result}\n历史记录已减少到50条`)
+  } catch (error) {
+    console.error('强制内存清理失败:', error)
+    alert('强制内存清理失败: ' + error)
+  }
+}
 </script>
 
 <template>
@@ -1134,6 +1205,13 @@ const clearMemoryCache = async () => {
             title="清理内存缓存"
           >
             Clear Cache
+          </button>
+          <button 
+            class="px-3 py-2 text-sm font-medium text-purple-600 hover:text-purple-900 hover:bg-purple-100 rounded-lg transition-colors duration-200"
+            @click="forceMemoryCleanup"
+            title="强制内存清理（激进模式）"
+          >
+            Force Clean
           </button>
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"

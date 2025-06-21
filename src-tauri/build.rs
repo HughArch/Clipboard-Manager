@@ -12,7 +12,10 @@ fn main() {
                 "paste_to_clipboard",
                 "reset_database",
                 "load_image_file",
-                "clear_memory_cache"
+                "clear_memory_cache",
+                "force_memory_cleanup",
+                "start_new_clipboard_watcher",
+                "stop_clipboard_watcher"
             ]))
     ).unwrap();
 }

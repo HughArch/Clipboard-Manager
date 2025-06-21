@@ -71,6 +71,21 @@
       "commands": ["clear_memory_cache"]
     },
     {
+      "identifier": "allow-force-memory-cleanup",
+      "description": "Allows forcing memory cleanup",
+      "commands": ["force_memory_cleanup"]
+    },
+    {
+      "identifier": "allow-start-new-clipboard-watcher",
+      "description": "Allows starting a new clipboard watcher",
+      "commands": ["start_new_clipboard_watcher"]
+    },
+    {
+      "identifier": "allow-stop-clipboard-watcher",
+      "description": "Allows stopping the clipboard watcher",
+      "commands": ["stop_clipboard_watcher"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

@@ -19,7 +19,7 @@ use tokio::sync::Mutex;
 use enigo::{Enigo, Key, Keyboard, Settings};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -71,36 +71,134 @@ struct SourceAppInfo {
     icon: Option<String>, // base64 encoded icon
 }
 
-// 添加图标缓存（使用静态变量，增加缓存限制）
-static ICON_CACHE: std::sync::OnceLock<Arc<RwLock<HashMap<String, Option<String>>>>> = std::sync::OnceLock::new();
+// 改进的图标缓存，使用LRU和更严格的内存管理
+use std::collections::BTreeMap;
 
-fn get_icon_cache() -> &'static Arc<RwLock<HashMap<String, Option<String>>>> {
-    ICON_CACHE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
+struct IconCacheEntry {
+    icon: Option<String>,
+    access_time: std::time::Instant,
 }
 
-// 清理图标缓存（当缓存过大时）- 更严格的限制
+struct IconCache {
+    cache: HashMap<String, IconCacheEntry>,
+    access_order: BTreeMap<std::time::Instant, String>,
+    max_size: usize,
+}
+
+impl IconCache {
+    fn new(max_size: usize) -> Self {
+        Self {
+            cache: HashMap::new(),
+            access_order: BTreeMap::new(),
+            max_size,
+        }
+    }
+
+    fn get(&mut self, key: &str) -> Option<Option<String>> {
+        if let Some(entry) = self.cache.get_mut(key) {
+            // 更新访问时间
+            self.access_order.remove(&entry.access_time);
+            entry.access_time = std::time::Instant::now();
+            self.access_order.insert(entry.access_time, key.to_string());
+            Some(entry.icon.clone())
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, key: String, icon: Option<String>) {
+        let now = std::time::Instant::now();
+        
+        // 如果缓存已满，移除最旧的条目
+        while self.cache.len() >= self.max_size {
+            if let Some((oldest_time, oldest_key)) = self.access_order.pop_first() {
+                self.cache.remove(&oldest_key);
+            } else {
+                break;
+            }
+        }
+
+        let entry = IconCacheEntry {
+            icon,
+            access_time: now,
+        };
+
+        self.cache.insert(key.clone(), entry);
+        self.access_order.insert(now, key);
+    }
+
+    fn clear(&mut self) {
+        self.cache.clear();
+        self.access_order.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.cache.len()
+    }
+}
+
+// 使用改进的图标缓存
+static ICON_CACHE: std::sync::OnceLock<Arc<RwLock<IconCache>>> = std::sync::OnceLock::new();
+
+fn get_icon_cache() -> &'static Arc<RwLock<IconCache>> {
+    ICON_CACHE.get_or_init(|| Arc::new(RwLock::new(IconCache::new(10)))) // 减少到10个条目
+}
+
+// 更严格的图标缓存清理
 fn cleanup_icon_cache() {
     let cache = get_icon_cache();
     if let Ok(mut cache_guard) = cache.write() {
-        if cache_guard.len() > 20 {  // 降低缓存限制从50到20
-            // 只保留最近使用的10个
-            let mut keys: Vec<String> = cache_guard.keys().cloned().collect();
-            keys.sort(); // 简单排序，在实际应用中可以使用LRU
-            
-            // 移除前面的旧缓存
-            let to_remove = keys.len() - 10;
-            for key in keys.iter().take(to_remove) {
-                cache_guard.remove(key);
+        if cache_guard.len() > 5 {  // 只保留5个最新的
+            // 清空一半缓存
+            let to_clear = cache_guard.len() / 2;
+            for _ in 0..to_clear {
+                if let Some((oldest_time, oldest_key)) = cache_guard.access_order.pop_first() {
+                    cache_guard.cache.remove(&oldest_key);
+                } else {
+                    break;
+                }
             }
-            
             println!("清理图标缓存，保留 {} 项", cache_guard.len());
         }
     }
 }
 
-// 获取当前活动窗口的应用程序信息
+// 添加限流机制，避免频繁获取窗口信息
+static LAST_WINDOW_INFO_CALL: std::sync::OnceLock<Arc<RwLock<(std::time::Instant, Option<SourceAppInfo>)>>> = std::sync::OnceLock::new();
+
+fn get_last_window_info() -> &'static Arc<RwLock<(std::time::Instant, Option<SourceAppInfo>)>> {
+    LAST_WINDOW_INFO_CALL.get_or_init(|| {
+        Arc::new(RwLock::new((std::time::Instant::now() - Duration::from_secs(10), None)))
+    })
+}
+
+// 获取当前活动窗口的应用程序信息（增加限流）
 #[cfg(target_os = "windows")]
 fn get_active_window_info() -> SourceAppInfo {
+    // 检查是否需要限流（每5秒最多调用一次）
+    let cache_duration = Duration::from_secs(5);
+    
+    if let Ok(guard) = get_last_window_info().read() {
+        if guard.0.elapsed() < cache_duration {
+            if let Some(ref cached_info) = guard.1 {
+                return cached_info.clone();
+            }
+        }
+    }
+
+    let new_info = get_active_window_info_impl();
+    
+    // 更新缓存
+    if let Ok(mut guard) = get_last_window_info().write() {
+        guard.0 = std::time::Instant::now();
+        guard.1 = Some(new_info.clone());
+    }
+
+    new_info
+}
+
+#[cfg(target_os = "windows")]
+fn get_active_window_info_impl() -> SourceAppInfo {
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
@@ -111,7 +209,7 @@ fn get_active_window_info() -> SourceAppInfo {
         }
 
         // 获取窗口标题
-        let mut window_title = [0u16; 512];
+        let mut window_title = [0u16; 256]; // 减少缓冲区大小
         let title_len = GetWindowTextW(hwnd, window_title.as_mut_ptr(), window_title.len() as i32);
         
         // 获取进程ID
@@ -135,7 +233,7 @@ fn get_active_window_info() -> SourceAppInfo {
         }
 
         // 获取进程可执行文件路径
-        let mut exe_path = [0u16; 512];
+        let mut exe_path = [0u16; 256]; // 减少缓冲区大小
         let path_len = GetModuleFileNameExW(process_handle, ptr::null_mut(), exe_path.as_mut_ptr(), exe_path.len() as u32);
         
         CloseHandle(process_handle);
@@ -158,7 +256,7 @@ fn get_active_window_info() -> SourceAppInfo {
             "Unknown".to_string()
         };
 
-        // 获取应用程序图标（使用缓存）
+        // 获取应用程序图标（使用改进的缓存）
         let icon_base64 = if path_len > 0 {
             let exe_path_str = OsString::from_wide(&exe_path[..path_len as usize])
                 .to_string_lossy()
@@ -166,25 +264,13 @@ fn get_active_window_info() -> SourceAppInfo {
             
             // 先检查缓存
             let icon_cache = get_icon_cache();
-            if let Ok(cache) = icon_cache.read() {
+            if let Ok(mut cache) = icon_cache.write() {
                 if let Some(cached_icon) = cache.get(&exe_path_str) {
-                    cached_icon.clone()
+                    cached_icon
                 } else {
-                    drop(cache); // 释放读锁
-                    
                     // 获取图标
                     let icon = get_app_icon_base64(&exe_path[..path_len as usize]);
-                    
-                    // 存入缓存
-                    if let Ok(mut cache) = icon_cache.write() {
-                        cache.insert(exe_path_str, icon.clone());
-                        // 检查是否需要清理缓存
-                        if cache.len() > 20 {
-                            drop(cache);
-                            cleanup_icon_cache();
-                        }
-                    }
-                    
+                    cache.insert(exe_path_str, icon.clone());
                     icon
                 }
             } else {
@@ -219,8 +305,10 @@ fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
         if icon_count > 0 && !large_icons[0].is_null() {
             let icon_base64 = hicon_to_base64(large_icons[0]);
             
-            // 清理图标资源
-            DestroyIcon(large_icons[0]);
+            // 确保清理图标资源
+            if !large_icons[0].is_null() {
+                DestroyIcon(large_icons[0]);
+            }
             if !small_icons[0].is_null() {
                 DestroyIcon(small_icons[0]);
             }
@@ -228,6 +316,14 @@ fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
             if icon_base64.is_some() {
                 return icon_base64;
             }
+        }
+
+        // 清理可能分配的图标句柄
+        if !large_icons[0].is_null() {
+            DestroyIcon(large_icons[0]);
+        }
+        if !small_icons[0].is_null() {
+            DestroyIcon(small_icons[0]);
         }
 
         // 方法2: 如果 ExtractIconEx 失败，回退到 SHGetFileInfoW
@@ -242,7 +338,7 @@ fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
 
         if result != 0 && !shfi.hIcon.is_null() {
             let icon_base64 = hicon_to_base64(shfi.hIcon);
-            DestroyIcon(shfi.hIcon);
+            DestroyIcon(shfi.hIcon); // 确保释放图标句柄
             icon_base64
         } else {
             None
@@ -268,8 +364,8 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
             return None;
         }
 
-        // 创建位图 - 使用更大的尺寸获得最佳质量
-        let icon_size = 48; // 使用48x48像素获得最佳质量
+        // 减小图标尺寸以减少内存使用（从48改为32）
+        let icon_size = 32;
         let bitmap = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
         if bitmap.is_null() {
             DeleteDC(mem_dc);
@@ -280,18 +376,20 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
         // 选择位图到内存 DC
         let old_bitmap = SelectObject(mem_dc, bitmap as *mut winapi::ctypes::c_void);
         
-        // 先填充白色背景，确保透明区域正确处理
-        let white_brush = winapi::um::wingdi::CreateSolidBrush(0xFFFFFF); // 白色
-        let rect = winapi::shared::windef::RECT {
-            left: 0,
-            top: 0,
-            right: icon_size,
-            bottom: icon_size,
-        };
-        winapi::um::winuser::FillRect(mem_dc, &rect, white_brush);
-        winapi::um::wingdi::DeleteObject(white_brush as *mut winapi::ctypes::c_void);
+        // 填充白色背景
+        let white_brush = winapi::um::wingdi::CreateSolidBrush(0xFFFFFF);
+        if !white_brush.is_null() {
+            let rect = winapi::shared::windef::RECT {
+                left: 0,
+                top: 0,
+                right: icon_size,
+                bottom: icon_size,
+            };
+            winapi::um::winuser::FillRect(mem_dc, &rect, white_brush);
+            winapi::um::wingdi::DeleteObject(white_brush as *mut winapi::ctypes::c_void);
+        }
 
-        // 绘制图标到位图，使用高质量绘制选项
+        // 绘制图标到位图
         let draw_result = winapi::um::winuser::DrawIconEx(
             mem_dc, 
             0, 
@@ -303,50 +401,49 @@ fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
             ptr::null_mut(), 
             0x0003 // DI_NORMAL
         );
-        if draw_result == 0 {
-            SelectObject(mem_dc, old_bitmap);
-            DeleteObject(bitmap as *mut winapi::ctypes::c_void);
-            DeleteDC(mem_dc);
-            ReleaseDC(ptr::null_mut(), screen_dc);
-            return None;
-        }
 
-        // 准备位图信息结构
-        let mut bitmap_info: BITMAPINFO = mem::zeroed();
-        bitmap_info.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
-        bitmap_info.bmiHeader.biWidth = icon_size;
-        bitmap_info.bmiHeader.biHeight = -icon_size; // 负值表示自上而下
-        bitmap_info.bmiHeader.biPlanes = 1;
-        bitmap_info.bmiHeader.biBitCount = 32; // RGBA
-        bitmap_info.bmiHeader.biCompression = BI_RGB;
+        let result = if draw_result != 0 {
+            // 准备位图信息结构
+            let mut bitmap_info: BITMAPINFO = mem::zeroed();
+            bitmap_info.bmiHeader.biSize = mem::size_of::<BITMAPINFOHEADER>() as u32;
+            bitmap_info.bmiHeader.biWidth = icon_size;
+            bitmap_info.bmiHeader.biHeight = -icon_size; // 负值表示自上而下
+            bitmap_info.bmiHeader.biPlanes = 1;
+            bitmap_info.bmiHeader.biBitCount = 32; // RGBA
+            bitmap_info.bmiHeader.biCompression = BI_RGB;
 
-        // 分配缓冲区
-        let buffer_size = (icon_size * icon_size * 4) as usize;
-        let mut buffer: Vec<u8> = vec![0; buffer_size];
+            // 分配缓冲区
+            let buffer_size = (icon_size * icon_size * 4) as usize;
+            let mut buffer: Vec<u8> = vec![0; buffer_size];
 
-        // 获取位图数据
-        let lines = GetDIBits(
-            mem_dc,
-            bitmap,
-            0,
-            icon_size as u32,
-            buffer.as_mut_ptr() as *mut winapi::ctypes::c_void,
-            &mut bitmap_info,
-            DIB_RGB_COLORS,
-        );
+            // 获取位图数据
+            let lines = GetDIBits(
+                mem_dc,
+                bitmap,
+                0,
+                icon_size as u32,
+                buffer.as_mut_ptr() as *mut winapi::ctypes::c_void,
+                &mut bitmap_info,
+                DIB_RGB_COLORS,
+            );
 
-        // 清理资源
+            if lines > 0 {
+                // 转换 BGRA 到 RGBA 并编码为 PNG
+                convert_bgra_to_png_base64(&buffer, icon_size as u32, icon_size as u32)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // 确保清理所有GDI资源
         SelectObject(mem_dc, old_bitmap);
         DeleteObject(bitmap as *mut winapi::ctypes::c_void);
         DeleteDC(mem_dc);
         ReleaseDC(ptr::null_mut(), screen_dc);
 
-        if lines == 0 {
-            return None;
-        }
-
-        // 转换 BGRA 到 RGBA 并编码为 PNG
-        convert_bgra_to_png_base64(&buffer, icon_size as u32, icon_size as u32)
+        result
     }
 }
 
@@ -362,11 +459,11 @@ fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> Opti
         rgba_data.push(chunk[3]); // A
     }
 
-    // 使用 image crate 编码为高质量 PNG
+    // 使用 image crate 编码为PNG
     let img = image::RgbaImage::from_raw(width, height, rgba_data)?;
     let mut png_buffer = Vec::new();
     
-    // 使用高质量PNG编码设置
+    // 使用PNG编码设置
     let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
     
     if encoder.write_image(&img, width, height, image::ColorType::Rgba8).is_ok() {
@@ -510,97 +607,210 @@ fn start_clipboard_watcher(app: AppHandle) -> Arc<AtomicBool> {
         let mut last_text = String::new();
         let mut last_image_hash = 0u64;
         let mut cleanup_counter = 0u32;
+        let mut last_window_check = std::time::Instant::now();
+        let mut cached_source_info: Option<SourceAppInfo> = None;
+        let mut recent_image_filenames: VecDeque<String> = VecDeque::with_capacity(10);
         
-        // 添加内存限制常量
-        const MAX_TEXT_LENGTH: usize = 500_000; // 降低文本限制从1MB到500KB
-        const MAX_IMAGE_SIZE: usize = 20_000_000; // 降低图片限制从50MB到20MB
+        // 更严格的内存限制
+        const MAX_TEXT_LENGTH: usize = 100_000; // 降低到100KB
+        const MAX_IMAGE_SIZE: usize = 10_000_000; // 降低到10MB
+        const WINDOW_CHECK_INTERVAL: Duration = Duration::from_secs(3); // 每3秒检查一次活动窗口
 
         while !should_stop_clone.load(Ordering::Relaxed) {
-            // 定期清理计数器
+            // 更频繁的清理
             cleanup_counter = cleanup_counter.wrapping_add(1);
             
-            // 每100次循环（约80秒）执行一次内存清理
-            if cleanup_counter % 100 == 0 {
+            // 每50次循环（约50秒）执行一次内存清理
+            if cleanup_counter % 50 == 0 {
                 cleanup_icon_cache();
                 
-                // 强制收缩字符串容量
-                if last_text.capacity() > 1000 && last_text.len() < last_text.capacity() / 2 {
+                // 更积极的字符串容量管理
+                if last_text.capacity() > 500 && last_text.len() < last_text.capacity() / 3 {
                     last_text.shrink_to_fit();
+                }
+                
+                // 清理缓存的窗口信息
+                if cleanup_counter % 200 == 0 {
+                    cached_source_info = None;
                 }
             }
             
-            // 检查文本 - 减少内存分配
+            // 检查文本 - 优化内存使用
             match clipboard.get_text() {
                 Ok(text) => {
-                    // 限制文本长度以防止内存溢出
+                    // 更严格的文本长度限制
                     if text.len() > MAX_TEXT_LENGTH {
                         println!("警告：剪贴板文本过大，跳过: {} bytes", text.len());
-                        thread::sleep(Duration::from_millis(800));
+                        thread::sleep(Duration::from_millis(1200)); // 增加等待时间
                         continue;
                     }
                     
                     if text != last_text {
-                        // 获取源应用信息（优化：减少重复获取）
-                        let source_info = get_active_window_info();
+                        // 优化窗口信息获取 - 减少频率
+                        let source_info = if last_window_check.elapsed() > WINDOW_CHECK_INTERVAL {
+                            let info = get_active_window_info();
+                            last_window_check = std::time::Instant::now();
+                            cached_source_info = Some(info.clone());
+                            info
+                        } else {
+                            cached_source_info.clone().unwrap_or_else(|| SourceAppInfo {
+                                name: "Unknown".to_string(),
+                                icon: None,
+                            })
+                        };
                         
-                        // 使用更高效的方式构建事件数据，避免过多的字符串分配
-                        let event_data = format!(
-                            r#"{{"content":"{}","source_app_name":"{}","source_app_icon":{}}}"#,
-                            text.replace('"', r#"\""#).replace('\n', r#"\n"#).replace('\r', r#"\r"#),
-                            source_info.name.replace('"', r#"\""#),
-                            match source_info.icon {
-                                Some(icon) => format!(r#""{}""#, icon),
-                                None => "null".to_string(),
+                        // 使用预分配的字符串构建器减少内存分配
+                        let mut event_data = String::with_capacity(text.len() + 200);
+                        event_data.push_str(r#"{"content":""#);
+                        
+                        // 更高效的字符串转义
+                        for ch in text.chars() {
+                            match ch {
+                                '"' => event_data.push_str(r#"\""#),
+                                '\n' => event_data.push_str(r#"\n"#),
+                                '\r' => event_data.push_str(r#"\r"#),
+                                '\\' => event_data.push_str(r#"\\"#),
+                                _ => event_data.push(ch),
                             }
-                        );
+                        }
+                        
+                        event_data.push_str(r#"","source_app_name":""#);
+                        // 转义应用名称
+                        for ch in source_info.name.chars() {
+                            match ch {
+                                '"' => event_data.push_str(r#"\""#),
+                                '\\' => event_data.push_str(r#"\\"#),
+                                _ => event_data.push(ch),
+                            }
+                        }
+                        
+                        event_data.push_str(r#"","source_app_icon":"#);
+                        match source_info.icon {
+                            Some(icon) => {
+                                event_data.push('"');
+                                event_data.push_str(&icon);
+                                event_data.push('"');
+                            }
+                            None => event_data.push_str("null"),
+                        }
+                        event_data.push('}');
                         
                         let _ = app.emit("clipboard-text", event_data);
                         
-                        // 交换而不是克隆，减少内存分配
-                        last_text = text;
+                        // 使用swap避免克隆
+                        std::mem::swap(&mut last_text, &mut String::from(text));
                         
-                        // 定期清理大文本内容的容量
-                        if last_text.len() > 50_000 {
+                        // 立即收缩大文本的容量
+                        if last_text.capacity() > last_text.len() * 2 {
                             last_text.shrink_to_fit();
                         }
                     }
                 }
                 Err(_) => {
-                    // 忽略剪贴板访问错误，继续监听
+                    // 忽略剪贴板访问错误
                 }
             }
             
-            // 检查图片 - 添加更多内存优化
+            // 检查图片 - 更严格的内存管理
             match clipboard.get_image() {
                 Ok(image) => {
-                    // 检查图片大小
+                    // 更严格的图片大小检查
                     let image_size = image.bytes.len();
                     if image_size > MAX_IMAGE_SIZE {
                         println!("警告：剪贴板图片过大，跳过: {} bytes", image_size);
-                        thread::sleep(Duration::from_millis(800));
+                        thread::sleep(Duration::from_millis(1500)); // 增加等待时间
                         continue;
                     }
                     
-                    // 使用更快的哈希算法
+                    // 改进的图片哈希算法 - 更稳定的重复检测
                     let hash = {
-                        let mut hasher = 0u64;
+                        // 使用更稳定的方法：图片尺寸 + 数据长度 + 固定采样点
                         let bytes = &image.bytes;
-                        let step = (bytes.len() / 1000).max(1); // 采样哈希，避免处理所有字节
-                        for i in (0..bytes.len()).step_by(step) {
-                            hasher = hasher.wrapping_mul(31).wrapping_add(bytes[i] as u64);
+                        let len = bytes.len();
+                        
+                        // 基础哈希：尺寸和长度
+                        let mut hasher = 0u64;
+                        hasher = hasher.wrapping_mul(31).wrapping_add(image.width as u64);
+                        hasher = hasher.wrapping_mul(31).wrapping_add(image.height as u64);
+                        hasher = hasher.wrapping_mul(31).wrapping_add(len as u64);
+                        
+                        // 固定位置采样，避免因内存布局变化导致的哈希不同
+                        let sample_positions = [
+                            0,                    // 起始
+                            len / 4,             // 1/4位置
+                            len / 2,             // 中间
+                            len * 3 / 4,         // 3/4位置
+                            len.saturating_sub(4), // 接近末尾（避免越界）
+                        ];
+                        
+                        for &pos in &sample_positions {
+                            if pos < len {
+                                // 采样4个字节（如果可用）
+                                for offset in 0..4 {
+                                    if pos + offset < len {
+                                        hasher = hasher.wrapping_mul(31).wrapping_add(bytes[pos + offset] as u64);
+                                    }
+                                }
+                            }
                         }
+                        
                         hasher
                     };
                     
                     if hash != last_image_hash {
                         last_image_hash = hash;
                         
+                        // 额外的重复检测：检查最近保存的图片文件
+                        let mut is_duplicate = false;
+                        if let Ok(images_dir) = get_app_images_dir() {
+                            if images_dir.exists() {
+                                // 检查最近5分钟内创建的文件
+                                let five_minutes_ago = std::time::SystemTime::now() - Duration::from_secs(300);
+                                
+                                if let Ok(entries) = std::fs::read_dir(&images_dir) {
+                                    for entry in entries.flatten() {
+                                        if let Ok(metadata) = entry.metadata() {
+                                            if let Ok(created) = metadata.created() {
+                                                if created > five_minutes_ago {
+                                                    // 对于最近的文件，比较文件大小作为快速检查
+                                                    if metadata.len() as usize == image.bytes.len() {
+                                                        println!("检测到可能的重复图片，大小匹配: {} bytes", metadata.len());
+                                                        is_duplicate = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if is_duplicate {
+                            println!("跳过重复的图片");
+                            continue;
+                        }
+                        
                         // 获取程序安装目录下的图片目录
                         match get_app_images_dir() {
                             Ok(images_dir) => {
-                                // 生成唯一的文件名
+                                // 生成唯一的文件名，避免与最近的文件重复
                                 let timestamp = chrono::Utc::now().timestamp_millis();
-                                let filename = format!("clipboard_{}.png", timestamp);
+                                let mut filename = format!("clipboard_{}.png", timestamp);
+                                
+                                // 检查文件名是否与最近的重复
+                                let mut counter = 0;
+                                while recent_image_filenames.contains(&filename) && counter < 10 {
+                                    counter += 1;
+                                    filename = format!("clipboard_{}_{}.png", timestamp, counter);
+                                }
+                                
+                                // 添加到最近文件名列表
+                                if recent_image_filenames.len() >= 10 {
+                                    recent_image_filenames.pop_front();
+                                }
+                                recent_image_filenames.push_back(filename.clone());
+                                
                                 let image_path = images_dir.join(&filename);
                                 
                                 // 在限制作用域中处理图片，确保内存及时释放
@@ -680,26 +890,62 @@ fn start_clipboard_watcher(app: AppHandle) -> Arc<AtomicBool> {
                                     };
                                     
                                     if let Some(thumb_data_url) = thumbnail_result {
-                                        // 获取源应用信息
-                                        let source_info = get_active_window_info();
+                                        // 使用缓存的窗口信息，减少API调用
+                                        let source_info = if last_window_check.elapsed() > WINDOW_CHECK_INTERVAL {
+                                            let info = get_active_window_info();
+                                            last_window_check = std::time::Instant::now();
+                                            cached_source_info = Some(info.clone());
+                                            info
+                                        } else {
+                                            cached_source_info.clone().unwrap_or_else(|| SourceAppInfo {
+                                                name: "Unknown".to_string(),
+                                                icon: None,
+                                            })
+                                        };
                                         
-                                        // 构建事件数据，减少内存分配
-                                        let event_data = format!(
-                                            r#"{{"path":"{}","thumbnail":"{}","source_app_name":"{}","source_app_icon":{}}}"#,
-                                            image_path.to_string_lossy().replace('"', r#"\""#),
-                                            thumb_data_url,
-                                            source_info.name.replace('"', r#"\""#),
-                                            match source_info.icon {
-                                                Some(icon) => format!(r#""{}""#, icon),
-                                                None => "null".to_string(),
+                                        // 使用预分配构建事件数据
+                                        let mut event_data = String::with_capacity(thumb_data_url.len() + 200);
+                                        event_data.push_str(r#"{"path":""#);
+                                        
+                                        // 转义路径
+                                        let path_str = image_path.to_string_lossy();
+                                        for ch in path_str.chars() {
+                                            match ch {
+                                                '"' => event_data.push_str(r#"\""#),
+                                                '\\' => event_data.push_str(r#"\\"#),
+                                                _ => event_data.push(ch),
                                             }
-                                        );
+                                        }
+                                        
+                                        event_data.push_str(r#"","thumbnail":""#);
+                                        event_data.push_str(&thumb_data_url);
+                                        event_data.push_str(r#"","source_app_name":""#);
+                                        
+                                        // 转义应用名称
+                                        for ch in source_info.name.chars() {
+                                            match ch {
+                                                '"' => event_data.push_str(r#"\""#),
+                                                '\\' => event_data.push_str(r#"\\"#),
+                                                _ => event_data.push(ch),
+                                            }
+                                        }
+                                        
+                                        event_data.push_str(r#"","source_app_icon":"#);
+                                        match source_info.icon {
+                                            Some(icon) => {
+                                                event_data.push('"');
+                                                event_data.push_str(&icon);
+                                                event_data.push('"');
+                                            }
+                                            None => event_data.push_str("null"),
+                                        }
+                                        event_data.push('}');
                                         
                                         let _ = app.emit("clipboard-image", event_data);
                                     }
                                 }
                                 
-                                // 明确释放图片数据内存
+                                // 立即释放图片数据内存
                                 drop(image);
                             },
                             Err(e) => {
@@ -713,11 +959,17 @@ fn start_clipboard_watcher(app: AppHandle) -> Arc<AtomicBool> {
                 }
             }
             
-            // 稍微增加睡眠时间，减少CPU使用和内存压力
-            thread::sleep(Duration::from_millis(1000)); // 从800ms增加到1000ms
+            // 显著增加睡眠时间，大幅减少CPU使用和内存压力
+            thread::sleep(Duration::from_millis(2000)); // 从1秒增加到2秒
         }
         
-        println!("剪贴板监听器已停止");
+        // 线程退出前执行最终清理
+        cleanup_icon_cache();
+        last_text.clear();
+        last_text.shrink_to_fit();
+        cached_source_info = None;
+        
+        println!("剪贴板监听器已停止并完成清理");
     });
     
     should_stop
@@ -1247,8 +1499,64 @@ async fn clear_memory_cache() -> Result<(), String> {
     // 清理图标缓存
     cleanup_icon_cache();
     
+    // 强制清理所有缓存
+    let cache = get_icon_cache();
+    if let Ok(mut cache_guard) = cache.write() {
+        cache_guard.clear();
+        println!("图标缓存已完全清空");
+    }
+    
+    // 清理窗口信息缓存
+    if let Ok(mut guard) = get_last_window_info().write() {
+        guard.1 = None;
+        println!("窗口信息缓存已清理");
+    }
+    
     println!("内存缓存已清理");
     Ok(())
+}
+
+#[tauri::command]
+async fn force_memory_cleanup() -> Result<String, String> {
+    // 强制清理所有内存缓存
+    cleanup_icon_cache();
+    
+    // 清空图标缓存
+    let cache = get_icon_cache();
+    let cache_size = if let Ok(mut cache_guard) = cache.write() {
+        let size = cache_guard.len();
+        cache_guard.clear();
+        size
+    } else {
+        0
+    };
+    
+    // 清理窗口信息缓存
+    if let Ok(mut guard) = get_last_window_info().write() {
+        guard.1 = None;
+    }
+    
+    // 尝试强制内存回收
+    #[cfg(target_os = "windows")]
+    unsafe {
+        // 调用Windows API强制内存清理
+        use winapi::um::winbase::{SetProcessWorkingSetSize};
+        use winapi::um::processthreadsapi::GetCurrentProcess;
+        
+        // 设置进程工作集大小来强制内存回收
+        let _result = SetProcessWorkingSetSize(
+            GetCurrentProcess(),
+            usize::MAX,
+            usize::MAX,
+        );
+    }
+    
+    let message = format!(
+        "强制内存清理完成 - 清理了 {} 个图标缓存项", 
+        cache_size
+    );
+    println!("{}", message);
+    Ok(message)
 }
 
 #[tauri::command]
@@ -1565,7 +1873,7 @@ pub fn run() {
             
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file, clear_memory_cache, stop_clipboard_watcher, start_new_clipboard_watcher])
+        .invoke_handler(tauri::generate_handler![greet, save_settings, load_settings, register_shortcut, set_auto_start, get_auto_start_status, cleanup_history, paste_to_clipboard, reset_database, load_image_file, clear_memory_cache, force_memory_cleanup, stop_clipboard_watcher, start_new_clipboard_watcher])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
