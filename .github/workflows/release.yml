@@ -95,8 +95,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri
         run: |
-          # 预编译依赖，这样可以更好地利用缓存
-          cargo build --release --dependencies-only || echo "Dependencies build completed"
+          # 预编译依赖，使用check命令来避免完整编译但仍然下载和检查依赖
+          cargo check --release || echo "Dependencies check completed"
+          # 或者使用fetch来预下载依赖
+          cargo fetch
 
       - name: Build the app
         uses: tauri-apps/tauri-action@v0
