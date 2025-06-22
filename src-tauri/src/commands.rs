@@ -485,8 +485,8 @@ pub async fn auto_paste() -> Result<(), String> {
     match result {
         Ok(Ok(())) => {
             println!("跨平台自动粘贴操作完成");
-            Ok(())
-        }
+    Ok(())
+}
         Ok(Err(e)) => {
             println!("自动粘贴失败: {}", e);
             Err(format!("粘贴操作失败: {}", e))
@@ -910,4 +910,4 @@ pub async fn ensure_database_compatibility(_app: AppHandle) -> Result<(), String
     // This function is kept for backward compatibility but does nothing
     println!("数据库兼容性由迁移系统自动处理");
     Ok(())
-}
+} 

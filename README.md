@@ -50,8 +50,8 @@
 
 ### 系统要求
 - Windows 10/11
-- macOS 10.15+
-- Linux (Ubuntu 18.04+)
+- macOS 10.15+ （待支持）
+- Linux (Ubuntu 18.04+)（待支持）
 
 ### 从源码构建
 
@@ -84,7 +84,7 @@ npm run tauri build
 
 1. 启动应用程序
 2. 程序会自动最小化到系统托盘
-3. 使用快捷键 `Ctrl+Shift+V` 唤醒主窗口
+3. 使用自定义快捷键唤醒主窗口
 4. 复制任何文本或图片，程序会自动记录
 5. 在历史记录中点击任意项目即可复制并粘贴
 
@@ -103,23 +103,6 @@ npm run tauri build
 - **图片文件**：`{程序目录}/images/`
 - **设置文件**：`%APPDATA%/clipboard_settings.json` (Windows)
 
-## 🔧 开发环境设置
-
-### 推荐 IDE 配置
-
-- [VS Code](https://code.visualstudio.com/)
-- [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) - Vue 3 支持
-- [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) - Tauri 开发工具
-- [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer) - Rust 语言服务
-
-### Vue 3 + TypeScript 支持
-
-由于 TypeScript 无法处理 `.vue` 文件的类型信息，需要启用 Volar 的接管模式：
-
-1. 在 VS Code 命令面板中运行 `Extensions: Show Built-in Extensions`
-2. 找到 `TypeScript and JavaScript Language Features`，右键选择 `Disable (Workspace)`
-3. 重新加载 VS Code 窗口
-
 ## 🤝 贡献指南
 
 欢迎贡献代码！请遵循以下步骤：
@@ -130,31 +113,11 @@ npm run tauri build
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启 Pull Request
 
-## 📝 更新日志
-
-### v1.0.0
-- ✨ 初始版本发布
-- 📋 支持文本和图片剪贴板监控
-- ⭐ 添加收藏功能
-- 🔍 实现搜索功能
-- ⌨️ 支持全局快捷键
-- 🧹 自动清理过期记录
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-- [Tauri](https://tauri.app/) - 出色的桌面应用框架
-- [Vue.js](https://vuejs.org/) - 渐进式前端框架
-- [Rust](https://www.rust-lang.org/) - 系统编程语言
 
 ## 📞 联系方式
 
 如果你有任何问题或建议，请通过以下方式联系：
 
-- 📧 Email: your-email@example.com
 - 🐛 Issues: [GitHub Issues](https://github.com/your-username/clipboard-manager/issues)
 
 ---
@@ -163,6 +126,6 @@ npm run tauri build
 
 **如果这个项目对你有帮助，请给它一个 ⭐**
 
-Made with ❤️ by [Your Name]
+Made with ❤️ by [HughArch]
 
 </div>

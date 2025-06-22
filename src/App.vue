@@ -139,7 +139,7 @@ const formatTime = (() => {
       // 清理旧缓存
       const firstKey = timeCache.keys().next().value
       if (firstKey !== undefined) {
-        timeCache.delete(firstKey)
+      timeCache.delete(firstKey)
       }
     }
     timeCache.set(timestamp, result)
@@ -327,10 +327,10 @@ const toggleFavorite = async (item: any) => {
 const checkDuplicateContent = async (content: string, contentType: 'text' | 'image'): Promise<number | null> => {
   try {
     // 先检查内存中的历史记录
-    const existingItem = clipboardHistory.value.find(item => {
+  const existingItem = clipboardHistory.value.find(item => {
       if (item.type === 'image' && item.imagePath && contentType === 'image') {
-        return item.imagePath === content
-      }
+      return item.imagePath === content
+    }
       return item.content === content && item.type === contentType
     })
     
@@ -860,12 +860,12 @@ onMounted(async () => {
         lastTextProcessTime = currentTime
         
         try {
-          // 检查是否是重复内容
+        // 检查是否是重复内容
           const duplicateItemId = await checkDuplicateContent(newText, 'text')
-          if (duplicateItemId) {
-            console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
-            await moveItemToFront(duplicateItemId)
-            return
+        if (duplicateItemId) {
+          console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
+          await moveItemToFront(duplicateItemId)
+          return
           }
         } finally {
           // 在 finally 块外处理后续逻辑，但先清除标志
