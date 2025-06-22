@@ -91,6 +91,16 @@
       "commands": ["get_active_window_info"]
     },
     {
+      "identifier": "allow-auto-paste",
+      "description": "Allows automatic pasting with cross-platform keyboard simulation",
+      "commands": ["auto_paste"]
+    },
+    {
+      "identifier": "allow-ensure-database-compatibility",
+      "description": "Allows ensuring database compatibility",
+      "commands": ["ensure_database_compatibility"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

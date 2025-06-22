@@ -9,6 +9,7 @@ fn main() {
                 "set_auto_start", 
                 "get_auto_start_status", 
                 "cleanup_history", 
+                "auto_paste",
                 "paste_to_clipboard",
                 "reset_database",
                 "load_image_file",
@@ -16,6 +17,7 @@ fn main() {
                 "force_memory_cleanup",
                 "start_new_clipboard_watcher",
                 "stop_clipboard_watcher",
+                "ensure_database_compatibility",
                 "get_active_window_info"
             ]))
     ).unwrap();

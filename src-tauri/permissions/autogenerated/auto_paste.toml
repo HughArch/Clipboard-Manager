@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-auto-paste"
+description = "Enables the auto_paste command without any pre-configured scope."
+commands.allow = ["auto_paste"]
+
+[[permission]]
+identifier = "deny-auto-paste"
+description = "Denies the auto_paste command without any pre-configured scope."
+commands.deny = ["auto_paste"]

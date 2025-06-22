@@ -10,7 +10,9 @@ import Database from '@tauri-apps/plugin-sql'
 import { 
   onTextUpdate, 
   onImageUpdate, 
-  startListening
+  startListening,
+  writeText,
+  writeImageBase64
 } from 'tauri-plugin-clipboard-api'
 
 
@@ -70,8 +72,11 @@ let unlistenClipboardImage: (() => void) | null = null
 let unlistenClipboard: (() => Promise<void>) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 
-// 防重复机制：记录最近处理的图片
+// 防重复机制：记录最近处理的图片和文本
 let lastImageProcessTime = 0
+let lastTextContent = '' // 新增：记录最后处理的文本内容
+let lastTextProcessTime = 0 // 新增：记录最后处理文本的时间
+let isProcessingClipboard = false // 新增：防止并发处理
 
 // 优化的内存管理函数（更激进的清理策略）
 const trimMemoryHistory = () => {
@@ -133,7 +138,9 @@ const formatTime = (() => {
     if (timeCache.size >= maxCacheSize) {
       // 清理旧缓存
       const firstKey = timeCache.keys().next().value
-      timeCache.delete(firstKey)
+      if (firstKey !== undefined) {
+        timeCache.delete(firstKey)
+      }
     }
     timeCache.set(timestamp, result)
     
@@ -269,7 +276,7 @@ const filteredHistory = computed(() => {
   
   // 应用搜索过滤
   const result = items.filter(item => 
-    item.content.toLowerCase().includes(query)
+    item.content?.toLowerCase().includes(query) || false
   )
   
   return result
@@ -317,16 +324,36 @@ const toggleFavorite = async (item: any) => {
 }
 
 // 检查是否是重复内容，如果是则返回已有条目的ID
-const checkDuplicateContent = (content: string): number | null => {
-  // 在当前历史记录中查找相同内容的条目
-  // 对于图片，使用 imagePath 进行比较；对于文本，使用 content 进行比较
-  const existingItem = clipboardHistory.value.find(item => {
-    if (item.type === 'image' && item.imagePath) {
-      return item.imagePath === content
+const checkDuplicateContent = async (content: string, contentType: 'text' | 'image'): Promise<number | null> => {
+  try {
+    // 先检查内存中的历史记录
+    const existingItem = clipboardHistory.value.find(item => {
+      if (item.type === 'image' && item.imagePath && contentType === 'image') {
+        return item.imagePath === content
+      }
+      return item.content === content && item.type === contentType
+    })
+    
+    if (existingItem) {
+      return existingItem.id
     }
-    return item.content === content
-  })
-  return existingItem ? existingItem.id : null
+    
+    // 如果内存中没有找到，检查数据库（防止内存清理导致的漏检）
+    if (db) {
+      const dbResult = await db.select(
+        'SELECT id FROM clipboard_history WHERE content = ? AND type = ? ORDER BY timestamp DESC LIMIT 1',
+        [content, contentType]
+      )
+      if (dbResult.length > 0) {
+        return dbResult[0].id
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.error('检查重复内容失败:', error)
+    return null
+  }
 }
 
 // 将已有条目移动到最前面并更新时间戳
@@ -353,42 +380,102 @@ const moveItemToFront = async (itemId: number) => {
       // 添加到最前面
       clipboardHistory.value.unshift(item)
       
-      console.log('Item moved to front:', itemId, 'new timestamp:', newTimestamp)
+      console.log('Item moved to front in memory:', itemId, 'new timestamp:', newTimestamp)
+      
+      // 如果移动的项目就是当前选中的项目，更新选中项目的引用
+      if (selectedItem.value?.id === itemId) {
+        selectedItem.value = item
+        console.log('Updated selected item reference after move to front')
+      }
+    } else {
+      // 如果内存中没有找到，从数据库重新加载该条目
+      console.warn('Item not found in memory, reloading from database:', itemId)
+      const dbResult = await db.select(
+        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon FROM clipboard_history WHERE id = ?',
+        [itemId]
+      )
+      
+      if (dbResult.length > 0) {
+        const row = dbResult[0]
+        const item = {
+          id: row.id,
+          content: row.content,
+          type: row.type,
+          timestamp: newTimestamp, // 使用新的时间戳
+          isFavorite: row.is_favorite === 1,
+          imagePath: row.image_path ?? null,
+          sourceAppName: row.source_app_name ?? 'Unknown',
+          sourceAppIcon: row.source_app_icon ?? null
+        }
+        
+        // 添加到内存列表的开头
+        clipboardHistory.value.unshift(item)
+        
+        // 执行内存清理以防止列表过长
+        trimMemoryHistory()
+        
+        console.log('Item reloaded from database and moved to front:', itemId)
+      }
     }
   } catch (error) {
     console.error('Failed to move item to front:', error)
   }
 }
 
-// 粘贴内容到系统剪贴板
-const pasteToClipboard = async (item: any) => {
+// 复制内容到系统剪贴板并自动粘贴
+const copyToClipboard = async (item: any) => {
   if (!item) return
   
   try {
-    console.log('Pasting item to clipboard:', item.type, item.id)
+    console.log('Copying and pasting item:', item.type, item.id)
+    
+    // 准备要复制的内容
+    let contentToCopy = item.content
+    
+    // 对于图片，如果是当前选中的项目且有完整图片内容，则使用完整内容
+    if (item.type === 'image' && selectedItem.value?.id === item.id && fullImageContent.value) {
+      contentToCopy = fullImageContent.value
+    } else if (item.type === 'image' && item.imagePath) {
+      // 如果是旧格式的图片（有 imagePath），尝试加载完整图片
+      try {
+        const fullImage = await invoke('load_image_file', { imagePath: item.imagePath }) as string
+        contentToCopy = fullImage
+      } catch (error) {
+        console.warn('Failed to load full image, using content field:', error)
+        contentToCopy = item.content
+      }
+    }
+    
+    // 写入系统剪贴板
+    if (item.type === 'text') {
+      await writeText(contentToCopy)
+      console.log('Text content copied to clipboard for item:', item.id)
+    } else if (item.type === 'image') {
+      // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
+      const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
+      if (base64Data) {
+        await writeImageBase64(base64Data)
+        console.log('Image content copied to clipboard for item:', item.id)
+      } else {
+        console.warn('No valid base64 data found for image item:', item.id)
+        return // 如果没有有效数据，不继续执行粘贴
+      }
+    }
     
     // 先隐藏窗口，让焦点回到之前的应用
     const appWindow = getCurrentWindow()
     await appWindow.hide()
-    console.log('Window hidden before paste')
+    console.log('Window hidden, ready to auto-paste')
     
-    // 等待一小段时间确保焦点已经切换
-    await new Promise(resolve => setTimeout(resolve, 50))
+    // 等待一小段时间确保窗口隐藏和焦点切换完成
+    await new Promise(resolve => setTimeout(resolve, 150))
     
-    // 然后执行粘贴操作（包含复制到剪贴板和自动粘贴）
-    // 对于图片，如果有完整图片内容，使用完整内容，否则使用缩略图
-    const contentToPaste = item.type === 'image' && fullImageContent.value 
-      ? fullImageContent.value 
-      : item.content
-    
-    await invoke('paste_to_clipboard', {
-      content: contentToPaste,
-      contentType: item.type
-    })
-    console.log('Successfully pasted to clipboard and auto-pasted')
+    // 执行跨平台自动粘贴
+    await invoke('auto_paste')
+    console.log('Auto-paste completed for item:', item.id)
     
   } catch (error) {
-    console.error('Failed to paste to clipboard:', error)
+    console.error('Failed to copy and paste:', error)
     // 如果出错，重新显示窗口
     try {
       const appWindow = getCurrentWindow()
@@ -446,9 +533,9 @@ const handleKeyDown = (e: KeyboardEvent) => {
     newIndex = currentIndex < filteredHistory.value.length - 1 ? currentIndex + 1 : 0
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    // 按Enter键粘贴当前选中的项目
+    // 按Enter键复制当前选中的项目到剪贴板
     if (selectedItem.value) {
-      pasteToClipboard(selectedItem.value)
+      copyToClipboard(selectedItem.value)
     }
     return
   }
@@ -464,7 +551,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 // 处理双击事件
 const handleDoubleClick = (item: any) => {
-  pasteToClipboard(item)
+  copyToClipboard(item)
 }
 
 const handleTabChange = (index: number) => {
@@ -739,18 +826,43 @@ onMounted(async () => {
       try {
         console.log('检测到文本剪贴板变化:', newText.length, '字符')
         
+        // 防止并发处理
+        if (isProcessingClipboard) {
+          console.log('正在处理其他剪贴板事件，跳过')
+          return
+        }
+        
         // 限制内容长度
         if (newText && newText.length > 100_000) {
           console.warn('文本内容过长，跳过')
           return
         }
         
-        // 检查是否是重复内容
-        const duplicateItemId = checkDuplicateContent(newText)
-        if (duplicateItemId) {
-          console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
-          await moveItemToFront(duplicateItemId)
+        // 时间窗口重复检测（防止快速重复复制）
+        const currentTime = Date.now()
+        const timeDiff = currentTime - lastTextProcessTime
+        
+        if (timeDiff < 1000 && lastTextContent === newText) { // 1秒内相同内容视为重复
+          console.log('检测到时间窗口内的重复文本事件，跳过')
           return
+        }
+        
+        // 设置处理标志
+        isProcessingClipboard = true
+        lastTextContent = newText
+        lastTextProcessTime = currentTime
+        
+        try {
+          // 检查是否是重复内容
+          const duplicateItemId = await checkDuplicateContent(newText, 'text')
+          if (duplicateItemId) {
+            console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
+            await moveItemToFront(duplicateItemId)
+            return
+          }
+        } finally {
+          // 在 finally 块外处理后续逻辑，但先清除标志
+          // 标志将在函数末尾清除
         }
 
         // 获取当前活动窗口信息
@@ -803,6 +915,9 @@ onMounted(async () => {
         }
       } catch (error) {
         console.error('Failed to process clipboard text:', error)
+      } finally {
+        // 确保在所有情况下都清除处理标志
+        isProcessingClipboard = false
       }
     })
 
@@ -810,6 +925,12 @@ onMounted(async () => {
     unlistenClipboardImage = await onImageUpdate(async (base64Image: string) => {
       try {
         console.log('检测到图片剪贴板变化:', base64Image.length, '字符')
+        
+        // 防止并发处理
+        if (isProcessingClipboard) {
+          console.log('正在处理其他剪贴板事件，跳过')
+          return
+        }
         
         // 检查图片大小
         if (base64Image && base64Image.length > MAX_IMAGE_PREVIEW_SIZE) {
@@ -826,13 +947,15 @@ onMounted(async () => {
           return
         }
         
+        // 设置处理标志
+        isProcessingClipboard = true
         lastImageProcessTime = currentTime
         
         // 创建data URL格式
         const imageDataUrl = `data:image/png;base64,${base64Image}`
         
         // 检查是否是重复内容
-        const duplicateItemId = checkDuplicateContent(imageDataUrl)
+        const duplicateItemId = await checkDuplicateContent(imageDataUrl, 'image')
         if (duplicateItemId) {
           console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
           await moveItemToFront(duplicateItemId)
@@ -889,6 +1012,9 @@ onMounted(async () => {
         }
       } catch (error) {
         console.error('Failed to process clipboard image:', error)
+      } finally {
+        // 确保在所有情况下都清除处理标志
+        isProcessingClipboard = false
       }
     })
 
@@ -1238,37 +1364,37 @@ const forceMemoryCleanup = async () => {
         </div>
         <div class="flex items-center space-x-3">
           <!-- 开发者工具按钮（生产环境已注释，开发时可取消注释） -->
-          <button 
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="openDevTools"
           >
             Dev Tools
-          </button>
-          <button 
+          </button> -->
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-green-600 hover:text-green-900 hover:bg-green-100 rounded-lg transition-colors duration-200"
             @click="restartClipboardWatcher"
             title="重启剪贴板监听器"
           >
             Restart Watcher
-          </button>
-          <button 
+          </button> -->
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-blue-600 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors duration-200"
             @click="clearMemoryCache"
             title="清理内存缓存"
           >
             Clear Cache
-          </button>
-          <button 
+          </button> -->
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-purple-600 hover:text-purple-900 hover:bg-purple-100 rounded-lg transition-colors duration-200"
             @click="forceMemoryCleanup"
             title="强制内存清理（激进模式）"
           >
             Force Clean
-          </button>
+          </button> -->
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
             @click="resetDatabase"
-            title="重置数据库（修复迁移冲突）"
+            title="重置数据库"
           >
             Reset DB
           </button>
