@@ -444,8 +444,8 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
 pub async fn auto_paste() -> Result<(), String> {
     println!("开始执行跨平台自动粘贴...");
     
-    // 等待一短时间确保剪贴板内容已由前端设置
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    // 移除额外等待时间，前端已经处理了必要的同步等待，直接执行粘贴以获得最快响应
+    // tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
     
     // 在新线程中执行按键模拟，避免阻塞异步运行时
     let result = tokio::task::spawn_blocking(|| {

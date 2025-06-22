@@ -446,29 +446,36 @@ const copyToClipboard = async (item: any) => {
       }
     }
     
-    // 写入系统剪贴板
-    if (item.type === 'text') {
-      await writeText(contentToCopy)
-      console.log('Text content copied to clipboard for item:', item.id)
-    } else if (item.type === 'image') {
-      // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
-      const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
-      if (base64Data) {
-        await writeImageBase64(base64Data)
-        console.log('Image content copied to clipboard for item:', item.id)
-      } else {
-        console.warn('No valid base64 data found for image item:', item.id)
-        return // 如果没有有效数据，不继续执行粘贴
-      }
-    }
-    
-    // 先隐藏窗口，让焦点回到之前的应用
+    // 获取窗口引用，准备并行操作
     const appWindow = getCurrentWindow()
-    await appWindow.hide()
-    console.log('Window hidden, ready to auto-paste')
     
-    // 等待一小段时间确保窗口隐藏和焦点切换完成
-    await new Promise(resolve => setTimeout(resolve, 150))
+    // 并行执行剪贴板写入和窗口隐藏操作
+    const [, ] = await Promise.all([
+      // 写入系统剪贴板
+      (async () => {
+        if (item.type === 'text') {
+          await writeText(contentToCopy)
+          console.log('Text content copied to clipboard for item:', item.id)
+        } else if (item.type === 'image') {
+          // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
+          const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
+          if (base64Data) {
+            await writeImageBase64(base64Data)
+            console.log('Image content copied to clipboard for item:', item.id)
+          } else {
+            console.warn('No valid base64 data found for image item:', item.id)
+            throw new Error('Invalid image data')
+          }
+        }
+      })(),
+      // 隐藏窗口
+      appWindow.hide()
+    ])
+    
+    console.log('Clipboard and window operations completed, ready to auto-paste')
+    
+    // 进一步减少等待时间，现代系统的剪贴板操作通常很快
+    await new Promise(resolve => setTimeout(resolve, 30))
     
     // 执行跨平台自动粘贴
     await invoke('auto_paste')
@@ -1158,16 +1165,7 @@ onUnmounted(() => {
   console.log('资源清理完成')
 })
 
-// 添加剪贴板监听器重启功能
-const restartClipboardWatcher = async () => {
-  try {
-    console.log('重启剪贴板监听器...')
-    await invoke('start_new_clipboard_watcher')
-    console.log('剪贴板监听器重启成功')
-  } catch (error) {
-    console.error('重启剪贴板监听器失败:', error)
-  }
-}
+
 
 // 监听标签页变化
 watch(selectedTabIndex, () => {
@@ -1179,48 +1177,7 @@ watch(selectedTabIndex, () => {
   fullImageContent.value = null
 })
 
-// 开发者工具函数
-const openDevTools = async () => {
-  try {
-    const appWindow = getCurrentWindow()
-    // 直接调用 openDevtools 方法
-    // @ts-ignore
-    if (appWindow.openDevtools) {
-      // @ts-ignore
-      appWindow.openDevtools()
-      console.log('Dev tools opened via API')
-    } else {
-      // 如果方法不存在，尝试使用键盘快捷键
-      console.log('openDevtools method not available, trying keyboard shortcut')
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'i',
-        code: 'KeyI',
-        ctrlKey: true,
-        shiftKey: true,
-        keyCode: 73,
-        which: 73,
-        bubbles: true
-      }))
-    }
-  } catch (error) {
-    console.error('Failed to open dev tools:', error)
-    // 尝试使用键盘快捷键作为后备方案
-    try {
-      document.dispatchEvent(new KeyboardEvent('keydown', {
-        key: 'i',
-        code: 'KeyI',
-        ctrlKey: true,
-        shiftKey: true,
-        keyCode: 73,
-        which: 73,
-        bubbles: true
-      }))
-    } catch (keyError) {
-      console.error('Keyboard shortcut also failed:', keyError)
-      alert('无法打开开发者工具。请确保在 tauri.conf.json 中设置了 devtools: true')
-    }
-  }
-}
+
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
 const resetDatabase = async () => {
@@ -1238,74 +1195,7 @@ const resetDatabase = async () => {
   }
 }
 
-// 增强的内存缓存清理函数
-const clearMemoryCache = async () => {
-  try {
-    // 先调用后端清理
-    await invoke('clear_memory_cache')
-    console.log('后端内存缓存已清理')
-    
-    // 前端内存清理
-    trimMemoryHistory()
-    fullImageContent.value = null
-    
-    // 清理时间格式化缓存
-    if (typeof formatTime === 'function' && formatTime.clearCache) {
-      formatTime.clearCache()
-    }
-    
-    // 强制垃圾回收
-    if (typeof (window as any).gc === 'function') {
-      (window as any).gc()
-    }
-    
-    // 重启剪贴板监听器以清理可能的内存泄漏
-    await restartClipboardWatcher()
-    
-    alert('内存缓存清理完成，剪贴板监听器已重启')
-  } catch (error) {
-    console.error('清理内存缓存失败:', error)
-    alert('清理内存缓存失败: ' + error)
-  }
-}
 
-// 强制内存清理函数（更激进）
-const forceMemoryCleanup = async () => {
-  try {
-    console.log('开始强制内存清理...')
-    
-    // 调用后端强制清理
-    const result = await invoke('force_memory_cleanup') as string
-    console.log('后端强制清理结果:', result)
-    
-    // 前端激进清理
-    clipboardHistory.value = clipboardHistory.value.slice(0, 50) // 只保留50条
-    fullImageContent.value = null
-    selectedItem.value = null
-    searchQuery.value = ''
-    
-    // 清理所有可能的缓存
-    if (typeof formatTime === 'function' && formatTime.clearCache) {
-      formatTime.clearCache()
-    }
-    
-    // 多次强制垃圾回收
-    for (let i = 0; i < 3; i++) {
-      if (typeof (window as any).gc === 'function') {
-        (window as any).gc()
-      }
-      await new Promise(resolve => setTimeout(resolve, 100))
-    }
-    
-    // 重启剪贴板监听器
-    await restartClipboardWatcher()
-    
-    alert(`强制内存清理完成！\n${result}\n历史记录已减少到50条`)
-  } catch (error) {
-    console.error('强制内存清理失败:', error)
-    alert('强制内存清理失败: ' + error)
-  }
-}
 </script>
 
 <template>
@@ -1414,19 +1304,19 @@ const forceMemoryCleanup = async () => {
       <div class="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
         <!-- Tabs -->
         <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col h-full" @change="handleTabChange">
-          <div class="border-b border-gray-200 flex-shrink-0 bg-gray-50">
-            <TabList class="flex">
+          <div class="flex-shrink-0 bg-gradient-to-r from-gray-50 to-gray-100 px-3 py-1 border-b border-gray-200">
+            <TabList class="flex items-center justify-center space-x-0.5 bg-gray-100 p-0.5 rounded-lg shadow-inner max-w-[200px] mx-auto">
               <!-- All 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="flex-1 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-all duration-200"
+                  class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
                   :class="[
                     selected
-                      ? 'text-blue-600 border-blue-600 bg-white'
-                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
+                      ? 'text-white bg-gradient-to-r from-blue-500 to-blue-600 shadow-md shadow-blue-500/20'
+                      : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
                   ]"
                 >
-                  <span class="flex items-center space-x-1.5">
+                  <span class="flex items-center justify-center space-x-1.5">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
                     </svg>
@@ -1437,14 +1327,14 @@ const forceMemoryCleanup = async () => {
               <!-- Favorites 标签页 -->
               <Tab v-slot="{ selected }" as="template">
                 <button
-                  class="flex-1 px-4 py-2.5 text-xs font-medium border-b-2 -mb-px transition-all duration-200"
+                  class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
                   :class="[
                     selected
-                      ? 'text-blue-600 border-blue-600 bg-white'
-                      : 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300 bg-gray-50'
+                      ? 'text-white bg-gradient-to-r from-amber-500 to-yellow-500 shadow-md shadow-amber-500/20'
+                      : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
                   ]"
                 >
-                  <span class="flex items-center space-x-1.5">
+                  <span class="flex items-center justify-center space-x-1.5">
                     <StarIcon class="w-3.5 h-3.5" />
                     <span>Favorites</span>
                   </span>
@@ -1809,7 +1699,7 @@ input:focus {
 
 /* 按钮悬停效果 */
 button:hover {
-  transform: translateY(-1px);
+  filter: brightness(1.05);
 }
 
 /* 卡片阴影效果 */
@@ -1899,6 +1789,164 @@ img[alt$="sourceAppName"] {
   width: 32px !important;
   height: 32px !important;
   flex-shrink: 0;
+}
+
+/* 现代化标签页样式 */
+.modern-tab-container {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.modern-tab-list {
+  background: rgba(226, 232, 240, 0.6);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.modern-tab-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.modern-tab-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  transition: left 0.6s;
+}
+
+.modern-tab-button:hover::before {
+  left: 100%;
+}
+
+/* 选中状态的简洁效果 */
+.tab-selected-all {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  box-shadow: 
+    0 4px 6px -1px rgba(59, 130, 246, 0.3),
+    0 2px 4px -1px rgba(59, 130, 246, 0.2),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.tab-selected-favorites {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 
+    0 4px 6px -1px rgba(245, 158, 11, 0.3),
+    0 2px 4px -1px rgba(245, 158, 11, 0.2),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+/* 按钮文字和图标样式 */
+.tab-content {
+  position: relative;
+  z-index: 10;
+  font-weight: 600;
+  letter-spacing: 0.025em;
+}
+
+/* 悬停状态简洁 */
+.modern-tab-button:not(.tab-selected-all):not(.tab-selected-favorites):hover {
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 
+    0 2px 4px -1px rgba(0, 0, 0, 0.1),
+    0 1px 2px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* 焦点状态 */
+.modern-tab-button:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: #3b82f6;
+  ring-offset: 2px;
+}
+
+
+
+/* 响应式优化 */
+@media (max-width: 640px) {
+  .modern-tab-list {
+    max-width: 180px;
+  }
+  
+  .modern-tab-button {
+    min-width: 70px;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* 紧凑型标签页样式 */
+.compact-tab-container {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  padding: 0.5rem 0.75rem;
+}
+
+.compact-tab-list {
+  background: rgba(226, 232, 240, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 0.5rem;
+  padding: 0.125rem;
+  box-shadow: 
+    0 2px 4px -1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+
+.compact-tab-button {
+  padding: 0.375rem 1rem;
+  min-width: 80px;
+  font-weight: 500;
+  border-radius: 0.375rem;
+}
+
+/* 选中状态的简洁效果 */
+.compact-selected {
+  box-shadow: 
+    0 2px 4px -1px rgba(59, 130, 246, 0.25),
+    0 1px 2px -1px rgba(59, 130, 246, 0.15);
+}
+
+/* 图标和文字间距优化 */
+.compact-tab-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.compact-tab-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
+/* 高分辨率屏幕优化 */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx) {
+  .modern-tab-list {
+    border-width: 0.5px;
+  }
+}
+
+/* 暗色模式适配预留 */
+@media (prefers-color-scheme: dark) {
+  .modern-tab-container {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-bottom-color: #334155;
+  }
+  
+  .modern-tab-list {
+    background: rgba(51, 65, 85, 0.6);
+    border-color: rgba(51, 65, 85, 0.8);
+  }
 }
 </style>
 
