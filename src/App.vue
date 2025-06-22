@@ -4,10 +4,15 @@ import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon } from '@heroicons/vue/24/
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
-import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Database from '@tauri-apps/plugin-sql'
+import { 
+  onTextUpdate, 
+  onImageUpdate, 
+  startListening
+} from 'tauri-plugin-clipboard-api'
+
 
 // 窗口最大化状态
 const isMaximized = ref(false)
@@ -62,11 +67,11 @@ const currentOffset = ref(0) // 当前加载的偏移量
 // 事件监听器清理函数存储
 let unlistenClipboardText: (() => void) | null = null
 let unlistenClipboardImage: (() => void) | null = null
+let unlistenClipboard: (() => Promise<void>) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 
 // 防重复机制：记录最近处理的图片
 let lastImageProcessTime = 0
-let lastImagePath = ''
 
 // 优化的内存管理函数（更激进的清理策略）
 const trimMemoryHistory = () => {
@@ -487,22 +492,42 @@ watch(selectedItem, async (newItem) => {
     fullImageContent.value = null
   }
   
-  if (newItem && newItem.type === 'image' && newItem.imagePath) {
+  if (newItem && newItem.type === 'image') {
     try {
-      console.log('Loading full image from path:', newItem.imagePath)
-      const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
-      
-      // 检查图片大小，如果过大则不在内存中保存
-      if (fullImage.length > MAX_IMAGE_PREVIEW_SIZE) {
-        console.warn('完整图片过大，使用缩略图显示')
-        fullImageContent.value = newItem.content
+      // 使用新插件：图片数据直接存储在content字段中
+      if (newItem.imagePath) {
+        // 如果有文件路径，尝试从文件加载（兼容旧数据）
+        console.log('Loading full image from path:', newItem.imagePath)
+        const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
+        
+        // 检查图片大小，如果过大则不在内存中保存
+        if (fullImage.length > MAX_IMAGE_PREVIEW_SIZE) {
+          console.warn('完整图片过大，使用缩略图显示')
+          fullImageContent.value = newItem.content
+        } else {
+          fullImageContent.value = fullImage
+        }
       } else {
-        fullImageContent.value = fullImage
+        // 新插件模式：直接使用content中的base64数据
+        console.log('Using base64 image data from content field')
+        if (newItem.content && typeof newItem.content === 'string') {
+          // 检查图片大小
+          if (newItem.content.length > MAX_IMAGE_PREVIEW_SIZE) {
+            console.warn('图片数据过大，限制显示')
+            // 即使过大也显示，因为这是唯一的数据源
+            fullImageContent.value = newItem.content
+          } else {
+            fullImageContent.value = newItem.content
+          }
+        } else {
+          console.warn('图片项目缺少内容数据')
+          fullImageContent.value = null
+        }
       }
     } catch (error) {
-      console.error('Failed to load full image:', error)
-      // 如果加载失败，使用缩略图作为后备
-      fullImageContent.value = newItem.content
+      console.error('Failed to load image:', error)
+      // 如果加载失败，尝试使用content作为后备
+      fullImageContent.value = (newItem.content && typeof newItem.content === 'string') ? newItem.content : null
     }
   } else {
     fullImageContent.value = null
@@ -705,44 +730,57 @@ onMounted(async () => {
     // 初始加载最近的历史记录
     await loadRecentHistory()
 
-    // 注册剪贴板文本事件监听器，并保存unlisten函数
-    unlistenClipboardText = await listen<string>('clipboard-text', async (event) => {
+    // 启动新的剪贴板监听器（使用tauri-plugin-clipboard）
+    unlistenClipboard = await startListening()
+    console.log('剪贴板监听器已启动（无内存泄漏版本）')
+
+    // 注册剪贴板文本变化监听器
+    unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
-        // 解析事件数据 - 优化：减少JSON解析
-        let eventData: any
-        try {
-          eventData = JSON.parse(event.payload)
-        } catch (parseError) {
-          console.error('解析剪贴板文本事件数据失败:', parseError)
-          return
-        }
-        
-        const content = eventData.content
-        const sourceAppName = eventData.source_app_name || 'Unknown'
-        const sourceAppIcon = eventData.source_app_icon || null
+        console.log('检测到文本剪贴板变化:', newText.length, '字符')
         
         // 限制内容长度
-        if (content && content.length > 100_000) {
+        if (newText && newText.length > 100_000) {
           console.warn('文本内容过长，跳过')
           return
         }
         
         // 检查是否是重复内容
-        const duplicateItemId = checkDuplicateContent(content)
+        const duplicateItemId = checkDuplicateContent(newText)
         if (duplicateItemId) {
           console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
           await moveItemToFront(duplicateItemId)
           return
         }
 
+        // 获取当前活动窗口信息
+        let sourceAppInfo: { name: string; icon: string | null } = {
+          name: 'Unknown',
+          icon: null
+        }
+        
+        console.log('🔍 [文本] 开始获取源应用信息...')
+        try {
+          console.log('🔍 [文本] 调用 get_active_window_info 命令')
+          sourceAppInfo = await invoke('get_active_window_info') as { name: string; icon: string | null }
+          console.log('✅ [文本] 获取到源应用信息:', {
+            name: sourceAppInfo.name,
+            hasIcon: sourceAppInfo.icon !== null,
+            iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
+          })
+        } catch (error) {
+          console.error('❌ [文本] 获取源应用信息失败:', error)
+          console.error('❌ [文本] 错误详情:', JSON.stringify(error))
+        }
+
         const item = {
-          content: content,
+          content: newText,
           type: 'text',
           timestamp: new Date().toISOString(),
           isFavorite: false,
           imagePath: null,
-          sourceAppName: sourceAppName,
-          sourceAppIcon: sourceAppIcon
+          sourceAppName: sourceAppInfo.name,
+          sourceAppIcon: sourceAppInfo.icon
         }
         
         // 插入新记录到数据库
@@ -768,58 +806,67 @@ onMounted(async () => {
       }
     })
 
-    // 注册剪贴板图片事件监听器，并保存unlisten函数
-    unlistenClipboardImage = await listen<string>('clipboard-image', async (event) => {
+    // 注册剪贴板图片变化监听器
+    unlistenClipboardImage = await onImageUpdate(async (base64Image: string) => {
       try {
-        // 解析事件数据 - 优化：减少JSON解析
-        let eventData: any
-        try {
-          eventData = JSON.parse(event.payload)
-        } catch (parseError) {
-          console.error('解析剪贴板图片事件数据失败:', parseError)
+        console.log('检测到图片剪贴板变化:', base64Image.length, '字符')
+        
+        // 检查图片大小
+        if (base64Image && base64Image.length > MAX_IMAGE_PREVIEW_SIZE) {
+          console.warn('图片过大，跳过')
           return
         }
         
-        const imagePath = eventData.path
-        const thumbnail = eventData.thumbnail
-        const sourceAppName = eventData.source_app_name || 'Unknown'
-        const sourceAppIcon = eventData.source_app_icon || null
-        
-        // 时间窗口重复检测（防止短时间内的重复事件）
+        // 时间窗口重复检测
         const currentTime = Date.now()
         const timeDiff = currentTime - lastImageProcessTime
         
-        if (imagePath === lastImagePath && timeDiff < 2000) { // 2秒内的相同路径视为重复
-          console.log('检测到时间窗口内的重复图片事件，跳过:', imagePath)
+        if (timeDiff < 2000) { // 2秒内视为重复
+          console.log('检测到时间窗口内的重复图片事件，跳过')
           return
         }
         
-        // 更新最近处理记录
         lastImageProcessTime = currentTime
-        lastImagePath = imagePath
         
-        // 检查缩略图大小
-        if (thumbnail && thumbnail.length > MAX_IMAGE_PREVIEW_SIZE) {
-          console.warn('缩略图过大，跳过内存存储')
-          return
-        }
+        // 创建data URL格式
+        const imageDataUrl = `data:image/png;base64,${base64Image}`
         
-        // 检查是否是重复内容（使用文件路径作为内容标识）
-        const duplicateItemId = checkDuplicateContent(imagePath)
+        // 检查是否是重复内容
+        const duplicateItemId = checkDuplicateContent(imageDataUrl)
         if (duplicateItemId) {
           console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
           await moveItemToFront(duplicateItemId)
           return
         }
 
+        // 获取当前活动窗口信息
+        let sourceAppInfo: { name: string; icon: string | null } = {
+          name: 'Unknown',
+          icon: null
+        }
+        
+        console.log('🔍 [图片] 开始获取源应用信息...')
+        try {
+          console.log('🔍 [图片] 调用 get_active_window_info 命令')
+          sourceAppInfo = await invoke('get_active_window_info') as { name: string; icon: string | null }
+          console.log('✅ [图片] 获取到源应用信息:', {
+            name: sourceAppInfo.name,
+            hasIcon: sourceAppInfo.icon !== null,
+            iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
+          })
+        } catch (error) {
+          console.error('❌ [图片] 获取源应用信息失败:', error)
+          console.error('❌ [图片] 错误详情:', JSON.stringify(error))
+        }
+
         const item = {
-          content: thumbnail, // 使用缩略图用于列表显示
+          content: imageDataUrl, // 直接使用base64数据
           type: 'image',
           timestamp: new Date().toISOString(),
           isFavorite: false,
-          imagePath: imagePath, // 存储完整图片的路径
-          sourceAppName: sourceAppName,
-          sourceAppIcon: sourceAppIcon
+          imagePath: null, // 新插件暂时不支持文件路径
+          sourceAppName: sourceAppInfo.name,
+          sourceAppIcon: sourceAppInfo.icon
         }
         
         // 插入新记录到数据库
@@ -947,6 +994,11 @@ onUnmounted(() => {
   if (unlistenClipboardImage) {
     unlistenClipboardImage()
     unlistenClipboardImage = null
+  }
+  
+  if (unlistenClipboard) {
+    unlistenClipboard()
+    unlistenClipboard = null
   }
   
   // 清理定期内存清理定时器

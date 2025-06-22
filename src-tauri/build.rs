@@ -15,7 +15,8 @@ fn main() {
                 "clear_memory_cache",
                 "force_memory_cleanup",
                 "start_new_clipboard_watcher",
-                "stop_clipboard_watcher"
+                "stop_clipboard_watcher",
+                "get_active_window_info"
             ]))
     ).unwrap();
 }
