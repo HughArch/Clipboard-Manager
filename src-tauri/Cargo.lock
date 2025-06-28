@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Clipboard-Manager"
-version = "1.0.109"
+version = "1.0.110"
 dependencies = [
  "base64 0.21.7",
  "chrono",

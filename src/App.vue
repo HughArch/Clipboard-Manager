@@ -28,8 +28,10 @@ interface AppSettings {
 }
 
 // 内存中的历史记录限制 - 更严格的限制
-const MAX_MEMORY_ITEMS = 100 // 降低从200到100
-const MAX_IMAGE_PREVIEW_SIZE = 2 * 1024 * 1024 // 降低从5MB到2MB
+const MAX_MEMORY_ITEMS = 300
+const MAX_IMAGE_PREVIEW_SIZE = 5 * 1024 * 1024
+const MEMORY_CLEAN_INTERVAL = 30* 60 * 1000
+const HISTORY_CLEAN_INTERVAL = 60 * 60 * 1000
 
 // 保存设置的函数
 const saveSettings = async (settings: AppSettings) => {
@@ -71,6 +73,7 @@ let unlistenClipboardText: (() => void) | null = null
 let unlistenClipboardImage: (() => void) | null = null
 let unlistenClipboard: (() => Promise<void>) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
+let historyCleanupInterval: ReturnType<typeof setInterval> | null = null
 
 // 防重复机制：记录最近处理的图片和文本
 let lastImageProcessTime = 0
@@ -165,6 +168,11 @@ const unlistenFocus = ref<(() => void) | null>(null)
 const resetToDefault = async () => {
   // 清理搜索框内容
   searchQuery.value = ''
+  
+  // 如果在搜索模式，退出搜索模式
+  if (isInSearchMode) {
+    await exitSearchMode()
+  }
   
   // 等待下一个tick以确保过滤后的历史列表已更新
   await nextTick()
@@ -387,6 +395,18 @@ const moveItemToFront = async (itemId: number) => {
         selectedItem.value = item
         console.log('Updated selected item reference after move to front')
       }
+      
+      // 如果在搜索模式下，也需要更新原始数据中的对应项目
+      if (isInSearchMode) {
+        const originalIndex = originalClipboardHistory.findIndex(origItem => origItem.id === itemId)
+        if (originalIndex !== -1) {
+          // 从原位置移除
+          originalClipboardHistory.splice(originalIndex, 1)
+          // 添加到最前面并更新时间戳
+          originalClipboardHistory.unshift({ ...item, timestamp: newTimestamp })
+          console.log('Updated item position in original data as well')
+        }
+      }
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       console.warn('Item not found in memory, reloading from database:', itemId)
@@ -529,15 +549,27 @@ const handleKeyDown = (e: KeyboardEvent) => {
   // 如果没有历史记录，只处理标签页切换
   if (!filteredHistory.value.length) return
 
-  const currentIndex = filteredHistory.value.findIndex(item => item.id === selectedItem.value?.id)
+  // 确保filteredHistory是最新的，避免状态不同步
+  const currentFilteredList = filteredHistory.value
+  const currentIndex = currentFilteredList.findIndex((item: any) => item.id === selectedItem.value?.id)
   let newIndex = currentIndex
 
   if (e.key === 'ArrowUp') {
     e.preventDefault()
-    newIndex = currentIndex > 0 ? currentIndex - 1 : filteredHistory.value.length - 1
+    if (currentIndex === -1) {
+      // 如果当前没有选中项，选中第一个
+      newIndex = 0
+    } else {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : currentFilteredList.length - 1
+    }
   } else if (e.key === 'ArrowDown') {
     e.preventDefault()
-    newIndex = currentIndex < filteredHistory.value.length - 1 ? currentIndex + 1 : 0
+    if (currentIndex === -1) {
+      // 如果当前没有选中项，选中第一个
+      newIndex = 0
+    } else {
+      newIndex = currentIndex < currentFilteredList.length - 1 ? currentIndex + 1 : 0
+    }
   } else if (e.key === 'Enter') {
     e.preventDefault()
     // 按Enter键复制当前选中的项目到剪贴板
@@ -547,11 +579,21 @@ const handleKeyDown = (e: KeyboardEvent) => {
     return
   }
 
-  if (newIndex !== currentIndex) {
-    selectedItem.value = filteredHistory.value[newIndex]
-    // 滚动到新选中的条目
-    if (selectedItem.value) {
-      scrollToSelectedItem(selectedItem.value.id)
+  // 确保新索引有效
+  if (newIndex >= 0 && newIndex < currentFilteredList.length && newIndex !== currentIndex) {
+    const newSelectedItem = currentFilteredList[newIndex]
+    
+    // 验证新选中的项目确实存在且有有效ID
+    if (newSelectedItem && newSelectedItem.id) {
+      selectedItem.value = newSelectedItem
+      console.log('Keyboard navigation: selected item', newSelectedItem.id, 'at index', newIndex)
+      
+      // 滚动到新选中的条目
+      nextTick(() => {
+        scrollToSelectedItem(newSelectedItem.id)
+      })
+    } else {
+      console.warn('Invalid item at index', newIndex, newSelectedItem)
     }
   }
 }
@@ -561,7 +603,7 @@ const handleDoubleClick = (item: any) => {
   copyToClipboard(item)
 }
 
-const handleTabChange = (index: number) => {
+const handleTabChange = async (index: number) => {
   console.log('Tab changed to:', index)
   selectedTabIndex.value = index
   // 重置搜索和选中状态
@@ -572,8 +614,13 @@ const handleTabChange = (index: number) => {
   currentOffset.value = 0
   hasMoreData.value = true
   
-  // 重新加载对应标签页的数据
-  loadRecentHistory()
+  // 如果在搜索模式，先退出搜索模式
+  if (isInSearchMode) {
+    await exitSearchMode()
+  } else {
+    // 重新加载对应标签页的数据
+    await loadRecentHistory()
+  }
   
   // 切换标签页后自动聚焦搜索框
   focusSearchInput()
@@ -628,6 +675,10 @@ watch(selectedItem, async (newItem) => {
   }
 })
 
+// 保存原始数据的变量
+let originalClipboardHistory: any[] = []
+let isInSearchMode = false
+
 // 添加数据库搜索函数
 const searchFromDatabase = async () => {
   if (!db || !searchQuery.value.trim()) {
@@ -637,6 +688,13 @@ const searchFromDatabase = async () => {
   isSearching.value = true
   
   try {
+    // 如果是第一次搜索，保存当前的内存数据
+    if (!isInSearchMode) {
+      originalClipboardHistory = [...clipboardHistory.value]
+      isInSearchMode = true
+      console.log('进入搜索模式，保存原始数据:', originalClipboardHistory.length, '条')
+    }
+    
     const query = searchQuery.value.toLowerCase()
     const isFavoritesTab = selectedTabIndex.value === 1
     
@@ -658,20 +716,33 @@ const searchFromDatabase = async () => {
     
     const rows = await db.select(sql, params)
     
-    // 将搜索结果转换为前端格式
-    const searchResults = rows.map((row: any) => ({
-      id: row.id,
-      content: row.content,
-      type: row.type,
-      timestamp: row.timestamp,
-      isFavorite: row.is_favorite === 1,
-      imagePath: row.image_path ?? null,
-      sourceAppName: row.source_app_name ?? 'Unknown',
-      sourceAppIcon: row.source_app_icon ?? null
-    }))
+    // 将搜索结果转换为前端格式，确保去重
+    const seenIds = new Set()
+    const searchResults = rows
+      .map((row: any) => ({
+        id: row.id,
+        content: row.content,
+        type: row.type,
+        timestamp: row.timestamp,
+        isFavorite: row.is_favorite === 1,
+        imagePath: row.image_path ?? null,
+        sourceAppName: row.source_app_name ?? 'Unknown',
+        sourceAppIcon: row.source_app_icon ?? null
+      }))
+      .filter((item: any) => {
+        if (seenIds.has(item.id)) {
+          console.warn('搜索结果中发现重复ID:', item.id)
+          return false
+        }
+        seenIds.add(item.id)
+        return true
+      })
     
     // 更新内存中的历史记录为搜索结果
     clipboardHistory.value = searchResults
+    
+    // 重置选中状态，避免状态混乱
+    selectedItem.value = null
     
     console.log(`数据库搜索完成，找到 ${searchResults.length} 条记录`)
   } catch (error) {
@@ -693,14 +764,64 @@ function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (..
 // 创建防抖的搜索函数
 const debouncedSearch = debounce(searchFromDatabase, 300)
 
+// 退出搜索模式，恢复原始数据
+const exitSearchMode = async () => {
+  if (isInSearchMode) {
+    console.log('退出搜索模式，恢复原始数据:', originalClipboardHistory.length, '条')
+    
+    // 合并在搜索期间可能新增的数据
+    const currentNewestItems = clipboardHistory.value.filter((item: any) => {
+      // 检查是否是在搜索期间新增的（时间戳比保存的最新项目更新）
+      if (originalClipboardHistory.length === 0) return true
+      
+      const newestOriginalTimestamp = new Date(originalClipboardHistory[0]?.timestamp || 0).getTime()
+      const itemTimestamp = new Date(item.timestamp).getTime()
+      
+      return itemTimestamp > newestOriginalTimestamp
+    })
+    
+    // 去重：从原始数据中移除可能重复的项目
+    const deduplicatedOriginal = originalClipboardHistory.filter((originalItem: any) => {
+      return !currentNewestItems.some((newItem: any) => newItem.id === originalItem.id)
+    })
+    
+    // 使用Set进行最终去重，确保没有重复ID
+    const allItems = [...currentNewestItems, ...deduplicatedOriginal]
+    const seenIds = new Set()
+    const finalDeduplicatedItems = allItems.filter((item: any) => {
+      if (seenIds.has(item.id)) {
+        console.warn('退出搜索时发现重复ID:', item.id)
+        return false
+      }
+      seenIds.add(item.id)
+      return true
+    })
+    
+    // 合并数据：确保按时间戳排序
+    clipboardHistory.value = finalDeduplicatedItems.sort((a: any, b: any) => 
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    )
+    
+    console.log(`数据恢复完成: ${currentNewestItems.length} 条新增 + ${deduplicatedOriginal.length} 条原始，最终去重后 ${finalDeduplicatedItems.length} 条`)
+    
+    // 清空保存的数据和重置选中状态
+    originalClipboardHistory = []
+    isInSearchMode = false
+    selectedItem.value = null
+  } else {
+    // 如果不在搜索模式，正常重新加载
+    await loadRecentHistory()
+  }
+}
+
 // 监听搜索框变化
 watch(searchQuery, async (newQuery) => {
   if (newQuery.trim()) {
     // 如果有搜索内容，从数据库搜索
     debouncedSearch()
   } else {
-    // 如果搜索框为空，重新加载最近的记录
-    await loadRecentHistory()
+    // 如果搜索框为空，退出搜索模式
+    await exitSearchMode()
   }
 })
 
@@ -794,22 +915,36 @@ const loadRecentHistory = async () => {
     
     const rows = await db.select(sql, [MAX_MEMORY_ITEMS])
     
-    clipboardHistory.value = rows.map((row: any) => ({
-      id: row.id,
-      content: row.content,
-      type: row.type,
-      timestamp: row.timestamp,
-      isFavorite: row.is_favorite === 1,
-      imagePath: row.image_path ?? null,
-      sourceAppName: row.source_app_name ?? 'Unknown',
-      sourceAppIcon: row.source_app_icon ?? null
-    }))
+    // 确保去重
+    const seenIds = new Set()
+    const deduplicatedHistory = rows
+      .map((row: any) => ({
+        id: row.id,
+        content: row.content,
+        type: row.type,
+        timestamp: row.timestamp,
+        isFavorite: row.is_favorite === 1,
+        imagePath: row.image_path ?? null,
+        sourceAppName: row.source_app_name ?? 'Unknown',
+        sourceAppIcon: row.source_app_icon ?? null
+      }))
+      .filter((item: any) => {
+        if (seenIds.has(item.id)) {
+          console.warn('加载历史记录时发现重复ID:', item.id)
+          return false
+        }
+        seenIds.add(item.id)
+        return true
+      })
     
-    // 重置分页状态
+    clipboardHistory.value = deduplicatedHistory
+    
+    // 重置分页状态和选中状态
     currentOffset.value = clipboardHistory.value.length
     hasMoreData.value = true
+    selectedItem.value = null
     
-    console.log(`加载了 ${clipboardHistory.value.length} 条最近的记录`)
+    console.log(`加载了 ${clipboardHistory.value.length} 条最近的记录（去重后）`)
   } catch (error) {
     console.error('加载历史记录失败:', error)
   }
@@ -912,10 +1047,30 @@ onMounted(async () => {
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
           
-          // 添加到内存列表的开头
-          clipboardHistory.value.unshift(Object.assign({ id }, item))
+          const newItem = Object.assign({ id }, item)
+          
+          // 检查内存中是否已存在相同ID的项目，避免重复
+          const existingIndex = clipboardHistory.value.findIndex((historyItem: any) => historyItem.id === id)
+          if (existingIndex === -1) {
+            // 添加到内存列表的开头
+            clipboardHistory.value.unshift(newItem)
+            
+            // 如果在搜索模式下，也需要添加到原始数据
+            if (isInSearchMode) {
+              const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
+              if (originalExistingIndex === -1) {
+                originalClipboardHistory.unshift(newItem)
+                console.log('新项目也添加到原始数据中')
+              }
+            }
+            
+            console.log('新文本项目已添加到内存，ID:', id)
+          } else {
+            console.warn('内存中已存在相同ID的项目，跳过添加:', id)
+          }
           
           // 立即执行内存清理
+          console.log('执行内存清理')
           trimMemoryHistory()
         } catch (dbError) {
           console.error('数据库操作失败:', dbError)
@@ -1009,8 +1164,27 @@ onMounted(async () => {
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
           
-          // 添加到内存列表的开头
-          clipboardHistory.value.unshift(Object.assign({ id }, item))
+          const newItem = Object.assign({ id }, item)
+          
+          // 检查内存中是否已存在相同ID的项目，避免重复
+          const existingIndex = clipboardHistory.value.findIndex((historyItem: any) => historyItem.id === id)
+          if (existingIndex === -1) {
+            // 添加到内存列表的开头
+            clipboardHistory.value.unshift(newItem)
+            
+            // 如果在搜索模式下，也需要添加到原始数据
+            if (isInSearchMode) {
+              const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
+              if (originalExistingIndex === -1) {
+                originalClipboardHistory.unshift(newItem)
+                console.log('新图片项目也添加到原始数据中')
+              }
+            }
+            
+            console.log('新图片项目已添加到内存，ID:', id)
+          } else {
+            console.warn('内存中已存在相同ID的图片项目，跳过添加:', id)
+          }
           
           // 立即执行内存清理
           trimMemoryHistory()
@@ -1055,6 +1229,12 @@ onMounted(async () => {
     // 检查初始最大化状态
     await checkMaximizedState()
     
+    // 开发环境下将调试函数绑定到window对象
+    if (process.env.NODE_ENV === 'development') {
+      (window as any).checkDataConsistency = checkDataConsistency
+      console.log('调试函数 checkDataConsistency 已绑定到 window 对象')
+    }
+    
     // 监听窗口大小变化事件
     const unlistenResize = await appWindow.listen('tauri://resize', async () => {
       await checkMaximizedState()
@@ -1065,7 +1245,7 @@ onMounted(async () => {
       unlistenResize()
     })
 
-    // 设置更频繁的内存清理（每30秒执行一次，更激进的内存管理）
+    // 定期内存清理
     memoryCleanupInterval = setInterval(() => {
       console.log('执行定期内存清理')
       trimMemoryHistory()
@@ -1074,22 +1254,6 @@ onMounted(async () => {
       if (!selectedItem.value || selectedItem.value.type !== 'image') {
         fullImageContent.value = null
       }
-      
-      // 更积极的历史记录清理
-      if (clipboardHistory.value.length > 200) {
-        clipboardHistory.value = clipboardHistory.value.slice(0, 150)
-        console.log('剪贴板历史记录已清理到150条')
-      }
-      
-      // 清理大文本内容
-      clipboardHistory.value.forEach(item => {
-        if (item.content && item.content.length > 3000) {
-          // 对于长文本，只保留前300字符用于显示
-          if (!item.displayContent) {
-            item.displayContent = item.content.substring(0, 300) + '...'
-          }
-        }
-      })
       
       // 手动触发垃圾回收（如果可用）
       if (typeof (window as any).gc === 'function') {
@@ -1100,7 +1264,27 @@ onMounted(async () => {
       if (typeof formatTime === 'function' && formatTime.clearCache) {
         formatTime.clearCache()
       }
-    }, 30 * 1000) // 从2分钟减少到30秒
+    }, MEMORY_CLEAN_INTERVAL) // 从2分钟减少到30秒
+
+    // 设置定期数据库历史清理
+    // 这将清理超过设置时间限制的过期历史记录，释放存储空间
+    historyCleanupInterval = setInterval(async () => {
+      try {
+        console.log('🧹 开始执行定期数据库历史清理...')
+        await invoke('cleanup_history')
+        console.log('✅ 定期数据库历史清理完成')
+        
+        // 清理完成后，如果不在搜索模式，重新加载最近的记录以反映清理后的状态
+        if (!isInSearchMode && !searchQuery.value.trim()) {
+          await loadRecentHistory()
+          console.log('📝 历史清理后已重新加载最近记录')
+        }
+      } catch (error) {
+        console.error('❌ 定期数据库历史清理失败:', error)
+      }
+    }, HISTORY_CLEAN_INTERVAL) // 每小时执行一次 (60分钟 * 60秒 * 1000毫秒)
+    
+    console.log('⏰ 定期历史清理定时器已启动，将每小时自动清理一次过期记录')
   } catch (error) {
     console.error('Database error:', error)
   }
@@ -1140,6 +1324,13 @@ onUnmounted(() => {
     memoryCleanupInterval = null
   }
   
+  // 清理定期历史清理定时器
+  if (historyCleanupInterval) {
+    clearInterval(historyCleanupInterval)
+    historyCleanupInterval = null
+    console.log('定期历史清理定时器已清理')
+  }
+  
   // 清理图片内容，释放内存
   fullImageContent.value = null
   
@@ -1149,6 +1340,10 @@ onUnmounted(() => {
   // 重置其他状态
   selectedItem.value = null
   searchQuery.value = ''
+  
+  // 清理搜索模式状态
+  isInSearchMode = false
+  originalClipboardHistory = []
   
   // 清理数据库连接
   if (db) {
@@ -1178,6 +1373,75 @@ watch(selectedTabIndex, () => {
 })
 
 
+
+// 数据一致性检查函数（调试用）
+const checkDataConsistency = () => {
+  console.log('=== 数据一致性检查 ===')
+  console.log('clipboardHistory 长度:', clipboardHistory.value.length)
+  console.log('filteredHistory 长度:', filteredHistory.value.length)
+  console.log('selectedItem ID:', selectedItem.value?.id)
+  console.log('isInSearchMode:', isInSearchMode)
+  console.log('originalClipboardHistory 长度:', originalClipboardHistory.length)
+  
+  // 检查重复ID
+  const ids = clipboardHistory.value.map((item: any) => item.id)
+  const uniqueIds = new Set(ids)
+  if (ids.length !== uniqueIds.size) {
+    console.warn('⚠️ 发现重复ID!', ids.length, '项 vs', uniqueIds.size, '唯一ID')
+    
+    // 找出重复的ID
+    const duplicates: any[] = []
+    const seen = new Set()
+    ids.forEach((id: any) => {
+      if (seen.has(id)) {
+        duplicates.push(id)
+      }
+      seen.add(id)
+    })
+    console.warn('重复的ID:', duplicates)
+  } else {
+    console.log('✅ 无重复ID')
+  }
+  
+  // 检查选中项是否在列表中
+  if (selectedItem.value) {
+    const found = filteredHistory.value.find((item: any) => item.id === selectedItem.value?.id)
+    if (!found) {
+      console.warn('⚠️ 选中项不在过滤列表中!', selectedItem.value.id)
+    } else {
+      console.log('✅ 选中项有效')
+    }
+  }
+  
+  console.log('=== 检查结束 ===')
+}
+
+// 手动清理过期历史记录
+const manualCleanupHistory = async () => {
+  try {
+    console.log('🧹 手动执行历史清理...')
+    
+    // 显示确认对话框
+    if (!confirm('确定要清理过期的历史记录吗？\n\n这将删除超过设置时间限制的剪贴板记录，但不会影响收藏的项目。')) {
+      return
+    }
+    
+    await invoke('cleanup_history')
+    console.log('✅ 手动历史清理完成')
+    
+    // 清理完成后重新加载最近的记录
+    if (!isInSearchMode && !searchQuery.value.trim()) {
+      await loadRecentHistory()
+      console.log('📝 历史清理后已重新加载最近记录')
+    }
+    
+    // 用户反馈
+    alert('✅ 过期历史记录清理完成！\n\n旧的剪贴板记录已被清理，收藏的项目保持不变。')
+  } catch (error) {
+    console.error('❌ 手动历史清理失败:', error)
+    alert('❌ 历史清理失败: ' + error)
+  }
+}
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
 const resetDatabase = async () => {
@@ -1281,6 +1545,13 @@ const resetDatabase = async () => {
           >
             Force Clean
           </button> -->
+          <!-- <button 
+            class="px-3 py-2 text-sm font-medium text-green-600 hover:text-green-900 hover:bg-green-100 rounded-lg transition-colors duration-200"
+            @click="manualCleanupHistory"
+            title="清理过期历史记录"
+          >
+            Cleanup
+          </button> -->
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
             @click="resetDatabase"
@@ -1369,8 +1640,8 @@ const resetDatabase = async () => {
                   :data-item-id="item.id"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
@@ -1481,8 +1752,8 @@ const resetDatabase = async () => {
                   :data-item-id="item.id"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"

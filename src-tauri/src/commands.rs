@@ -1,21 +1,14 @@
 use tauri::{AppHandle, Manager};
 use crate::types::{AppSettings, DatabaseState};
-use serde::{Serialize};
 use std::fs;
 use std::path::PathBuf;
 use dirs_next::config_dir;
-use std::time::Duration;
 use base64::{engine::general_purpose, Engine as _};
 use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut};
-// 使用第三方剪贴板插件，解决arboard内存泄漏问题
 use std::env;
 use chrono;
 use tokio;
 use tokio::sync::Mutex;
-
-use std::collections::{HashMap, BTreeMap};
-use std::sync::{Arc, RwLock};
-use std::sync::atomic::{AtomicBool, Ordering};
 use sqlx::{self, Row};
 use enigo::{Enigo, Key, Keyboard, Settings};
 
@@ -326,27 +319,6 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
     Ok(())
 }
 
-// 检查 Windows 自启动状态
-#[cfg(target_os = "windows")]
-fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
-    use std::process::Command;
-    
-    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
-    
-    let output = Command::new("reg")
-        .args(&[
-            "query",
-            key_path,
-            "/v",
-            app_name
-        ])
-        .output()
-        .map_err(|e| format!("查询注册表失败: {}", e))?;
-        
-    // 如果查询成功且输出包含应用名称，说明自启动已启用
-    Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).contains(app_name))
-}
-
 // Windows 注册表操作
 #[cfg(target_os = "windows")]
 fn set_windows_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
@@ -405,10 +377,6 @@ fn set_windows_auto_start(_enable: bool, _app_name: &str, _exe_path: &PathBuf) -
     Err("当前系统不支持自启动功能".to_string())
 }
 
-#[cfg(not(target_os = "windows"))]
-fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
-    Ok(false)
-}
 
 #[tauri::command]
 pub async fn set_auto_start(_app: AppHandle, enable: bool) -> Result<(), String> {
@@ -418,12 +386,6 @@ pub async fn set_auto_start(_app: AppHandle, enable: bool) -> Result<(), String>
     set_windows_auto_start(enable, app_name, &exe_path)?;
     
     Ok(())
-}
-
-#[tauri::command]
-pub async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
-    let app_name = "ClipboardManager";
-    get_windows_auto_start_status(app_name)
 }
 
 #[tauri::command]
@@ -611,303 +573,3 @@ pub async fn load_image_file(image_path: String) -> Result<String, String> {
     Ok(data_url)
 }
 
-// 改进的图标缓存，使用LRU和更严格的内存管理
-
-struct IconCacheEntry {
-    icon: Option<String>,
-    access_time: std::time::Instant,
-}
-
-struct IconCache {
-    cache: HashMap<String, IconCacheEntry>,
-    access_order: BTreeMap<std::time::Instant, String>,
-    max_size: usize,
-}
-
-// 剪贴板监听器控制
-struct ClipboardWatcherState {
-    should_stop: Arc<AtomicBool>,
-}
-
-impl IconCache {
-    fn new(max_size: usize) -> Self {
-        Self {
-            cache: HashMap::new(),
-            access_order: BTreeMap::new(),
-            max_size,
-        }
-    }
-
-    fn get(&mut self, key: &str) -> Option<Option<String>> {
-        if let Some(entry) = self.cache.get_mut(key) {
-            // 更新访问时间
-            self.access_order.remove(&entry.access_time);
-            entry.access_time = std::time::Instant::now();
-            self.access_order.insert(entry.access_time, key.to_string());
-            Some(entry.icon.clone())
-        } else {
-            None
-        }
-    }
-
-    fn insert(&mut self, key: String, icon: Option<String>) {
-        let now = std::time::Instant::now();
-        
-        // 如果缓存已满，移除最旧的条目
-        while self.cache.len() >= self.max_size {
-            if let Some((oldest_time, oldest_key)) = self.access_order.pop_first() {
-                self.cache.remove(&oldest_key);
-            } else {
-                break;
-            }
-        }
-
-        let entry = IconCacheEntry {
-            icon,
-            access_time: now,
-        };
-
-        self.cache.insert(key.clone(), entry);
-        self.access_order.insert(now, key);
-    }
-
-    fn clear(&mut self) {
-        self.cache.clear();
-        self.access_order.clear();
-    }
-
-    fn len(&self) -> usize {
-        self.cache.len()
-    }
-}
-
-#[derive(Debug, Serialize, Clone)]
-struct SourceAppInfo {
-    name: String,
-    icon: Option<String>, // base64 encoded icon
-}
-
-// 添加限流机制，避免频繁获取窗口信息
-static LAST_WINDOW_INFO_CALL: std::sync::OnceLock<Arc<RwLock<(std::time::Instant, Option<SourceAppInfo>)>>> = std::sync::OnceLock::new();
-
-fn get_last_window_info() -> &'static Arc<RwLock<(std::time::Instant, Option<SourceAppInfo>)>> {
-    LAST_WINDOW_INFO_CALL.get_or_init(|| {
-        Arc::new(RwLock::new((std::time::Instant::now() - Duration::from_secs(10), None)))
-    })
-}
-
-// 使用改进的图标缓存
-static ICON_CACHE: std::sync::OnceLock<Arc<RwLock<IconCache>>> = std::sync::OnceLock::new();
-
-fn get_icon_cache() -> &'static Arc<RwLock<IconCache>> {
-    ICON_CACHE.get_or_init(|| Arc::new(RwLock::new(IconCache::new(10)))) // 减少到10个条目
-}
-
-// 手动清理内存缓存
-#[tauri::command]
-pub async fn clear_memory_cache() -> Result<(), String> {
-    // 清理图标缓存
-    cleanup_icon_cache();
-    
-    // 强制清理所有缓存
-    let cache = get_icon_cache();
-    if let Ok(mut cache_guard) = cache.write() {
-        cache_guard.clear();
-        println!("图标缓存已完全清空");
-    }
-    
-    // 清理窗口信息缓存
-    if let Ok(mut guard) = get_last_window_info().write() {
-        guard.1 = None;
-        println!("窗口信息缓存已清理");
-    }
-    
-    println!("内存缓存已清理");
-    Ok(())
-}
-
-// 更严格的图标缓存清理
-fn cleanup_icon_cache() {
-    let cache = get_icon_cache();
-    if let Ok(mut cache_guard) = cache.write() {
-        if cache_guard.len() > 5 {  // 只保留5个最新的
-            // 清空一半缓存
-            let to_clear = cache_guard.len() / 2;
-            for _ in 0..to_clear {
-                if let Some((oldest_time, oldest_key)) = cache_guard.access_order.pop_first() {
-                    cache_guard.cache.remove(&oldest_key);
-                } else {
-                    break;
-                }
-            }
-            println!("清理图标缓存，保留 {} 项", cache_guard.len());
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn force_memory_cleanup() -> Result<String, String> {
-    println!("开始强制内存清理...");
-    
-    // 强制清理所有内存缓存
-    cleanup_icon_cache();
-    
-    // 清空图标缓存
-    let cache = get_icon_cache();
-    let cache_size = if let Ok(mut cache_guard) = cache.write() {
-        let size = cache_guard.len();
-        cache_guard.clear();
-        size
-    } else {
-        0
-    };
-    
-    // 清理窗口信息缓存
-    if let Ok(mut guard) = get_last_window_info().write() {
-        guard.1 = None;
-    }
-    
-    // 尝试强制内存回收 - 多次调用以确保效果
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use winapi::um::winbase::{SetProcessWorkingSetSize};
-        use winapi::um::processthreadsapi::GetCurrentProcess;
-        
-        // 多次调用SetProcessWorkingSetSize以强制内存回收
-        for _ in 0..3 {
-            let result = SetProcessWorkingSetSize(
-                GetCurrentProcess(),
-                usize::MAX,
-                usize::MAX,
-            );
-            if result == 0 {
-                println!("警告: SetProcessWorkingSetSize 调用失败");
-            }
-            // 在调用之间稍作等待
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        
-        // 额外调用以确保内存清理效果
-        let additional_result = SetProcessWorkingSetSize(
-            GetCurrentProcess(),
-            0,
-            0,
-        );
-        if additional_result == 0 {
-            println!("警告: 额外的内存清理调用失败");
-        }
-    }
-    
-    let message = format!(
-        "强制内存清理完成 - 清理了 {} 个图标缓存项，执行了多轮内存回收", 
-        cache_size
-    );
-    println!("{}", message);
-    Ok(message)
-}
-
-#[tauri::command]
-pub async fn get_memory_stats() -> Result<String, String> {
-    let cache = get_icon_cache();
-    let cache_size = if let Ok(cache_guard) = cache.read() {
-        cache_guard.len()
-    } else {
-        0
-    };
-    
-    let window_cache_status = if let Ok(guard) = get_last_window_info().read() {
-        if guard.1.is_some() { "已缓存" } else { "未缓存" }
-    } else {
-        "无法访问"
-    };
-    
-    #[cfg(target_os = "windows")]
-    let memory_info = unsafe {
-        use winapi::um::psapi::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
-        use winapi::um::processthreadsapi::GetCurrentProcess;
-        
-        let mut pmc: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
-        pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-        
-        if GetProcessMemoryInfo(GetCurrentProcess(), &mut pmc, pmc.cb) != 0 {
-            format!("工作集: {} MB, 峰值工作集: {} MB", 
-                    pmc.WorkingSetSize / 1024 / 1024,
-                    pmc.PeakWorkingSetSize / 1024 / 1024)
-        } else {
-            "无法获取内存信息".to_string()
-        }
-    };
-    
-    #[cfg(not(target_os = "windows"))]
-    let memory_info = "非Windows系统".to_string();
-    
-    let stats = format!(
-        "内存统计:\n图标缓存项: {}\n窗口信息缓存: {}\n{}",
-        cache_size, window_cache_status, memory_info
-    );
-    
-    Ok(stats)
-}
-
-#[tauri::command]
-pub async fn stop_clipboard_watcher(app: AppHandle) -> Result<(), String> {
-    if let Some(watcher_state) = app.try_state::<ClipboardWatcherState>() {
-        watcher_state.should_stop.store(true, Ordering::Relaxed);
-        println!("剪贴板监听器停止信号已发送");
-        Ok(())
-    } else {
-        Err("无法找到剪贴板监听器状态".to_string())
-    }
-}
-
-// 新的剪贴板监听器 - 使用事件驱动而不是轮询
-fn start_clipboard_watcher(app: AppHandle) -> Arc<AtomicBool> {
-    let should_stop = Arc::new(AtomicBool::new(false));
-    
-    // 使用新的插件，剪贴板监听由插件自动处理
-    // 不再需要手动轮询，避免了arboard的内存泄漏问题
-    
-    // TODO: 这里将由前端通过事件监听器设置剪贴板监听
-    // tauri-plugin-clipboard 插件会在前端处理剪贴板事件
-    
-    println!("剪贴板监听器已初始化（事件驱动模式，无内存泄漏）");
-    
-    should_stop
-}
-
-#[tauri::command]
-pub async fn start_new_clipboard_watcher(app: AppHandle) -> Result<(), String> {
-    println!("开始重启剪贴板监听器...");
-    
-    // 停止现有的监听器
-    if let Some(watcher_state) = app.try_state::<ClipboardWatcherState>() {
-        watcher_state.should_stop.store(true, Ordering::Relaxed);
-        println!("已发送停止信号给旧监听器");
-    }
-    
-    // 等待更长时间确保旧监听器完全停止
-    tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-    
-    // 执行强制内存清理
-    let _ = force_memory_cleanup().await;
-    
-    // 再等待一段时间
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    
-    // 启动新的监听器
-    let should_stop = start_clipboard_watcher(app.clone());
-    
-    // 更新状态
-    app.manage(ClipboardWatcherState { should_stop });
-    
-    println!("新的剪贴板监听器已启动");
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn ensure_database_compatibility(_app: AppHandle) -> Result<(), String> {
-    // Database compatibility is now handled by tauri_plugin_sql migration system
-    // This function is kept for backward compatibility but does nothing
-    println!("数据库兼容性由迁移系统自动处理");
-    Ok(())
-} 

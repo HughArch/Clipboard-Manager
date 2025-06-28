@@ -13,11 +13,11 @@ use tauri::Manager;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{ShortcutState};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use tokio::sync::Mutex;
-use sqlx::{SqlitePool, sqlite::SqliteConnectOptions, Row};
+use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
 // 初始化数据库连接
 async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
@@ -201,20 +201,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::save_settings,
-            commands::load_settings,
             commands::register_shortcut,
-            commands::set_auto_start,
-            commands::get_auto_start_status,
-            commands::cleanup_history,
             commands::auto_paste,
             commands::reset_database,
             commands::load_image_file,
-            commands::clear_memory_cache,
-            commands::force_memory_cleanup,
-            commands::get_memory_stats,
-            commands::stop_clipboard_watcher,
-            commands::start_new_clipboard_watcher,
-            commands::ensure_database_compatibility,
+            commands::cleanup_history,
             window_info::get_active_window_info
         ])
         .run(tauri::generate_context!())
