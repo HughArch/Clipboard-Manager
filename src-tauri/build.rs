@@ -10,6 +10,7 @@ fn main() {
                 "get_auto_start_status", 
                 "cleanup_history", 
                 "auto_paste",
+                "smart_paste_to_app",
 
                 "reset_database",
                 "load_image_file",

@@ -9,7 +9,7 @@ mod commands;
 pub use types::*;
 
 // 基础导入
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -89,12 +89,7 @@ pub fn run() {
                         if window.is_visible().unwrap_or(false) {
                             let _ = window.hide();
                         } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                            // 添加小延迟确保窗口完全显示
-                            std::thread::sleep(std::time::Duration::from_millis(50));
-                            // 再次设置焦点，确保焦点在 webview 上
-                            let _ = window.set_focus();
+                            show_window_with_context(app);
                         }
                     }
                 }
@@ -202,6 +197,7 @@ pub fn run() {
             commands::greet,
             commands::save_settings,
             commands::auto_paste,
+            commands::smart_paste_to_app,
             commands::reset_database,
             commands::load_image_file,
             commands::cleanup_history,
@@ -241,4 +237,33 @@ fn show_window(app: &tauri::AppHandle) {
         // 再次设置焦点，确保焦点在 webview 上
         let _ = window.set_focus();
     }
+}
+
+// 改进的显示窗口函数 - 在显示前获取活动窗口上下文
+fn show_window_with_context(app: &tauri::AppHandle) {
+    // 先获取当前活动窗口信息（在显示剪贴板管理器之前）
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        // 获取活动窗口信息
+        let active_app_info = window_info::get_active_window_info().await;
+        
+        // 显示窗口
+        if let Some(window) = app_handle.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+            
+            // 将活动窗口信息发送给前端
+            if let Ok(app_info) = active_app_info {
+                println!("📤 发送前一个活动应用信息到前端: {}", app_info.name);
+                let _ = window.emit("previous-app-info", app_info);
+            } else {
+                println!("⚠️ 无法获取前一个活动应用信息");
+            }
+            
+            // 添加小延迟确保窗口完全显示
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            // 再次设置焦点，确保焦点在 webview 上
+            let _ = window.set_focus();
+        }
+    });
 }

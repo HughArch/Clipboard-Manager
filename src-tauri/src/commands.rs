@@ -458,19 +458,19 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
     cleanup_expired_data(&app, &settings).await
 }
 
-// 跨平台自动粘贴功能 - 使用系统原生方法
+// 改进的自动粘贴功能 - 先激活目标应用，再执行粘贴
 #[tauri::command]
 pub async fn auto_paste() -> Result<(), String> {
-    println!("开始执行跨平台自动粘贴...");
+    println!("开始执行智能自动粘贴...");
     
-    // 给用户时间切换到目标应用
+    // 短暂等待确保窗口已隐藏
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     
-    // 在新线程中执行粘贴操作，避免阻塞异步运行时
+    // 在新线程中执行粘贴操作
     let result = tokio::task::spawn_blocking(|| {
         #[cfg(target_os = "macos")]
         {
-            macos_auto_paste()
+            macos_simple_paste()
         }
         
         #[cfg(target_os = "windows")]
@@ -486,7 +486,7 @@ pub async fn auto_paste() -> Result<(), String> {
     
     match result {
         Ok(Ok(())) => {
-            println!("跨平台自动粘贴操作完成");
+            println!("智能自动粘贴操作完成");
             Ok(())
         }
         Ok(Err(e)) => {
@@ -500,105 +500,342 @@ pub async fn auto_paste() -> Result<(), String> {
     }
 }
 
-// macOS 专用的自动粘贴实现 - 使用 AppleScript
-#[cfg(target_os = "macos")]
-fn macos_auto_paste() -> Result<(), String> {
-    use std::process::Command;
+// 新增：智能粘贴功能 - 先激活指定应用，再粘贴
+#[tauri::command]
+pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> Result<(), String> {
+    println!("开始执行智能粘贴到应用: {} (bundle: {:?})", app_name, bundle_id);
     
-    println!("使用 AppleScript 执行 macOS 自动粘贴...");
+    // 短暂等待确保窗口已隐藏
+    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     
-    // 使用 AppleScript 模拟 Cmd+V 按键
-    let applescript = r#"
-        tell application "System Events"
-            keystroke "v" using command down
-        end tell
-    "#;
+    // 克隆参数用于后续日志输出
+    let app_name_for_log = app_name.clone();
+    let bundle_id_clone = bundle_id.clone();
     
-    let output = Command::new("osascript")
-        .arg("-e")
-        .arg(applescript)
-        .output()
-        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    // 在新线程中执行激活和粘贴操作
+    let result = tokio::task::spawn_blocking(move || {
+        // 先激活目标应用程序
+        activate_application(&app_name, bundle_id.as_deref())?;
+        
+        // 短暂等待应用程序激活
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        
+        // 然后执行粘贴
+        #[cfg(target_os = "macos")]
+        {
+            macos_simple_paste()
+        }
+        
+        #[cfg(target_os = "windows")]
+        {
+            windows_auto_paste()
+        }
+        
+        #[cfg(target_os = "linux")]
+        {
+            linux_auto_paste()
+        }
+    }).await;
     
-    if output.status.success() {
-        println!("AppleScript 执行成功，粘贴操作完成");
-        Ok(())
-    } else {
-        let error_msg = String::from_utf8_lossy(&output.stderr);
-        println!("AppleScript 执行失败: {}", error_msg);
-        Err(format!("AppleScript 执行失败: {}", error_msg))
+    match result {
+        Ok(Ok(())) => {
+            println!("智能粘贴到应用 {} 完成", app_name_for_log);
+            Ok(())
+        }
+        Ok(Err(e)) => {
+            println!("智能粘贴失败: {}", e);
+            Err(format!("粘贴操作失败: {}", e))
+        }
+        Err(e) => {
+            println!("粘贴任务执行失败: {}", e);
+            Err(format!("粘贴任务失败: {}", e))
+        }
     }
 }
 
-// Windows 专用的自动粘贴实现 - 使用 enigo
-#[cfg(target_os = "windows")]
-fn windows_auto_paste() -> Result<(), String> {
-    use enigo::{Enigo, Settings, Direction, Key, Keyboard};
-    
-    println!("使用 enigo 执行 Windows 自动粘贴...");
-    
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
-    
-    // Windows 使用 Ctrl+V
-    enigo.key(Key::Control, Direction::Press)
-        .map_err(|e| format!("按下 Ctrl 键失败: {}", e))?;
-    enigo.key(Key::Unicode('v'), Direction::Press)
-        .map_err(|e| format!("按下 V 键失败: {}", e))?;
-    enigo.key(Key::Unicode('v'), Direction::Release)
-        .map_err(|e| format!("释放 V 键失败: {}", e))?;
-    enigo.key(Key::Control, Direction::Release)
-        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))?;
-    
-    println!("Windows 粘贴操作执行完成");
-    Ok(())
-}
-
-// Linux 专用的自动粘贴实现 - 使用 xdotool 或 enigo
-#[cfg(target_os = "linux")]
-fn linux_auto_paste() -> Result<(), String> {
+// 激活指定的应用程序
+fn activate_application(app_name: &str, bundle_id: Option<&str>) -> Result<(), String> {
     use std::process::Command;
     
-    println!("尝试使用 xdotool 执行 Linux 自动粘贴...");
+    #[cfg(target_os = "macos")]
+    {
+        println!("🎯 macOS: 激活应用程序 {} (bundle: {:?})", app_name, bundle_id);
+        
+        // 方法1: 如果有 bundle_id，优先使用 bundle identifier 激活（最可靠）
+        if let Some(bundle) = bundle_id {
+            if !bundle.is_empty() && bundle != "missing value" {
+                println!("尝试使用 bundle identifier 激活: {}", bundle);
+                let script = format!(r#"tell application id "{}" to activate"#, bundle);
+                let output = Command::new("osascript")
+                    .arg("-e")
+                    .arg(&script)
+                    .output()
+                    .map_err(|e| format!("使用 bundle ID 激活失败: {}", e))?;
+                
+                if output.status.success() {
+                    println!("✅ 成功通过 bundle ID 激活应用程序: {}", app_name);
+                    return Ok(());
+                } else {
+                    let error_msg = String::from_utf8_lossy(&output.stderr);
+                    println!("⚠️ bundle ID 激活失败，尝试其他方法: {}", error_msg);
+                }
+            }
+        }
+        
+        // 方法2: 使用 open 命令激活应用程序（通过应用名称）
+        println!("尝试使用 open 命令激活应用程序");
+        let open_output = Command::new("open")
+            .arg("-a")
+            .arg(app_name)
+            .output()
+            .map_err(|e| format!("open 命令执行失败: {}", e))?;
+        
+        if open_output.status.success() {
+            println!("✅ 成功通过 open 命令激活应用程序: {}", app_name);
+            return Ok(());
+        } else {
+            let open_error = String::from_utf8_lossy(&open_output.stderr);
+            println!("⚠️ open 命令激活失败，尝试其他方法: {}", open_error);
+        }
+        
+        // 方法3: 使用 System Events 通过进程名称激活
+        println!("尝试使用 System Events 激活应用程序");
+        let script = format!(r#"
+tell application "System Events"
+    set targetApp to first application process whose name is "{}"
+    set frontmost of targetApp to true
+end tell
+        "#, app_name);
+        
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| format!("System Events 激活失败: {}", e))?;
+        
+        if output.status.success() {
+            println!("✅ 成功通过 System Events 激活应用程序: {}", app_name);
+            Ok(())
+        } else {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            println!("❌ System Events 激活失败: {}", error_msg);
+            
+            // 方法4: 最后尝试直接通过应用名称激活
+            println!("尝试直接通过应用名称激活");
+            let backup_script = format!(r#"tell application "{}" to activate"#, app_name);
+            let backup_output = Command::new("osascript")
+                .arg("-e")
+                .arg(&backup_script)
+                .output()
+                .map_err(|e| format!("直接激活失败: {}", e))?;
+            
+            if backup_output.status.success() {
+                println!("✅ 成功通过直接方法激活应用程序: {}", app_name);
+                Ok(())
+            } else {
+                let backup_error = String::from_utf8_lossy(&backup_output.stderr);
+                Err(format!("所有激活方法都失败了: System Events错误: {}, 直接激活错误: {}", error_msg, backup_error))
+            }
+        }
+    }
     
-    // 首先尝试使用 xdotool（更稳定）
-    let xdotool_result = Command::new("xdotool")
-        .args(&["key", "ctrl+v"])
+    #[cfg(target_os = "windows")]
+    {
+        println!("🎯 Windows: 激活应用程序 {}", app_name);
+        // TODO: 实现 Windows 的应用程序激活
+        Ok(())
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        println!("🎯 Linux: 激活应用程序 {}", app_name);
+        // TODO: 实现 Linux 的应用程序激活
+        Ok(())
+    }
+}
+
+
+
+// macOS 使用 rdev 库进行键盘模拟（更稳定）
+#[cfg(target_os = "macos")]
+fn macos_simple_paste() -> Result<(), String> {
+    use rdev::{simulate, EventType, Key, SimulateError};
+    use std::thread;
+    use std::time::Duration;
+    
+    println!("使用 rdev 库执行 macOS 自动粘贴...");
+    
+    fn send_with_delay(event_type: &EventType, delay_ms: u64) -> Result<(), SimulateError> {
+        let delay = Duration::from_millis(delay_ms);
+        simulate(event_type)?;
+        thread::sleep(delay);
+        Ok(())
+    }
+    
+    // 鉴于时序不稳定问题，优先使用最可靠的 AppleScript 方案
+    println!("🎯 开始模拟 Cmd+V 按键组合...");
+    
+    // 方法1: 优先使用 AppleScript（最可靠的方案）
+    println!("方法1: 使用 AppleScript (最可靠)");
+    let applescript_result = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg("tell application \"System Events\" to keystroke \"v\" using command down")
         .output();
     
-    match xdotool_result {
+    match applescript_result {
         Ok(output) if output.status.success() => {
-            println!("xdotool 执行成功，粘贴操作完成");
+            println!("✅ AppleScript 粘贴成功");
             return Ok(());
         }
         Ok(output) => {
-            let error_msg = String::from_utf8_lossy(&output.stderr);
-            println!("xdotool 执行失败: {}", error_msg);
+            let error = String::from_utf8_lossy(&output.stderr);
+            println!("❌ AppleScript 失败: {}", error);
         }
         Err(e) => {
-            println!("xdotool 不可用: {}，回退到 enigo", e);
+            println!("❌ 执行 AppleScript 失败: {}", e);
         }
     }
     
-    // 回退到 enigo
-    use enigo::{Enigo, Settings, Direction, Key, Keyboard};
+    // 方法2: rdev 备用方案（改进的时序控制）
+    println!("方法2: 使用 rdev (改进时序控制)");
+    let rdev_result = (|| -> Result<(), SimulateError> {
+        println!("🔧 使用改进的时序控制...");
+        
+        // 1. 按下 Cmd 键并等待系统注册
+        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 150)?;
+        println!("✅ Cmd键按下，等待150ms确保系统注册");
+        
+        // 2. 按下 V 键
+        send_with_delay(&EventType::KeyPress(Key::KeyV), 50)?;
+        println!("✅ V键按下");
+        
+        // 3. 保持一段时间让组合键生效
+        thread::sleep(Duration::from_millis(100));
+        println!("⏳ 保持按键状态100ms");
+        
+        // 4. 释放 V 键
+        send_with_delay(&EventType::KeyRelease(Key::KeyV), 50)?;
+        println!("✅ V键释放");
+        
+        // 5. 释放 Cmd 键
+        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 50)?;
+        println!("✅ Cmd键释放");
+        
+        Ok(())
+    })();
     
-    println!("使用 enigo 作为回退方案...");
+    match rdev_result {
+        Ok(()) => {
+            println!("✅ rdev 方法2执行成功");
+            return Ok(());
+        }
+        Err(e) => {
+            println!("❌ rdev 方法2失败: {:?}", e);
+        }
+    }
     
-    let mut enigo = Enigo::new(&Settings::default())
-        .map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
+    // 方法3: 更激进的 rdev 方案（更长延迟）
+    println!("方法3: 使用 rdev (极长延迟)");
+    let aggressive_result = (|| -> Result<(), SimulateError> {
+        println!("🔧 使用极长延迟策略...");
+        
+        // 使用更长的延迟
+        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 300)?;
+        println!("✅ Cmd键按下，等待300ms");
+        
+        send_with_delay(&EventType::KeyPress(Key::KeyV), 100)?;
+        println!("✅ V键按下，等待100ms");
+        
+        // 保持更长时间
+        thread::sleep(Duration::from_millis(200));
+        println!("⏳ 保持按键状态200ms");
+        
+        send_with_delay(&EventType::KeyRelease(Key::KeyV), 100)?;
+        println!("✅ V键释放，等待100ms");
+        
+        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 100)?;
+        println!("✅ Cmd键释放");
+        
+        Ok(())
+    })();
     
-    // Linux 使用 Ctrl+V
-    enigo.key(Key::Control, Direction::Press)
-        .map_err(|e| format!("按下 Ctrl 键失败: {}", e))?;
-    enigo.key(Key::Unicode('v'), Direction::Press)
-        .map_err(|e| format!("按下 V 键失败: {}", e))?;
-    enigo.key(Key::Unicode('v'), Direction::Release)
-        .map_err(|e| format!("释放 V 键失败: {}", e))?;
-    enigo.key(Key::Control, Direction::Release)
-        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))?;
+    match aggressive_result {
+        Ok(()) => {
+            println!("✅ rdev 方法3 (极长延迟) 执行成功");
+            Ok(())
+        }
+        Err(e) => {
+            println!("❌ 所有方法都失败了");
+            Err(format!("所有键盘模拟方法都失败: 最后一个错误: {:?}", e))
+        }
+    }
+}
+
+
+
+// Windows 使用 rdev 库进行键盘模拟
+#[cfg(target_os = "windows")]
+fn windows_auto_paste() -> Result<(), String> {
+    use rdev::{simulate, EventType, Key, SimulateError};
+    use std::thread;
+    use std::time::Duration;
     
-    println!("Linux 粘贴操作执行完成");
+    println!("使用 rdev 库执行 Windows 自动粘贴...");
+    
+    fn send(event_type: &EventType) -> Result<(), SimulateError> {
+        let delay = Duration::from_millis(10);
+        simulate(event_type)?;
+        thread::sleep(delay);
+        Ok(())
+    }
+    
+    // 模拟 Ctrl+V 按键序列
+    send(&EventType::KeyPress(Key::ControlLeft))
+        .map_err(|e| format!("按下 Ctrl 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyPress(Key::KeyV))
+        .map_err(|e| format!("按下 V 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyRelease(Key::KeyV))
+        .map_err(|e| format!("释放 V 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyRelease(Key::ControlLeft))
+        .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
+    
+    println!("rdev Windows 粘贴操作执行完成");
+    Ok(())
+}
+
+// Linux 使用 rdev 库进行键盘模拟
+#[cfg(target_os = "linux")]
+fn linux_auto_paste() -> Result<(), String> {
+    use rdev::{simulate, EventType, Key, SimulateError};
+    use std::thread;
+    use std::time::Duration;
+    
+    println!("使用 rdev 库执行 Linux 自动粘贴...");
+    
+    fn send(event_type: &EventType) -> Result<(), SimulateError> {
+        let delay = Duration::from_millis(10);
+        simulate(event_type)?;
+        thread::sleep(delay);
+        Ok(())
+    }
+    
+    // 模拟 Ctrl+V 按键序列
+    send(&EventType::KeyPress(Key::ControlLeft))
+        .map_err(|e| format!("按下 Ctrl 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyPress(Key::KeyV))
+        .map_err(|e| format!("按下 V 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyRelease(Key::KeyV))
+        .map_err(|e| format!("释放 V 键失败: {:?}", e))?;
+    
+    send(&EventType::KeyRelease(Key::ControlLeft))
+        .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
+    
+    println!("rdev Linux 粘贴操作执行完成");
     Ok(())
 }
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-smart-paste-to-app"
+description = "Enables the smart_paste_to_app command without any pre-configured scope."
+commands.allow = ["smart_paste_to_app"]
+
+[[permission]]
+identifier = "deny-smart-paste-to-app"
+description = "Denies the smart_paste_to_app command without any pre-configured scope."
+commands.deny = ["smart_paste_to_app"]

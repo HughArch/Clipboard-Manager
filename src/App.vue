@@ -8,6 +8,13 @@ import Toast from './components/Toast.vue'
 import { useToast } from './composables/useToast'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+
+// 定义类型接口
+interface SourceAppInfo {
+  name: string
+  icon?: string
+  bundle_id?: string
+}
 import Database from '@tauri-apps/plugin-sql'
 import { 
   onTextUpdate, 
@@ -90,6 +97,9 @@ const isSearching = ref(false) // 添加搜索状态标识
 const isLoadingMore = ref(false) // 添加加载更多状态
 const hasMoreData = ref(true) // 是否还有更多数据
 const currentOffset = ref(0) // 当前加载的偏移量
+
+// 前一个活动应用程序信息（用于智能粘贴）
+const previousActiveApp = ref<SourceAppInfo | null>(null)
 
 // 事件监听器清理函数存储
 let unlistenClipboardText: (() => void) | null = null
@@ -186,6 +196,7 @@ const formatTime = (() => {
 const searchInputRef = ref<HTMLInputElement | null>(null)
 // 存储Tauri事件监听器的unlisten函数
 const unlistenFocus = ref<(() => void) | null>(null)
+const unlistenPreviousApp = ref<(() => void) | null>(null)
 
 // 清理搜索框并选中第一个条目的函数
 const resetToDefault = async () => {
@@ -465,12 +476,29 @@ const moveItemToFront = async (itemId: number) => {
   }
 }
 
-// 复制内容到系统剪贴板并自动粘贴
+// 复制内容到系统剪贴板并智能粘贴到目标应用
 const copyToClipboard = async (item: any) => {
   if (!item) return
   
   try {
-    console.log('Copying and pasting item:', item.type, item.id)
+    console.log('智能复制和粘贴项目:', item.type, item.id)
+    
+    // 使用之前保存的目标应用信息（在快捷键触发时获取的）
+    let targetApp: SourceAppInfo | null = previousActiveApp.value
+    
+    console.log('使用预保存的目标应用信息:', targetApp?.name || 'null', '(bundle:', targetApp?.bundle_id || 'null', ')')
+    
+    // 如果没有预保存的信息，则尝试获取（但此时可能已经不准确）
+    if (!targetApp) {
+      console.warn('没有预保存的目标应用信息，尝试实时获取（可能不准确）')
+      try {
+        targetApp = await invoke('get_active_window_info') as SourceAppInfo
+        console.log('实时获取到应用信息:', targetApp.name, '(bundle:', targetApp.bundle_id, ')')
+      } catch (error) {
+        console.warn('获取活动窗口信息失败:', error)
+        targetApp = null
+      }
+    }
     
     // 准备要复制的内容
     let contentToCopy = item.content
@@ -498,13 +526,13 @@ const copyToClipboard = async (item: any) => {
       (async () => {
         if (item.type === 'text') {
           await writeText(contentToCopy)
-          console.log('Text content copied to clipboard for item:', item.id)
+          console.log('文本内容已复制到剪贴板:', item.id)
         } else if (item.type === 'image') {
           // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
           const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
           if (base64Data) {
             await writeImageBase64(base64Data)
-            console.log('Image content copied to clipboard for item:', item.id)
+            console.log('图片内容已复制到剪贴板:', item.id)
           } else {
             console.warn('No valid base64 data found for image item:', item.id)
             throw new Error('Invalid image data')
@@ -515,23 +543,50 @@ const copyToClipboard = async (item: any) => {
       appWindow.hide()
     ])
     
-    console.log('Clipboard and window operations completed, ready to auto-paste')
+    console.log('剪贴板和窗口操作完成，准备智能粘贴')
     
-    // 进一步减少等待时间，现代系统的剪贴板操作通常很快
-    await new Promise(resolve => setTimeout(resolve, 30))
+    // 极短等待，让窗口隐藏生效
+    await new Promise(resolve => setTimeout(resolve, 50))
     
-    // 执行跨平台自动粘贴
-    await invoke('auto_paste')
-    console.log('Auto-paste completed for item:', item.id)
+    // 使用智能粘贴：如果有目标应用信息，就激活目标应用再粘贴
+    console.log('🔍 检查智能粘贴条件:')
+    console.log('  - targetApp存在:', !!targetApp)
+    console.log('  - targetApp.name:', targetApp?.name || 'undefined')
+    console.log('  - targetApp.name !== "Unknown":', targetApp?.name !== 'Unknown')
+    console.log('  - 不包含Clipboard:', !targetApp?.name?.includes('Clipboard'))
+    console.log('  - 不包含clipboard:', !targetApp?.name?.includes('clipboard'))
+    
+    if (targetApp && targetApp.name && targetApp.name !== 'Unknown' && 
+        !targetApp.name.includes('Clipboard') && !targetApp.name.includes('clipboard')) {
+      console.log('✅ 满足智能粘贴条件，执行智能粘贴到应用:', targetApp.name, '(bundle:', targetApp.bundle_id, ')')
+      await invoke('smart_paste_to_app', { 
+        appName: targetApp.name,
+        bundleId: targetApp.bundle_id || null
+      })
+      console.log('智能粘贴完成:', item.id)
+    } else {
+      console.log('❌ 不满足智能粘贴条件，回退到普通自动粘贴')
+      if (!targetApp) {
+        console.log('  原因: targetApp为null')
+      } else if (!targetApp.name) {
+        console.log('  原因: targetApp.name为空')
+      } else if (targetApp.name === 'Unknown') {
+        console.log('  原因: targetApp.name为Unknown')
+      } else if (targetApp.name.includes('Clipboard') || targetApp.name.includes('clipboard')) {
+        console.log('  原因: targetApp.name包含Clipboard字符串')
+      }
+      await invoke('auto_paste')
+      console.log('普通粘贴完成:', item.id)
+    }
     
   } catch (error) {
-    console.error('Failed to copy and paste:', error)
+    console.error('复制和粘贴失败:', error)
     // 如果出错，重新显示窗口
     try {
       const appWindow = getCurrentWindow()
       await appWindow.show()
     } catch (showError) {
-      console.error('Failed to show window after error:', showError)
+      console.error('显示窗口失败:', showError)
     }
   }
 }
@@ -1227,6 +1282,15 @@ onMounted(async () => {
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
     
+    // 监听前一个活动应用程序信息事件
+    const unlistenPreviousAppFunc = await appWindow.listen<SourceAppInfo>('previous-app-info', (event) => {
+      console.log('📥 收到前一个活动应用信息:', event.payload.name)
+      previousActiveApp.value = event.payload
+    })
+    
+    // 将unlisten函数存储到ref中
+    unlistenPreviousApp.value = unlistenPreviousAppFunc
+    
     // 监听窗口焦点事件
     const unlistenFocusFunc = await appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
@@ -1323,6 +1387,12 @@ onUnmounted(() => {
   if (unlistenFocus.value) {
     unlistenFocus.value()
     unlistenFocus.value = null
+  }
+  
+  // 清理前一个活动应用信息事件监听器
+  if (unlistenPreviousApp.value) {
+    unlistenPreviousApp.value()
+    unlistenPreviousApp.value = null
   }
   
   // 清理剪贴板事件监听器

@@ -96,6 +96,11 @@
       "commands": ["auto_paste"]
     },
     {
+      "identifier": "allow-smart-paste-to-app",
+      "description": "Allows smart pasting to specific applications with focus management",
+      "commands": ["smart_paste_to_app"]
+    },
+    {
       "identifier": "allow-ensure-database-compatibility",
       "description": "Allows ensuring database compatibility",
       "commands": ["ensure_database_compatibility"]

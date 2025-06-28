@@ -79,6 +79,7 @@ fn get_active_window_info_impl() -> SourceAppInfo {
             return SourceAppInfo {
                 name: "Unknown".to_string(),
                 icon: None,
+                bundle_id: None,
             };
         }
         println!("✅ 获取到前台窗口句柄: {:?}", hwnd);
@@ -114,6 +115,7 @@ fn get_active_window_info_impl() -> SourceAppInfo {
             return SourceAppInfo {
                 name: title,
                 icon: None,
+                bundle_id: None,
             };
         }
         println!("✅ 成功打开进程句柄: {:?}", process_handle);
@@ -183,6 +185,7 @@ fn get_active_window_info_impl() -> SourceAppInfo {
         let result = SourceAppInfo {
             name: app_name,
             icon: icon_base64,
+            bundle_id: None, // Windows 下没有 bundle_id
         };
         
         println!("🎯 最终结果: 名称='{}', 图标={}", result.name, if result.icon.is_some() { "有" } else { "无" });
@@ -446,11 +449,105 @@ pub fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> 
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
 #[tauri::command]
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
+    use std::process::Command;
+    
+    println!("🔍 macOS: 获取当前活动窗口信息");
+    
+    // 使用 AppleScript 获取当前活动应用程序的信息
+    let script = r#"
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set appBundleID to bundle identifier of frontApp
+    return appName & "|" & appBundleID
+end tell
+    "#;
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = result.split('|').collect();
+        
+        if parts.len() >= 2 {
+            let app_name = parts[0].to_string();
+            let bundle_id = parts[1].to_string();
+            
+            println!("✅ 获取到活动应用: {} ({})", app_name, bundle_id);
+            
+            Ok(SourceAppInfo {
+                name: app_name,
+                icon: None, // 可以后续添加图标获取
+                bundle_id: Some(bundle_id),
+            })
+        } else {
+            println!("⚠️ 解析应用信息失败: {}", result);
+            Ok(SourceAppInfo {
+                name: result,
+                icon: None,
+                bundle_id: None,
+            })
+        }
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("❌ 获取活动窗口失败: {}", error_msg);
+        Ok(SourceAppInfo {
+            name: "Unknown".to_string(),
+            icon: None,
+            bundle_id: None,
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
+    use std::process::Command;
+    
+    println!("🔍 Linux: 获取当前活动窗口信息");
+    
+    // 尝试使用 xdotool 获取活动窗口信息
+    let window_id_output = Command::new("xdotool")
+        .args(&["getactivewindow"])
+        .output();
+    
+    match window_id_output {
+        Ok(output) if output.status.success() => {
+            let window_id = String::from_utf8_lossy(&output.stdout).trim();
+            
+            // 获取窗口名称
+            let window_name_output = Command::new("xdotool")
+                .args(&["getwindowname", window_id])
+                .output();
+            
+            if let Ok(name_output) = window_name_output {
+                if name_output.status.success() {
+                    let window_name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
+                    println!("✅ 获取到活动窗口: {}", window_name);
+                    
+                    return Ok(SourceAppInfo {
+                        name: window_name,
+                        icon: None,
+                        bundle_id: None,
+                    });
+                }
+            }
+        }
+        _ => {
+            println!("⚠️ xdotool 不可用，回退到默认值");
+        }
+    }
+    
     Ok(SourceAppInfo {
         name: "Unknown".to_string(),
         icon: None,
+        bundle_id: None,
     })
 } 

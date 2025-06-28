@@ -18,6 +18,7 @@ pub struct AppSettings {
 pub struct SourceAppInfo {
     pub name: String,
     pub icon: Option<String>, // base64 encoded icon
+    pub bundle_id: Option<String>, // macOS bundle identifier
 }
 
 // 数据库连接池状态管理
