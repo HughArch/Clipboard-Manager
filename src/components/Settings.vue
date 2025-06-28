@@ -16,6 +16,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'update:show', value: boolean): void
   (e: 'save-settings', settings: AppSettings): void
+  (e: 'show-toast', toast: { type: 'success' | 'error' | 'warning' | 'info', title: string, message?: string, duration?: number }): void
 }>()
 
 const settings = ref<AppSettings>({
@@ -43,25 +44,74 @@ onMounted(async () => {
   }
 })
 
+// 解析快捷键冲突错误
+const parseHotkeyError = (error: string): { title: string; message: string } => {
+  if (error.includes('HotKey already registered')) {
+    return {
+      title: 'Hotkey Conflict',
+      message: `"${settings.value.hotkey}" is already in use. Try a different combination.`
+    }
+  }
+  
+  if (error.includes('Invalid hotkey format')) {
+    return {
+      title: 'Invalid Format',
+      message: 'Use format: Ctrl+Shift+V'
+    }
+  }
+  
+  return {
+    title: 'Registration Failed',
+    message: 'Please try a different hotkey'
+  }
+}
+
 const handleSubmit = async () => {
   try {
     // 保存设置
     await invoke('save_settings', { settings: settings.value })
+    
     // 更新快捷键
-    await invoke('register_shortcut', { shortcut: settings.value.hotkey })
+    try {
+      await invoke('register_shortcut', { shortcut: settings.value.hotkey })
+    } catch (hotkeyError) {
+      const { title, message } = parseHotkeyError(String(hotkeyError))
+      emit('show-toast', { type: 'error', title, message, duration: 8000 }) // 显示8秒，让用户有时间阅读
+      return // 如果快捷键注册失败，不继续
+    }
+    
     // 更新自启动设置
-    await invoke('set_auto_start', { enable: settings.value.auto_start })
+    try {
+      await invoke('set_auto_start', { enable: settings.value.auto_start })
+    } catch (autoStartError) {
+      // 自启动失败不影响其他设置，显示警告即可
+      emit('show-toast', {
+        type: 'warning',
+        title: 'Auto-start Warning',
+        message: 'Auto-start setup failed, but other settings saved.',
+        duration: 6000
+      })
+    }
+    
+    // 所有操作成功
+    emit('show-toast', { type: 'success', title: 'Settings Saved', message: 'All settings updated successfully!', duration: 3000 })
     emit('save-settings', settings.value)
     emit('update:show', false)
+    
   } catch (error) {
     console.error('Failed to save settings:', error)
-    // 这里可以添加错误提示
+    emit('show-toast', {
+      type: 'error',
+      title: 'Save Failed',
+      message: 'Settings could not be saved. Try again.',
+      duration: 5000
+    })
   }
 }
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+  <div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9998] p-4">
     <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg transform transition-all duration-300">
       <!-- Header -->
       <div class="px-6 py-4 border-b border-gray-200">

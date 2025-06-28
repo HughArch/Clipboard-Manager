@@ -4,6 +4,8 @@ import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon } from '@heroicons/vue/24/
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
+import Toast from './components/Toast.vue'
+import { useToast } from './composables/useToast'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Database from '@tauri-apps/plugin-sql'
@@ -18,6 +20,9 @@ import {
 
 // 窗口最大化状态
 const isMaximized = ref(false)
+
+// Toast 消息系统
+const { toastMessages, removeToast, showSuccess, showError, showWarning, showInfo } = useToast()
 
 // 定义设置类型
 interface AppSettings {
@@ -52,6 +57,24 @@ const handleSaveSettings = async (settings: AppSettings) => {
   } catch (error) {
     // 可以在这里添加错误提示
     throw error
+  }
+}
+
+// 处理Toast消息
+const handleShowToast = (toast: { type: 'success' | 'error' | 'warning' | 'info', title: string, message?: string, duration?: number }) => {
+  switch (toast.type) {
+    case 'success':
+      showSuccess(toast.title, toast.message, toast.duration)
+      break
+    case 'error':
+      showError(toast.title, toast.message, toast.duration)
+      break
+    case 'warning':
+      showWarning(toast.title, toast.message, toast.duration)
+      break
+    case 'info':
+      showInfo(toast.title, toast.message, toast.duration)
+      break
   }
 }
 
@@ -1436,10 +1459,18 @@ const manualCleanupHistory = async () => {
     }
     
     // 用户反馈
-    alert('✅ 过期历史记录清理完成！\n\n旧的剪贴板记录已被清理，收藏的项目保持不变。')
+    showSuccess(
+      'Cleanup Complete',
+      'Expired records cleaned. Favorites preserved.',
+      4000
+    )
   } catch (error) {
     console.error('❌ 手动历史清理失败:', error)
-    alert('❌ 历史清理失败: ' + error)
+    showError(
+      'Cleanup Failed',
+      'Could not clean expired records.',
+      6000
+    )
   }
 }
 
@@ -1545,13 +1576,13 @@ const resetDatabase = async () => {
           >
             Force Clean
           </button> -->
-          <!-- <button 
+          <button 
             class="px-3 py-2 text-sm font-medium text-green-600 hover:text-green-900 hover:bg-green-100 rounded-lg transition-colors duration-200"
             @click="manualCleanupHistory"
             title="清理过期历史记录"
           >
             Cleanup
-          </button> -->
+          </button>
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
             @click="resetDatabase"
@@ -1904,7 +1935,17 @@ const resetDatabase = async () => {
     </div>
 
     <!-- Settings Modal -->
-    <Settings v-model:show="showSettings" @save-settings="handleSaveSettings" />
+    <Settings 
+      v-model:show="showSettings" 
+      @save-settings="handleSaveSettings"
+      @show-toast="handleShowToast"
+    />
+    
+    <!-- Toast notifications -->
+    <Toast 
+      :messages="toastMessages" 
+      @remove="removeToast" 
+    />
   </div>
 </template>
 

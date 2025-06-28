@@ -307,15 +307,38 @@ pub async fn load_settings(_app: tauri::AppHandle) -> Result<AppSettings, String
 
 #[tauri::command]
 pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
+    println!("尝试注册快捷键: {}", shortcut);
+    
     // 先尝试注销已有的快捷键
     let _ = app.global_shortcut().unregister_all();
     
     // 将字符串转换为 Shortcut 类型
-    let shortcut = shortcut.parse::<Shortcut>().map_err(|e| e.to_string())?;
+    let shortcut_parsed = shortcut.parse::<Shortcut>().map_err(|e| {
+        let error_msg = format!("Invalid hotkey format: {}. Please use format like 'Ctrl+Shift+V'", e);
+        println!("快捷键解析失败: {}", error_msg);
+        error_msg
+    })?;
     
     // 注册快捷键
-    app.global_shortcut().register(shortcut).map_err(|e| e.to_string())?;
+    app.global_shortcut().register(shortcut_parsed).map_err(|e| {
+        let error_str = e.to_string();
+        
+        // 处理常见的错误类型
+        if error_str.contains("HotKey already registered") || error_str.contains("already registered") {
+            let friendly_msg = format!("HotKey already registered: The hotkey '{}' is already in use by another application", shortcut);
+            println!("快捷键冲突: {}", friendly_msg);
+            friendly_msg
+        } else if error_str.contains("Invalid") || error_str.contains("invalid") {
+            let friendly_msg = format!("Invalid hotkey format: '{}' is not a valid hotkey format", shortcut);
+            println!("快捷键格式错误: {}", friendly_msg);
+            friendly_msg
+        } else {
+            println!("快捷键注册失败: {}", error_str);
+            format!("Failed to register hotkey '{}': {}", shortcut, error_str)
+        }
+    })?;
     
+    println!("快捷键注册成功: {}", shortcut);
     Ok(())
 }
 
@@ -383,9 +406,43 @@ pub async fn set_auto_start(_app: AppHandle, enable: bool) -> Result<(), String>
     let app_name = "ClipboardManager"; // 应用程序在注册表中的名称
     let exe_path = get_app_exe_path()?;
     
-    set_windows_auto_start(enable, app_name, &exe_path)?;
+    set_windows_auto_start(enable, app_name, &exe_path).map_err(|e| {
+        format!("Failed to update auto-start settings: {}", e)
+    })?;
     
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
+    get_windows_auto_start_status("ClipboardManager")
+}
+
+// 检查 Windows 自启动状态
+#[cfg(target_os = "windows")]
+fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
+    use std::process::Command;
+    
+    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+    
+    let output = Command::new("reg")
+        .args(&[
+            "query",
+            key_path,
+            "/v",
+            app_name
+        ])
+        .output()
+        .map_err(|e| format!("Failed to query registry: {}", e))?;
+    
+    // 如果查询成功且找到了值，说明自启动已启用
+    Ok(output.status.success())
+}
+
+// 非 Windows 系统的占位实现
+#[cfg(not(target_os = "windows"))]
+fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
+    Ok(false) // 非Windows系统默认返回false
 }
 
 #[tauri::command]

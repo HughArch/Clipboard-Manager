@@ -201,11 +201,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::save_settings,
-            commands::register_shortcut,
             commands::auto_paste,
             commands::reset_database,
             commands::load_image_file,
             commands::cleanup_history,
+            commands::load_settings,
+            commands::set_auto_start,
+            commands::get_auto_start_status,
+            commands::register_shortcut,
             window_info::get_active_window_info
         ])
         .run(tauri::generate_context!())
