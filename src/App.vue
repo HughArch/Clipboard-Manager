@@ -1088,8 +1088,8 @@ onMounted(async () => {
         // 获取当前活动窗口信息
         let sourceAppInfo: SourceAppInfo = {
           name: 'Unknown',
-          icon: null,
-          bundle_id: null
+          icon: undefined,
+          bundle_id: undefined
         }
         
         console.log('🔍 [文本] 开始获取源应用信息...')
@@ -1208,8 +1208,8 @@ onMounted(async () => {
         // 获取当前活动窗口信息
         let sourceAppInfo: SourceAppInfo = {
           name: 'Unknown',
-          icon: null,
-          bundle_id: null
+          icon: undefined,
+          bundle_id: undefined
         }
         
         console.log('🔍 [图片] 开始获取源应用信息...')

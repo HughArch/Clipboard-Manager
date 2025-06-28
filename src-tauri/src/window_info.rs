@@ -77,7 +77,7 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
     
     let new_info = get_active_window_info_impl();
     println!("✅ 剪贴板专用：获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
-    
+
     Ok(new_info)
 }
 
