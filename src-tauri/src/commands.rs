@@ -10,7 +10,7 @@ use chrono;
 use tokio;
 use tokio::sync::Mutex;
 use sqlx::{self, Row};
-use enigo::{Enigo, Key, Keyboard, Settings};
+// enigo 导入将在具体使用处声明
 
 
 const SETTINGS_FILE: &str = "clipboard_settings.json";
@@ -458,54 +458,37 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
     cleanup_expired_data(&app, &settings).await
 }
 
-// 跨平台自动粘贴功能
+// 跨平台自动粘贴功能 - 使用系统原生方法
 #[tauri::command]
 pub async fn auto_paste() -> Result<(), String> {
     println!("开始执行跨平台自动粘贴...");
     
-    // 移除额外等待时间，前端已经处理了必要的同步等待，直接执行粘贴以获得最快响应
-    // tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+    // 给用户时间切换到目标应用
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     
-    // 在新线程中执行按键模拟，避免阻塞异步运行时
+    // 在新线程中执行粘贴操作，避免阻塞异步运行时
     let result = tokio::task::spawn_blocking(|| {
-        let mut enigo = Enigo::new(&Settings::default())
-            .map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
-        
-        // 跨平台粘贴快捷键
         #[cfg(target_os = "macos")]
         {
-            // macOS 使用 Cmd+V
-            enigo.key(Key::Meta, enigo::Direction::Press)
-                .map_err(|e| format!("按下Cmd键失败: {}", e))?;
-            enigo.key(Key::Unicode('v'), enigo::Direction::Press)
-                .map_err(|e| format!("按下V键失败: {}", e))?;
-            enigo.key(Key::Unicode('v'), enigo::Direction::Release)
-                .map_err(|e| format!("释放V键失败: {}", e))?;
-            enigo.key(Key::Meta, enigo::Direction::Release)
-                .map_err(|e| format!("释放Cmd键失败: {}", e))?;
+            macos_auto_paste()
         }
         
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
         {
-            // Windows 和 Linux 使用 Ctrl+V
-            enigo.key(Key::Control, enigo::Direction::Press)
-                .map_err(|e| format!("按下Ctrl键失败: {}", e))?;
-            enigo.key(Key::Unicode('v'), enigo::Direction::Press)
-                .map_err(|e| format!("按下V键失败: {}", e))?;
-            enigo.key(Key::Unicode('v'), enigo::Direction::Release)
-                .map_err(|e| format!("释放V键失败: {}", e))?;
-            enigo.key(Key::Control, enigo::Direction::Release)
-                .map_err(|e| format!("释放Ctrl键失败: {}", e))?;
+            windows_auto_paste()
         }
         
-        Ok::<(), String>(())
+        #[cfg(target_os = "linux")]
+        {
+            linux_auto_paste()
+        }
     }).await;
     
     match result {
         Ok(Ok(())) => {
             println!("跨平台自动粘贴操作完成");
-    Ok(())
-}
+            Ok(())
+        }
         Ok(Err(e)) => {
             println!("自动粘贴失败: {}", e);
             Err(format!("粘贴操作失败: {}", e))
@@ -516,6 +499,110 @@ pub async fn auto_paste() -> Result<(), String> {
         }
     }
 }
+
+// macOS 专用的自动粘贴实现 - 使用 AppleScript
+#[cfg(target_os = "macos")]
+fn macos_auto_paste() -> Result<(), String> {
+    use std::process::Command;
+    
+    println!("使用 AppleScript 执行 macOS 自动粘贴...");
+    
+    // 使用 AppleScript 模拟 Cmd+V 按键
+    let applescript = r#"
+        tell application "System Events"
+            keystroke "v" using command down
+        end tell
+    "#;
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(applescript)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        println!("AppleScript 执行成功，粘贴操作完成");
+        Ok(())
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("AppleScript 执行失败: {}", error_msg);
+        Err(format!("AppleScript 执行失败: {}", error_msg))
+    }
+}
+
+// Windows 专用的自动粘贴实现 - 使用 enigo
+#[cfg(target_os = "windows")]
+fn windows_auto_paste() -> Result<(), String> {
+    use enigo::{Enigo, Settings, Direction, Key, Keyboard};
+    
+    println!("使用 enigo 执行 Windows 自动粘贴...");
+    
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
+    
+    // Windows 使用 Ctrl+V
+    enigo.key(Key::Control, Direction::Press)
+        .map_err(|e| format!("按下 Ctrl 键失败: {}", e))?;
+    enigo.key(Key::Unicode('v'), Direction::Press)
+        .map_err(|e| format!("按下 V 键失败: {}", e))?;
+    enigo.key(Key::Unicode('v'), Direction::Release)
+        .map_err(|e| format!("释放 V 键失败: {}", e))?;
+    enigo.key(Key::Control, Direction::Release)
+        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))?;
+    
+    println!("Windows 粘贴操作执行完成");
+    Ok(())
+}
+
+// Linux 专用的自动粘贴实现 - 使用 xdotool 或 enigo
+#[cfg(target_os = "linux")]
+fn linux_auto_paste() -> Result<(), String> {
+    use std::process::Command;
+    
+    println!("尝试使用 xdotool 执行 Linux 自动粘贴...");
+    
+    // 首先尝试使用 xdotool（更稳定）
+    let xdotool_result = Command::new("xdotool")
+        .args(&["key", "ctrl+v"])
+        .output();
+    
+    match xdotool_result {
+        Ok(output) if output.status.success() => {
+            println!("xdotool 执行成功，粘贴操作完成");
+            return Ok(());
+        }
+        Ok(output) => {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            println!("xdotool 执行失败: {}", error_msg);
+        }
+        Err(e) => {
+            println!("xdotool 不可用: {}，回退到 enigo", e);
+        }
+    }
+    
+    // 回退到 enigo
+    use enigo::{Enigo, Settings, Direction, Key, Keyboard};
+    
+    println!("使用 enigo 作为回退方案...");
+    
+    let mut enigo = Enigo::new(&Settings::default())
+        .map_err(|e| format!("无法初始化键盘模拟器: {}", e))?;
+    
+    // Linux 使用 Ctrl+V
+    enigo.key(Key::Control, Direction::Press)
+        .map_err(|e| format!("按下 Ctrl 键失败: {}", e))?;
+    enigo.key(Key::Unicode('v'), Direction::Press)
+        .map_err(|e| format!("按下 V 键失败: {}", e))?;
+    enigo.key(Key::Unicode('v'), Direction::Release)
+        .map_err(|e| format!("释放 V 键失败: {}", e))?;
+    enigo.key(Key::Control, Direction::Release)
+        .map_err(|e| format!("释放 Ctrl 键失败: {}", e))?;
+    
+    println!("Linux 粘贴操作执行完成");
+    Ok(())
+}
+
+
 
 // 获取应用程序的可执行文件路径
 fn get_app_exe_path() -> Result<PathBuf, String> {

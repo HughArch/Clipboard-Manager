@@ -1,9 +1,13 @@
 use std::time::Duration;
 use std::sync::{Arc, RwLock};
 use crate::types::SourceAppInfo;
+#[cfg(target_os = "windows")]
 use crate::icon_cache::get_icon_cache;
+#[cfg(target_os = "windows")]
 use crate::resource_manager::WindowsResourceManager;
+#[cfg(target_os = "windows")]
 use base64::{engine::general_purpose, Engine as _};
+#[cfg(target_os = "windows")]
 use image::ImageEncoder;
 
 #[cfg(target_os = "windows")]

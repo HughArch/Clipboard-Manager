@@ -10,7 +10,7 @@ fn main() {
                 "get_auto_start_status", 
                 "cleanup_history", 
                 "auto_paste",
-                "paste_to_clipboard",
+
                 "reset_database",
                 "load_image_file",
                 "clear_memory_cache",
