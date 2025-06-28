@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        platform: [macos-latest, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -59,11 +59,9 @@ jobs:
             ## 🚀 新版本发布
 
             ### ✨ 主要功能
-            - 修复了内存泄漏问题
-            - 修复了其他bug
-            - 优化了性能
-            - 优化了用户体验
-            - 优化了界面设计
-            - 优化了代码结构
+            - 跨平台兼容macos
+            - 修复了从数据库加载时列表顺序错乱的问题
+            - 支持快捷键录制
+            - 替换应用图标
           releaseDraft: false
           prerelease: false 
