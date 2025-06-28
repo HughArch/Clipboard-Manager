@@ -1652,13 +1652,13 @@ const resetDatabase = async () => {
           >
             Force Clean
           </button> -->
-          <button 
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-green-600 hover:text-green-900 hover:bg-green-100 rounded-lg transition-colors duration-200"
             @click="manualCleanupHistory"
             title="清理过期历史记录"
           >
             Cleanup
-          </button>
+          </button> -->
           <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
             @click="resetDatabase"
