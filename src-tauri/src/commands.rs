@@ -394,28 +394,54 @@ fn set_windows_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> R
     Ok(())
 }
 
-// 非 Windows 系统的占位实现
-#[cfg(not(target_os = "windows"))]
-fn set_windows_auto_start(_enable: bool, _app_name: &str, _exe_path: &PathBuf) -> Result<(), String> {
-    Err("当前系统不支持自启动功能".to_string())
-}
-
-
 #[tauri::command]
-pub async fn set_auto_start(_app: AppHandle, enable: bool) -> Result<(), String> {
-    let app_name = "ClipboardManager"; // 应用程序在注册表中的名称
-    let exe_path = get_app_exe_path()?;
+pub async fn set_auto_start(app: AppHandle, enable: bool) -> Result<(), String> {
+    let app_name = "Clipboard Manager"; // 显示名称
+    let bundle_id = "com.clipboardmanager.app"; // Bundle ID
     
-    set_windows_auto_start(enable, app_name, &exe_path).map_err(|e| {
-        format!("Failed to update auto-start settings: {}", e)
-    })?;
+    #[cfg(target_os = "windows")]
+    {
+        let exe_path = get_app_exe_path()?;
+        set_windows_auto_start(enable, "ClipboardManager", &exe_path).map_err(|e| {
+            format!("Failed to update auto-start settings: {}", e)
+        })?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        let exe_path = get_app_exe_path()?;
+        set_macos_auto_start(enable, app_name, bundle_id, &exe_path).map_err(|e| {
+            format!("设置 macOS 自启动失败: {}", e)
+        })?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        let exe_path = get_app_exe_path()?;
+        set_linux_auto_start(enable, app_name, &exe_path).map_err(|e| {
+            format!("设置 Linux 自启动失败: {}", e)
+        })?;
+    }
     
     Ok(())
 }
 
 #[tauri::command]
 pub async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
-    get_windows_auto_start_status("ClipboardManager")
+    #[cfg(target_os = "windows")]
+    {
+        get_windows_auto_start_status("ClipboardManager")
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        get_macos_auto_start_status("Clipboard Manager", "com.clipboardmanager.app")
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        get_linux_auto_start_status("Clipboard Manager")
+    }
 }
 
 // 检查 Windows 自启动状态
@@ -443,6 +469,331 @@ fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
 #[cfg(not(target_os = "windows"))]
 fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
     Ok(false) // 非Windows系统默认返回false
+}
+
+// ==================== macOS 自启动实现 ====================
+
+#[cfg(target_os = "macos")]
+fn set_macos_auto_start(enable: bool, app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> Result<(), String> {
+    use std::process::Command;
+    
+    println!("🍎 macOS: 设置自启动状态: {} (应用: {})", enable, app_name);
+    
+    if enable {
+        // 方法1: 尝试使用 Login Items (推荐方法)
+        if let Err(e1) = add_to_login_items_applescript(app_name, exe_path) {
+            println!("⚠️ AppleScript 方法失败: {}", e1);
+            
+            // 方法2: 回退到 LaunchAgent 方法
+            println!("🔄 尝试 LaunchAgent 方法...");
+            add_to_launch_agent(app_name, bundle_id, exe_path)?;
+        }
+    } else {
+        // 移除自启动：尝试两种方法
+        let _ = remove_from_login_items_applescript(app_name);
+        let _ = remove_from_launch_agent(bundle_id);
+    }
+    
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn get_macos_auto_start_status(app_name: &str, bundle_id: &str) -> Result<bool, String> {
+    println!("🔍 macOS: 检查自启动状态: {}", app_name);
+    
+    // 方法1: 检查 Login Items
+    if check_login_items_status(app_name).unwrap_or(false) {
+        return Ok(true);
+    }
+    
+    // 方法2: 检查 LaunchAgent
+    if check_launch_agent_status(bundle_id).unwrap_or(false) {
+        return Ok(true);
+    }
+    
+    Ok(false)
+}
+
+// 使用 AppleScript 添加到登录项
+#[cfg(target_os = "macos")]
+fn add_to_login_items_applescript(app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
+    use std::process::Command;
+    
+    // 获取应用程序的父目录路径（.app bundle）
+    let app_bundle_path = if exe_path.to_string_lossy().contains(".app/Contents/MacOS/") {
+        // 如果是 .app bundle 内的可执行文件，获取 .app 路径
+        let path_str = exe_path.to_string_lossy();
+        if let Some(app_end) = path_str.find(".app/Contents/MacOS/") {
+            format!("{}.app", &path_str[..app_end])
+        } else {
+            exe_path.to_string_lossy().to_string()
+        }
+    } else {
+        exe_path.to_string_lossy().to_string()
+    };
+    
+    println!("📁 应用 Bundle 路径: {}", app_bundle_path);
+    
+    let script = format!(r#"
+tell application "System Events"
+    -- 检查应用是否已经在登录项中
+    set loginItems to login items
+    set appExists to false
+    repeat with loginItem in loginItems
+        if name of loginItem is "{}" then
+            set appExists to true
+            exit repeat
+        end if
+    end repeat
+    
+    -- 如果不存在，则添加
+    if not appExists then
+        make login item at end with properties {{path:"{}", name:"{}", hidden:false}}
+        return "SUCCESS_ADDED"
+    else
+        return "ALREADY_EXISTS"
+    end if
+end tell
+    "#, app_name, app_bundle_path, app_name);
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("✅ AppleScript 结果: {}", result);
+        Ok(())
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        Err(format!("AppleScript 执行失败: {}", error_msg))
+    }
+}
+
+// 使用 AppleScript 从登录项移除
+#[cfg(target_os = "macos")]
+fn remove_from_login_items_applescript(app_name: &str) -> Result<(), String> {
+    use std::process::Command;
+    
+    let script = format!(r#"
+tell application "System Events"
+    set loginItems to login items
+    repeat with loginItem in loginItems
+        if name of loginItem is "{}" then
+            delete loginItem
+            return "SUCCESS_REMOVED"
+        end if
+    end repeat
+    return "NOT_FOUND"
+end tell
+    "#, app_name);
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("✅ 移除结果: {}", result);
+        Ok(())
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        Err(format!("移除失败: {}", error_msg))
+    }
+}
+
+// 检查登录项状态
+#[cfg(target_os = "macos")]
+fn check_login_items_status(app_name: &str) -> Result<bool, String> {
+    use std::process::Command;
+    
+    let script = format!(r#"
+tell application "System Events"
+    set loginItems to login items
+    repeat with loginItem in loginItems
+        if name of loginItem is "{}" then
+            return "FOUND"
+        end if
+    end repeat
+    return "NOT_FOUND"
+end tell
+    "#, app_name);
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| format!("检查登录项失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(result == "FOUND")
+    } else {
+        Ok(false)
+    }
+}
+
+// 添加到 LaunchAgent（备用方法）
+#[cfg(target_os = "macos")]
+fn add_to_launch_agent(app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> Result<(), String> {
+    use std::fs;
+    use std::path::Path;
+    
+    let home_dir = std::env::var("HOME")
+        .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
+    
+    let launch_agents_dir = Path::new(&home_dir).join("Library/LaunchAgents");
+    
+    // 确保目录存在
+    fs::create_dir_all(&launch_agents_dir)
+        .map_err(|e| format!("创建 LaunchAgents 目录失败: {}", e))?;
+    
+    let plist_filename = format!("{}.plist", bundle_id);
+    let plist_path = launch_agents_dir.join(&plist_filename);
+    
+    let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>LaunchOnlyOnce</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/{}.out</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/{}.err</string>
+</dict>
+</plist>"#, bundle_id, exe_path.to_string_lossy(), bundle_id, bundle_id);
+    
+    fs::write(&plist_path, plist_content)
+        .map_err(|e| format!("写入 plist 文件失败: {}", e))?;
+    
+    println!("✅ LaunchAgent plist 已创建: {}", plist_path.display());
+    Ok(())
+}
+
+// 从 LaunchAgent 移除
+#[cfg(target_os = "macos")]
+fn remove_from_launch_agent(bundle_id: &str) -> Result<(), String> {
+    use std::fs;
+    use std::path::Path;
+    
+    let home_dir = std::env::var("HOME")
+        .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
+    
+    let plist_filename = format!("{}.plist", bundle_id);
+    let plist_path = Path::new(&home_dir)
+        .join("Library/LaunchAgents")
+        .join(&plist_filename);
+    
+    if plist_path.exists() {
+        fs::remove_file(&plist_path)
+            .map_err(|e| format!("删除 plist 文件失败: {}", e))?;
+        println!("✅ LaunchAgent plist 已删除: {}", plist_path.display());
+    }
+    
+    Ok(())
+}
+
+// 检查 LaunchAgent 状态
+#[cfg(target_os = "macos")]
+fn check_launch_agent_status(bundle_id: &str) -> Result<bool, String> {
+    use std::path::Path;
+    
+    let home_dir = std::env::var("HOME")
+        .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
+    
+    let plist_filename = format!("{}.plist", bundle_id);
+    let plist_path = Path::new(&home_dir)
+        .join("Library/LaunchAgents")
+        .join(&plist_filename);
+    
+    Ok(plist_path.exists())
+}
+
+// ==================== Linux 自启动实现 ====================
+
+#[cfg(target_os = "linux")]
+fn set_linux_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
+    use std::fs;
+    use std::path::Path;
+    
+    println!("🐧 Linux: 设置自启动状态: {} (应用: {})", enable, app_name);
+    
+    let home_dir = std::env::var("HOME")
+        .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
+    
+    let autostart_dir = Path::new(&home_dir).join(".config/autostart");
+    let desktop_filename = format!("{}.desktop", app_name.replace(" ", "-").to_lowercase());
+    let desktop_path = autostart_dir.join(&desktop_filename);
+    
+    if enable {
+        // 创建自启动目录
+        fs::create_dir_all(&autostart_dir)
+            .map_err(|e| format!("创建 autostart 目录失败: {}", e))?;
+        
+        // 创建 .desktop 文件
+        let desktop_content = format!(r#"[Desktop Entry]
+Type=Application
+Version=1.0
+Name={}
+Comment=Clipboard Manager for productivity
+Exec={}
+Icon=clipboard
+Terminal=false
+StartupNotify=false
+Hidden=false
+X-GNOME-Autostart-enabled=true
+"#, app_name, exe_path.to_string_lossy());
+        
+        fs::write(&desktop_path, desktop_content)
+            .map_err(|e| format!("写入 .desktop 文件失败: {}", e))?;
+        
+        println!("✅ Linux: 自启动 .desktop 文件已创建: {}", desktop_path.display());
+    } else {
+        // 删除 .desktop 文件
+        if desktop_path.exists() {
+            fs::remove_file(&desktop_path)
+                .map_err(|e| format!("删除 .desktop 文件失败: {}", e))?;
+            
+            println!("✅ Linux: 自启动 .desktop 文件已删除: {}", desktop_path.display());
+        }
+    }
+    
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn get_linux_auto_start_status(app_name: &str) -> Result<bool, String> {
+    use std::path::Path;
+    
+    println!("🔍 Linux: 检查自启动状态: {}", app_name);
+    
+    let home_dir = std::env::var("HOME")
+        .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
+    
+    let desktop_filename = format!("{}.desktop", app_name.replace(" ", "-").to_lowercase());
+    let desktop_path = Path::new(&home_dir)
+        .join(".config/autostart")
+        .join(&desktop_filename);
+    
+    let exists = desktop_path.exists();
+    println!("📋 Linux: .desktop 文件状态: {}", if exists { "存在" } else { "不存在" });
+    
+    Ok(exists)
 }
 
 #[tauri::command]
