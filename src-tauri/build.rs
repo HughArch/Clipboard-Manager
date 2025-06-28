@@ -11,7 +11,7 @@ fn main() {
                 "cleanup_history", 
                 "auto_paste",
                 "smart_paste_to_app",
-
+                "get_active_window_info_for_clipboard",
                 "reset_database",
                 "load_image_file",
                 "clear_memory_cache",

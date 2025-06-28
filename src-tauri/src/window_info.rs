@@ -43,8 +43,8 @@ pub fn get_last_window_info() -> &'static Arc<RwLock<(std::time::Instant, Option
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     println!("🔍 get_active_window_info() 被调用");
     
-    // 合理的限流时间（每8秒最多调用一次），资源管理已改善
-    let cache_duration = Duration::from_secs(8);
+    // 减少缓存时间以适应剪贴板监听需求（每2秒最多调用一次）
+    let cache_duration = Duration::from_secs(2);
     
     if let Ok(guard) = get_last_window_info().read() {
         if guard.0.elapsed() < cache_duration {
@@ -66,6 +66,18 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
         println!("💾 窗口信息已缓存");
     }
 
+    Ok(new_info)
+}
+
+// 专门用于剪贴板监听的窗口信息获取函数（不使用缓存）
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
+    println!("🔍 get_active_window_info_for_clipboard() 被调用（无缓存）");
+    
+    let new_info = get_active_window_info_impl();
+    println!("✅ 剪贴板专用：获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
+    
     Ok(new_info)
 }
 
@@ -482,9 +494,615 @@ end tell
             
             println!("✅ 获取到活动应用: {} ({})", app_name, bundle_id);
             
+            // 获取应用图标
+            let app_icon = get_app_icon_base64_macos(&bundle_id);
+            if app_icon.is_some() {
+                println!("✅ 成功获取应用图标");
+            } else {
+                println!("⚠️ 无法获取应用图标");
+            }
+            
             Ok(SourceAppInfo {
                 name: app_name,
-                icon: None, // 可以后续添加图标获取
+                icon: app_icon,
+                bundle_id: Some(bundle_id),
+            })
+        } else {
+            println!("⚠️ 解析应用信息失败: {}", result);
+            Ok(SourceAppInfo {
+                name: result,
+                icon: None,
+                bundle_id: None,
+            })
+        }
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        println!("❌ 获取活动窗口失败: {}", error_msg);
+            Ok(SourceAppInfo {
+        name: "Unknown".to_string(),
+        icon: None,
+        bundle_id: None,
+    })
+}
+
+// 专门用于剪贴板监听的窗口信息获取函数（不使用缓存）
+#[cfg(target_os = "linux")]
+#[tauri::command]
+pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
+    use std::process::Command;
+    
+    println!("🔍 Linux: 获取当前活动窗口信息（剪贴板专用，无缓存）");
+    
+    // 尝试使用 xdotool 获取活动窗口信息
+    let window_id_output = Command::new("xdotool")
+        .args(&["getactivewindow"])
+        .output();
+    
+    match window_id_output {
+        Ok(output) if output.status.success() => {
+            let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            
+            // 获取窗口名称
+            let window_name_output = Command::new("xdotool")
+                .args(&["getwindowname", &window_id])
+                .output();
+            
+            if let Ok(name_output) = window_name_output {
+                if name_output.status.success() {
+                    let window_name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
+                    println!("✅ 剪贴板专用：获取到活动窗口: {}", window_name);
+                    
+                    return Ok(SourceAppInfo {
+                        name: window_name,
+                        icon: None,
+                        bundle_id: None,
+                    });
+                }
+            }
+        }
+        _ => {
+            println!("⚠️ xdotool 不可用，回退到默认值");
+        }
+    }
+    
+    Ok(SourceAppInfo {
+        name: "Unknown".to_string(),
+        icon: None,
+        bundle_id: None,
+    })
+    }
+}
+
+// macOS 专用：根据 bundle ID 获取应用图标
+#[cfg(target_os = "macos")]
+fn get_app_icon_base64_macos(bundle_id: &str) -> Option<String> {
+    use std::process::Command;
+    
+    println!("🎨 macOS: 开始获取应用图标，bundle_id: {}", bundle_id);
+    
+    // 方法1：使用 mdfind 查找应用路径
+    let find_output = Command::new("mdfind")
+        .arg(format!("kMDItemCFBundleIdentifier=={}", bundle_id))
+        .output();
+    
+    if let Ok(result) = find_output {
+        if result.status.success() {
+            let app_paths = String::from_utf8_lossy(&result.stdout);
+            let app_path = app_paths.lines().next();
+            
+            if let Some(path) = app_path {
+                println!("📁 macOS: 找到应用路径: {}", path);
+                return get_icon_from_app_path(path);
+            }
+        }
+    }
+    
+    // 方法2：回退到通过 System Events 获取路径
+    println!("🔄 macOS: 尝试备用方法...");
+    get_app_icon_simple_macos(bundle_id)
+}
+
+// 从应用路径提取图标
+#[cfg(target_os = "macos")]
+fn get_icon_from_app_path(app_path: &str) -> Option<String> {
+    use std::process::Command;
+    use std::time::Duration;
+    
+    println!("🔍 macOS: 从应用路径提取图标: {}", app_path);
+    
+    // 方法1: 直接提取 .app bundle 中的 icon 文件
+    let icon_paths = vec![
+        format!("{}/Contents/Resources/AppIcon.icns", app_path),
+        format!("{}/Contents/Resources/icon.icns", app_path),
+        format!("{}/Contents/Resources/application.icns", app_path),
+        format!("{}/Contents/Resources/App.icns", app_path),
+        format!("{}/Contents/Resources/{}.icns", 
+            app_path,
+            std::path::Path::new(app_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("app")
+                .replace(".app", "")
+        ),
+    ];
+    
+    for icon_path in &icon_paths {
+        if std::path::Path::new(icon_path).exists() {
+            println!("📁 macOS: 找到图标文件: {}", icon_path);
+            
+            if let Some(icon_data) = extract_icon_with_sips(icon_path) {
+                return Some(icon_data);
+            }
+        }
+    }
+    
+    // 方法2: 使用更简单的 iconutil 方法
+    println!("🔄 macOS: 尝试 iconutil 方法...");
+    if let Some(icon_data) = extract_icon_with_iconutil(app_path) {
+        return Some(icon_data);
+    }
+    
+    // 方法3: 最后尝试 osascript 获取图标（避免使用 qlmanage）
+    println!("🔄 macOS: 尝试 AppleScript 方法...");
+    if let Some(icon_data) = extract_icon_with_applescript(app_path) {
+        return Some(icon_data);
+    }
+    
+    println!("❌ macOS: 所有图标提取方法都失败了");
+    None
+}
+
+// 使用 sips 提取图标（macOS 原生方法）
+#[cfg(target_os = "macos")]
+fn extract_icon_with_sips(icon_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    let tmp_png = format!("/tmp/clipboard_icon_{}.png", std::process::id());
+    
+    println!("🔧 macOS: 使用 sips 转换图标: {} -> {}", icon_path, tmp_png);
+    
+    // 直接使用 sips 命令，不依赖 timeout
+    let sips_output = Command::new("sips")
+        .args(&["-s", "format", "png", "-Z", "64", icon_path, "--out", &tmp_png])
+        .output();
+    
+    match sips_output {
+        Ok(result) if result.status.success() => {
+            println!("✅ macOS: sips 转换成功");
+            
+            // 检查输出文件是否存在
+            if std::path::Path::new(&tmp_png).exists() {
+                // 转换为 base64
+                let b64_output = Command::new("base64")
+                    .args(&["-i", &tmp_png])
+                    .output();
+                
+                let base64_result = match b64_output {
+                    Ok(b64_result) if b64_result.status.success() => {
+                        let base64_data = String::from_utf8_lossy(&b64_result.stdout)
+                            .trim()
+                            .replace("\n", "");
+                        
+                        if !base64_data.is_empty() {
+                            Some(format!("data:image/png;base64,{}", base64_data))
+                        } else {
+                            None
+                        }
+                    }
+                    Ok(b64_result) => {
+                        println!("⚠️ macOS: base64 转换失败: {}", String::from_utf8_lossy(&b64_result.stderr));
+                        None
+                    }
+                    Err(e) => {
+                        println!("❌ macOS: base64 命令执行失败: {}", e);
+                        None
+                    }
+                };
+                
+                // 清理临时文件
+                let _ = Command::new("rm").arg(&tmp_png).output();
+                
+                if base64_result.is_some() {
+                    println!("✅ macOS: 成功从 icns 提取图标");
+                }
+                
+                base64_result
+            } else {
+                println!("⚠️ macOS: sips 没有生成输出文件");
+                None
+            }
+        }
+        Ok(result) => {
+            println!("⚠️ macOS: sips 转换失败，返回码: {}", result.status);
+            println!("⚠️ macOS: sips stderr: {}", String::from_utf8_lossy(&result.stderr));
+            println!("⚠️ macOS: sips stdout: {}", String::from_utf8_lossy(&result.stdout));
+            // 清理可能的临时文件
+            let _ = Command::new("rm").arg(&tmp_png).output();
+            None
+        }
+        Err(e) => {
+            println!("❌ macOS: sips 命令执行失败: {}", e);
+            None
+        }
+    }
+}
+
+// 使用 iconutil 提取图标
+#[cfg(target_os = "macos")]
+fn extract_icon_with_iconutil(app_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    // 查找 .iconset 目录
+    let iconset_path = format!("{}/Contents/Resources/AppIcon.iconset", app_path);
+    
+    if std::path::Path::new(&iconset_path).exists() {
+        println!("📁 macOS: 找到 iconset: {}", iconset_path);
+        
+        let tmp_png = format!("/tmp/clipboard_iconset_{}.png", std::process::id());
+        
+        // 直接复制一个合适大小的图标文件
+        let icon_files = vec![
+            format!("{}/icon_64x64.png", iconset_path),
+            format!("{}/icon_32x32@2x.png", iconset_path),
+            format!("{}/icon_32x32.png", iconset_path),
+            format!("{}/icon_16x16@2x.png", iconset_path),
+        ];
+        
+        for icon_file in &icon_files {
+            if std::path::Path::new(icon_file).exists() {
+                println!("📁 macOS: 找到图标文件: {}", icon_file);
+                
+                // 直接复制文件
+                let cp_output = Command::new("cp")
+                    .args(&[icon_file, &tmp_png])
+                    .output();
+                
+                if let Ok(result) = cp_output {
+                    if result.status.success() {
+                        // 转换为 base64
+                        let b64_output = Command::new("base64")
+                            .args(&["-i", &tmp_png])
+                            .output();
+                        
+                        if let Ok(b64_result) = b64_output {
+                            if b64_result.status.success() {
+                                let base64_data = String::from_utf8_lossy(&b64_result.stdout)
+                                    .trim()
+                                    .replace("\n", "");
+                                
+                                // 清理临时文件
+                                let _ = Command::new("rm").arg(&tmp_png).output();
+                                
+                                if !base64_data.is_empty() {
+                                    println!("✅ macOS: 成功从 iconset 提取图标");
+                                    return Some(format!("data:image/png;base64,{}", base64_data));
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // 清理临时文件
+                let _ = Command::new("rm").arg(&tmp_png).output();
+                break;
+            }
+        }
+    }
+    
+    None
+}
+
+// 使用 osascript 提取图标（简化方法）
+#[cfg(target_os = "macos")]
+fn extract_icon_with_applescript(app_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    println!("🍎 macOS: 尝试使用 osascript 获取图标");
+    
+    // 方法1: 最简单的方法，直接用应用路径
+    if let Some(icon_data) = extract_icon_with_mdls(app_path) {
+        return Some(icon_data);
+    }
+    
+    // 方法2: 使用更简单的 shell 命令组合
+    if let Some(icon_data) = extract_icon_with_shell(app_path) {
+        return Some(icon_data);
+    }
+    
+    println!("❌ macOS: AppleScript 方法全部失败");
+    None
+}
+
+// 使用 mdls 和系统工具的组合方法
+#[cfg(target_os = "macos")]
+fn extract_icon_with_mdls(app_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    println!("🔍 macOS: 使用 mdls 方法获取图标");
+    
+    // 获取应用的 CFBundleIconFile
+    let mdls_output = Command::new("mdls")
+        .args(&["-name", "kMDItemCFBundleIdentifier", "-name", "kMDItemDisplayName", app_path])
+        .output();
+    
+    if let Ok(result) = mdls_output {
+        if result.status.success() {
+            let output_str = String::from_utf8_lossy(&result.stdout);
+            println!("📋 macOS: mdls 输出: {}", output_str);
+        }
+    }
+    
+    // 尝试最直接的方法：直接使用 Finder 复制图标
+    let tmp_png = format!("/tmp/clipboard_mdls_icon_{}.png", std::process::id());
+    
+    let script = format!(r#"
+set appPath to "{}"
+set outputPath to "{}"
+
+try
+    -- 使用 QuickLook 生成缩略图
+    do shell script "qlmanage -t -s 64 -o /tmp " & quoted form of appPath
+    
+    -- 查找生成的文件
+    set appName to do shell script "basename " & quoted form of appPath & " .app"
+    set qlPath to "/tmp/" & appName & ".png"
+    
+    -- 如果文件存在，复制到目标位置
+    do shell script "if [ -f " & quoted form of qlPath & " ]; then cp " & quoted form of qlPath & " " & quoted form of outputPath & " && echo SUCCESS; else echo NOTFOUND; fi"
+    
+on error errMsg
+    return "ERROR: " & errMsg
+end try
+    "#, app_path, tmp_png);
+    
+    let output = Command::new("osascript")
+        .args(&["-e", &script])
+        .output();
+    
+    match output {
+        Ok(result) if result.status.success() => {
+            let response = String::from_utf8_lossy(&result.stdout).trim().to_string();
+            println!("📋 macOS: osascript 返回: {}", response);
+            
+            if response.contains("SUCCESS") && std::path::Path::new(&tmp_png).exists() {
+                // 转换为 base64
+                if let Some(base64_data) = convert_png_to_base64(&tmp_png) {
+                    // 清理临时文件
+                    let _ = Command::new("rm").arg(&tmp_png).output();
+                    println!("✅ macOS: mdls 方法成功");
+                    return Some(base64_data);
+                }
+            }
+            
+            // 清理临时文件
+            let _ = Command::new("rm").arg(&tmp_png).output();
+        }
+        Ok(result) => {
+            println!("⚠️ macOS: osascript 失败: {}", String::from_utf8_lossy(&result.stderr));
+        }
+        Err(e) => {
+            println!("❌ macOS: osascript 命令失败: {}", e);
+        }
+    }
+    
+    None
+}
+
+// 使用纯 shell 命令的方法
+#[cfg(target_os = "macos")]
+fn extract_icon_with_shell(app_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    println!("🐚 macOS: 使用纯 shell 方法获取图标");
+    
+    let tmp_png = format!("/tmp/clipboard_shell_icon_{}.png", std::process::id());
+    
+    // 使用 shell 脚本组合多种方法
+    let script = format!(r#"
+APP_PATH="{}"
+OUTPUT_PATH="{}"
+
+# 方法1: 直接从 .icns 转换
+ICNS_FILES=("$APP_PATH/Contents/Resources/"*.icns)
+for icns in "${{ICNS_FILES[@]}}"; do
+    if [ -f "$icns" ]; then
+        echo "找到图标文件: $icns"
+        if sips -s format png -Z 64 "$icns" --out "$OUTPUT_PATH" 2>/dev/null; then
+            echo "SUCCESS_SIPS"
+            exit 0
+        fi
+    fi
+done
+
+# 方法2: 使用 iconutil（如果有 iconset）
+ICONSET_PATH="$APP_PATH/Contents/Resources/AppIcon.iconset"
+if [ -d "$ICONSET_PATH" ]; then
+    # 查找合适大小的图标
+    for size in "icon_64x64.png" "icon_32x32@2x.png" "icon_32x32.png"; do
+        if [ -f "$ICONSET_PATH/$size" ]; then
+            cp "$ICONSET_PATH/$size" "$OUTPUT_PATH"
+            echo "SUCCESS_ICONSET"
+            exit 0
+        fi
+    done
+fi
+
+echo "FAILED"
+    "#, app_path, tmp_png);
+    
+    let output = Command::new("sh")
+        .args(&["-c", &script])
+        .output();
+    
+    match output {
+        Ok(result) if result.status.success() => {
+            let response = String::from_utf8_lossy(&result.stdout);
+            println!("📋 macOS: shell 脚本输出: {}", response);
+            
+            if (response.contains("SUCCESS_SIPS") || response.contains("SUCCESS_ICONSET")) 
+                && std::path::Path::new(&tmp_png).exists() {
+                
+                if let Some(base64_data) = convert_png_to_base64(&tmp_png) {
+                    // 清理临时文件
+                    let _ = Command::new("rm").arg(&tmp_png).output();
+                    println!("✅ macOS: shell 方法成功");
+                    return Some(base64_data);
+                }
+            }
+            
+            // 清理临时文件
+            let _ = Command::new("rm").arg(&tmp_png).output();
+        }
+        Ok(result) => {
+            println!("⚠️ macOS: shell 脚本失败: {}", String::from_utf8_lossy(&result.stderr));
+            let _ = Command::new("rm").arg(&tmp_png).output();
+        }
+        Err(e) => {
+            println!("❌ macOS: shell 命令失败: {}", e);
+        }
+    }
+    
+    None
+}
+
+// 统一的 PNG 转 base64 函数
+#[cfg(target_os = "macos")]
+fn convert_png_to_base64(png_path: &str) -> Option<String> {
+    use std::process::Command;
+    
+    let b64_output = Command::new("base64")
+        .args(&["-i", png_path])
+        .output();
+    
+    match b64_output {
+        Ok(result) if result.status.success() => {
+            let base64_data = String::from_utf8_lossy(&result.stdout)
+                .trim()
+                .replace("\n", "");
+            
+            if !base64_data.is_empty() {
+                Some(format!("data:image/png;base64,{}", base64_data))
+            } else {
+                None
+            }
+        }
+        _ => None
+    }
+}
+
+// macOS 备用方法：使用 qlmanage 获取图标
+#[cfg(target_os = "macos")]
+fn get_app_icon_simple_macos(bundle_id: &str) -> Option<String> {
+    use std::process::Command;
+    
+    // 首先获取应用路径
+    let script = format!(r#"
+try
+    tell application "System Events"
+        set appPath to path of (first application process whose bundle identifier is "{}")
+        return appPath
+    end tell
+on error
+    return ""
+end try
+    "#, bundle_id);
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output();
+    
+    if let Ok(result) = output {
+        if result.status.success() {
+            let app_path = String::from_utf8_lossy(&result.stdout).trim().to_string();
+            
+            if !app_path.is_empty() {
+                println!("📁 macOS: 获取到应用路径: {}", app_path);
+                
+                // 使用 sips 命令提取图标
+                let icon_output = Command::new("sips")
+                    .args(&["-s", "format", "png", "--resampleHeight", "64", &app_path, "--out", "/tmp/clipboard_app_icon_simple.png"])
+                    .output();
+                
+                if let Ok(sips_result) = icon_output {
+                    if sips_result.status.success() {
+                        // 读取生成的图标文件并转换为 base64
+                        let base64_output = Command::new("base64")
+                            .args(&["-i", "/tmp/clipboard_app_icon_simple.png"])
+                            .output();
+                        
+                        if let Ok(b64_result) = base64_output {
+                            if b64_result.status.success() {
+                                let base64_data = String::from_utf8_lossy(&b64_result.stdout)
+                                    .trim()
+                                    .replace("\n", "");
+                                
+                                // 清理临时文件
+                                let _ = Command::new("rm")
+                                    .arg("/tmp/clipboard_app_icon_simple.png")
+                                    .output();
+                                
+                                if !base64_data.is_empty() {
+                                    println!("✅ macOS: 备用方法成功获取图标");
+                                    return Some(format!("data:image/png;base64,{}", base64_data));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    println!("❌ macOS: 所有图标获取方法都失败了");
+    None
+}
+
+// 专门用于剪贴板监听的窗口信息获取函数（不使用缓存）
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
+    use std::process::Command;
+    
+    println!("🔍 macOS: 获取当前活动窗口信息（剪贴板专用，无缓存）");
+    
+    // 使用 AppleScript 获取当前活动应用程序的信息
+    let script = r#"
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set appBundleID to bundle identifier of frontApp
+    return appName & "|" & appBundleID
+end tell
+    "#;
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = result.split('|').collect();
+        
+        if parts.len() >= 2 {
+            let app_name = parts[0].to_string();
+            let bundle_id = parts[1].to_string();
+            
+            println!("✅ 剪贴板专用：获取到活动应用: {} ({})", app_name, bundle_id);
+            
+            // 获取应用图标
+            let app_icon = get_app_icon_base64_macos(&bundle_id);
+            if app_icon.is_some() {
+                println!("✅ 成功获取应用图标");
+            } else {
+                println!("⚠️ 无法获取应用图标");
+            }
+            
+            Ok(SourceAppInfo {
+                name: app_name,
+                icon: app_icon,
                 bundle_id: Some(bundle_id),
             })
         } else {
@@ -520,11 +1138,11 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     
     match window_id_output {
         Ok(output) if output.status.success() => {
-            let window_id = String::from_utf8_lossy(&output.stdout).trim();
+            let window_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
             
             // 获取窗口名称
             let window_name_output = Command::new("xdotool")
-                .args(&["getwindowname", window_id])
+                .args(&["getwindowname", &window_id])
                 .output();
             
             if let Ok(name_output) = window_name_output {

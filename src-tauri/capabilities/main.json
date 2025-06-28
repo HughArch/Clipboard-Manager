@@ -91,6 +91,11 @@
       "commands": ["get_active_window_info"]
     },
     {
+      "identifier": "allow-get-active-window-info-for-clipboard",
+      "description": "Allows getting active window information for clipboard monitoring (no cache)",
+      "commands": ["get_active_window_info_for_clipboard"]
+    },
+    {
       "identifier": "allow-auto-paste",
       "description": "Allows automatic pasting with cross-platform keyboard simulation",
       "commands": ["auto_paste"]

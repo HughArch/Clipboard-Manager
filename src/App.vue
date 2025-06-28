@@ -1086,17 +1086,20 @@ onMounted(async () => {
         }
 
         // 获取当前活动窗口信息
-        let sourceAppInfo: { name: string; icon: string | null } = {
+        let sourceAppInfo: SourceAppInfo = {
           name: 'Unknown',
-          icon: null
+          icon: null,
+          bundle_id: null
         }
         
         console.log('🔍 [文本] 开始获取源应用信息...')
         try {
-          console.log('🔍 [文本] 调用 get_active_window_info 命令')
-          sourceAppInfo = await invoke('get_active_window_info') as { name: string; icon: string | null }
+          console.log('🔍 [文本] 调用 get_active_window_info_for_clipboard 命令（剪贴板专用）')
+          const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
+          sourceAppInfo = appInfo
           console.log('✅ [文本] 获取到源应用信息:', {
             name: sourceAppInfo.name,
+            bundle_id: sourceAppInfo.bundle_id,
             hasIcon: sourceAppInfo.icon !== null,
             iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
           })
@@ -1203,17 +1206,20 @@ onMounted(async () => {
         }
 
         // 获取当前活动窗口信息
-        let sourceAppInfo: { name: string; icon: string | null } = {
+        let sourceAppInfo: SourceAppInfo = {
           name: 'Unknown',
-          icon: null
+          icon: null,
+          bundle_id: null
         }
         
         console.log('🔍 [图片] 开始获取源应用信息...')
         try {
-          console.log('🔍 [图片] 调用 get_active_window_info 命令')
-          sourceAppInfo = await invoke('get_active_window_info') as { name: string; icon: string | null }
+          console.log('🔍 [图片] 调用 get_active_window_info_for_clipboard 命令（剪贴板专用）')
+          const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
+          sourceAppInfo = appInfo
           console.log('✅ [图片] 获取到源应用信息:', {
             name: sourceAppInfo.name,
+            bundle_id: sourceAppInfo.bundle_id,
             hasIcon: sourceAppInfo.icon !== null,
             iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
           })

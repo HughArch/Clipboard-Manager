@@ -205,7 +205,8 @@ pub fn run() {
             commands::set_auto_start,
             commands::get_auto_start_status,
             commands::register_shortcut,
-            window_info::get_active_window_info
+            window_info::get_active_window_info,
+            window_info::get_active_window_info_for_clipboard
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
