@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, windows-latest]
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -28,6 +28,8 @@ jobs:
 
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -59,9 +61,21 @@ jobs:
             ## 🚀 新版本发布
 
             ### ✨ 主要功能
-            - 跨平台兼容macos
-            - 修复了从数据库加载时列表顺序错乱的问题
-            - 支持快捷键录制
-            - 替换应用图标
+            - 🍎 macOS Universal Binary支持（支持Intel和Apple Silicon）
+            - 🎹 键盘录制快捷键功能
+            - 🎨 现代化Toast提示系统
+            - 🗄️ 数据库优化和清理功能
+            - 🔧 修复多项稳定性问题
+
+            ### 💻 支持平台
+            - **macOS**: Universal Binary (Intel + Apple Silicon)
+            - **Windows**: x64
+            - **Linux**: x64 (AppImage + Deb)
+
+            ### 📦 安装说明
+            - **macOS**: 下载dmg文件，如遇"损坏"提示，请在终端运行: `sudo xattr -rd com.apple.quarantine /Applications/Clipboard\ Manager.app`
+            - **Windows**: 下载msi或exe安装包
+            - **Linux**: 下载AppImage或deb包
           releaseDraft: false
-          prerelease: false 
+          prerelease: false
+          args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }} 
