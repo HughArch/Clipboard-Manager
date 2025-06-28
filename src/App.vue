@@ -1516,39 +1516,39 @@ const checkDataConsistency = () => {
 }
 
 // 手动清理过期历史记录
-const manualCleanupHistory = async () => {
-  try {
-    console.log('🧹 手动执行历史清理...')
+// const manualCleanupHistory = async () => {
+//   try {
+//     console.log('🧹 手动执行历史清理...')
     
-    // 显示确认对话框
-    if (!confirm('确定要清理过期的历史记录吗？\n\n这将删除超过设置时间限制的剪贴板记录，但不会影响收藏的项目。')) {
-      return
-    }
+//     // 显示确认对话框
+//     if (!confirm('确定要清理过期的历史记录吗？\n\n这将删除超过设置时间限制的剪贴板记录，但不会影响收藏的项目。')) {
+//       return
+//     }
     
-    await invoke('cleanup_history')
-    console.log('✅ 手动历史清理完成')
+//     await invoke('cleanup_history')
+//     console.log('✅ 手动历史清理完成')
     
-    // 清理完成后重新加载最近的记录
-    if (!isInSearchMode && !searchQuery.value.trim()) {
-      await loadRecentHistory()
-      console.log('📝 历史清理后已重新加载最近记录')
-    }
+//     // 清理完成后重新加载最近的记录
+//     if (!isInSearchMode && !searchQuery.value.trim()) {
+//       await loadRecentHistory()
+//       console.log('📝 历史清理后已重新加载最近记录')
+//     }
     
-    // 用户反馈
-    showSuccess(
-      'Cleanup Complete',
-      'Expired records cleaned. Favorites preserved.',
-      4000
-    )
-  } catch (error) {
-    console.error('❌ 手动历史清理失败:', error)
-    showError(
-      'Cleanup Failed',
-      'Could not clean expired records.',
-      6000
-    )
-  }
-}
+//     // 用户反馈
+//     showSuccess(
+//       'Cleanup Complete',
+//       'Expired records cleaned. Favorites preserved.',
+//       4000
+//     )
+//   } catch (error) {
+//     console.error('❌ 手动历史清理失败:', error)
+//     showError(
+//       'Cleanup Failed',
+//       'Could not clean expired records.',
+//       6000
+//     )
+//   }
+// }
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
 const resetDatabase = async () => {
