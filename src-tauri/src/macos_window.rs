@@ -93,11 +93,18 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
                 }
                 
                 // 设置窗口集合行为，允许在全屏空间中显示
-                // 使用正确的类型：macOS 期望 NSUInteger (u64)
-                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;
-                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8;
+                // 使用正确的类型：macOS 期望 NSUInteger (u64)  
+                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
+                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2  
+                let ns_window_collection_behavior_transient: u64 = 1 << 3;             // 8
+                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
+                let ns_window_collection_behavior_full_screen_allows_tiling: u64 = 1 << 11; // 2048
+                
                 let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_full_screen_auxiliary;
+                              ns_window_collection_behavior_move_to_active_space |
+                              ns_window_collection_behavior_transient |
+                              ns_window_collection_behavior_full_screen_auxiliary |
+                              ns_window_collection_behavior_full_screen_allows_tiling;
                 
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
                 tracing::info!("🔧 设置窗口集合行为: {}", behavior);
@@ -133,12 +140,14 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
             if let Ok(native_window) = window.ns_window() {
                 let ns_window = native_window as id;
                 
-                // 逐步尝试不同的窗口级别，从低到高
+                // 逐步尝试不同的窗口级别，从低到高，包括极高级别
+                let ultra_high_level: i32 = 2147483640; // 接近最大值但安全的级别
                 let levels_to_try = [
                     (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),
                     (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"), 
                     (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),
                     (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),
+                    (ultra_high_level, "超高级别"),
                 ];
                 
                 let mut level_set = false;
@@ -161,10 +170,20 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 
                 // 设置集合行为，允许在全屏空间中显示 - 这是关键！
                 tracing::info!("🔧 准备设置窗口集合行为以支持全屏显示");
-                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;
-                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8;
+                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
+                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2  
+                let ns_window_collection_behavior_managed: u64 = 1 << 2;               // 4
+                let ns_window_collection_behavior_transient: u64 = 1 << 3;             // 8
+                let ns_window_collection_behavior_stationary: u64 = 1 << 4;            // 16
+                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
+                let ns_window_collection_behavior_full_screen_allows_tiling: u64 = 1 << 11; // 2048
+                
+                // 组合所有相关的行为标志
                 let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_full_screen_auxiliary;
+                              ns_window_collection_behavior_move_to_active_space |
+                              ns_window_collection_behavior_transient |
+                              ns_window_collection_behavior_full_screen_auxiliary |
+                              ns_window_collection_behavior_full_screen_allows_tiling;
                 
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
                 tracing::info!("✅ 设置窗口集合行为: {} (支持全屏显示)", behavior);
@@ -188,6 +207,22 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 tracing::info!("🔧 强制窗口显示在最前面");
                 let _: () = msg_send![ns_window, orderFrontRegardless];
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                
+                // 额外的强制显示方法
+                tracing::info!("🔧 使用额外的强制显示方法");
+                let _: () = msg_send![ns_window, orderWindow: 1 relativeTo: 0]; // NSWindowAbove
+                
+                // 确保窗口在当前空间显示
+                tracing::info!("🔧 强制窗口到当前空间");
+                let _: () = msg_send![ns_window, setCollectionBehavior: behavior]; // 再次设置确保生效
+                
+                // 激活窗口所属的应用
+                if let Some(app_class) = runtime::Class::get("NSApplication") {
+                    let shared_app: id = msg_send![app_class, sharedApplication];
+                    let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
+                    let _: () = msg_send![shared_app, arrangeInFront: shared_app];
+                    tracing::info!("🔧 重新激活应用并置于前台");
+                }
                 
                 // 获取最终状态
                 let final_level: i32 = msg_send![ns_window, level];
