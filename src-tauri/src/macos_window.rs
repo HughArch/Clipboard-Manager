@@ -70,9 +70,7 @@ pub fn detect_fullscreen_app() -> Result<String, String> {
 #[cfg(target_os = "macos")]
 pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        // 首先，确保窗口可见并获得焦点
-        tracing::info!("🚀 开始显示窗口覆盖全屏应用");
-        
+        tracing::info!("🚀 开始显示窗口 (NSPanel 模式)");
         let _ = window.show();
         let _ = window.set_focus();
         
@@ -81,19 +79,23 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
             tracing::info!("✅ 成功获取原生窗口句柄: {:p}", ns_window);
             
             unsafe {
-                // --- 模仿 Electron 的实现 ---
+                // --- 模仿 NSPanel 的行为 ---
                 // 1. 设置为浮动窗口级别
                 let level = NS_FLOATING_WINDOW_LEVEL;
-                tracing::info!("🔧 [Electron方案] 设置窗口级别为 NSFloatingWindowLevel: {}", level);
+                tracing::info!("🔧 [Panel-like] 设置窗口级别为 NSFloatingWindowLevel: {}", level);
                 let _: () = msg_send![ns_window, setLevel: level];
                 
                 // 2. 设置正确的集合行为
                 let behavior = NS_WINDOW_COLLECTION_BEHAVIOR_CAN_JOIN_ALL_SPACES 
                              | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY;
-                tracing::info!("🔧 [Electron方案] 设置窗口集合行为: CanJoinAllSpaces | FullScreenAuxiliary");
+                tracing::info!("🔧 [Panel-like] 设置窗口集合行为: CanJoinAllSpaces | FullScreenAuxiliary");
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
 
-                // 3. 确保窗口可见并成为主窗口
+                // 3. (关键) 设置窗口为非激活状态，不窃取焦点
+                let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: YES];
+                tracing::info!("🔧 [Panel-like] 设置窗口为 becomesKeyOnlyIfNeeded");
+
+                // 4. 确保窗口可见并成为主窗口 (这一步仍然需要)
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
 
                 // 验证设置
@@ -101,16 +103,14 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                 let is_visible: bool = msg_send![ns_window, isVisible];
                 
                 if new_level == level && is_visible {
-                    tracing::info!("🎉 [Electron方案] 窗口设置成功，应该可以覆盖全屏应用！");
+                    tracing::info!("🎉 [Panel-like] 窗口设置成功，应该可以覆盖全屏应用！");
                 } else {
-                    tracing::warn!("⚠️ [Electron方案] 窗口设置可能不完整。级别: {}, 可见: {}", new_level, is_visible);
+                    tracing::warn!("⚠️ [Panel-like] 窗口设置可能不完整。级别: {}, 可见: {}", new_level, is_visible);
                 }
             }
         } else {
             return Err("无法获取原生窗口句柄".to_string());
         }
-        
-        let _ = window.set_focus();
         
         Ok(())
     } else {

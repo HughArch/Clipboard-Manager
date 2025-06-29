@@ -21,6 +21,9 @@ use tauri::menu::{Menu, MenuItem};
 use tokio::sync::Mutex;
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 
+#[cfg(target_os = "macos")]
+use tauri::ActivationPolicy;
+
 // 初始化数据库连接
 async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
     let app_data_dir = app.path().app_data_dir().map_err(|e| format!("无法获取应用数据目录: {}", e))?;
@@ -99,7 +102,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard::init())
-                .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
@@ -115,6 +118,12 @@ pub fn run() {
             .build()
         )
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(ActivationPolicy::Accessory)?;
+                tracing::info!("🔧 [macOS] 应用激活策略已设置为 Accessory");
+            }
+
             let app_handle = app.handle().clone();
             let should_stop = start_clipboard_watcher(app_handle.clone());
             
