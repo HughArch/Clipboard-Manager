@@ -3,11 +3,21 @@ use std::process::Command;
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSWindow, NSWindowLevel};
+use cocoa::appkit::NSWindow;
 #[cfg(target_os = "macos")]
 use cocoa::base::id;
 #[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl};
+
+// macOS 窗口级别常量（基于 NSWindowLevel）
+#[cfg(target_os = "macos")]
+const NS_NORMAL_WINDOW_LEVEL: i32 = 0;
+#[cfg(target_os = "macos")]
+const NS_FLOATING_WINDOW_LEVEL: i32 = 3;
+#[cfg(target_os = "macos")]
+const NS_MODAL_PANEL_WINDOW_LEVEL: i32 = 8;
+#[cfg(target_os = "macos")]
+const NS_SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000;
 
 /// 检测是否有应用处于全屏模式
 #[cfg(target_os = "macos")]
@@ -69,8 +79,8 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                 tracing::info!("🔍 当前窗口级别: {}", current_level);
                 
                 // 使用 NSScreenSaverWindowLevel，这个级别足够高，可以覆盖全屏应用
-                let level = NSWindowLevel::ScreenSaver;
-                tracing::info!("🔧 设置窗口级别为 NSScreenSaverWindowLevel: {}", level as i32);
+                let level = NS_SCREEN_SAVER_WINDOW_LEVEL;
+                tracing::info!("🔧 设置窗口级别为 NSScreenSaverWindowLevel: {}", level);
                 
                 // 调用 NSWindow 的 setLevel: 方法
                 let _: () = msg_send![ns_window, setLevel: level];
@@ -95,7 +105,7 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                 tracing::info!("🔍 最终窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}, 主窗口: {}", 
                               new_level, is_visible, is_key, is_main);
                 
-                if new_level == level as i32 && is_visible {
+                if new_level == level && is_visible {
                     tracing::info!("🎉 窗口成功设置为屏保级别，可以覆盖全屏应用！");
                 } else {
                     tracing::warn!("⚠️ 窗口设置可能不完整");
@@ -123,10 +133,10 @@ pub fn reset_window_level(app: &AppHandle) -> Result<(), String> {
             
             unsafe {
                 // 重置为普通窗口级别
-                let normal_level = NSWindowLevel::Normal;
+                let normal_level = NS_NORMAL_WINDOW_LEVEL;
                 let _: () = msg_send![ns_window, setLevel: normal_level];
                 
-                tracing::info!("✅ 窗口级别已重置为普通级别: {}", normal_level as i32);
+                tracing::info!("✅ 窗口级别已重置为普通级别: {}", normal_level);
             }
         }
     }
