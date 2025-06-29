@@ -11,14 +11,14 @@ pub struct ClipboardCleanupGuard;
 
 impl ClipboardCleanupGuard {
     pub fn new() -> Self {
-        println!("剪贴板监听器线程启动，资源守护者已创建");
+        tracing::info!("剪贴板监听器线程启动，资源守护者已创建");
         Self
     }
 }
 
 impl Drop for ClipboardCleanupGuard {
     fn drop(&mut self) {
-        println!("剪贴板监听器线程退出，开始清理资源...");
+        tracing::info!("剪贴板监听器线程退出，开始清理资源...");
         
         // 清理图标缓存
         cleanup_icon_cache();
@@ -36,7 +36,7 @@ impl Drop for ClipboardCleanupGuard {
             let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
         }
         
-        println!("剪贴板监听器线程资源清理完成");
+        tracing::info!("剪贴板监听器线程资源清理完成");
     }
 }
 
@@ -84,7 +84,7 @@ impl Drop for WindowsResourceManager {
                 unsafe {
                     let result = DeleteObject(handle);
                     if result == 0 {
-                        println!("警告: 删除GDI对象失败: {:?}", handle);
+                        tracing::info!("警告: 删除GDI对象失败: {:?}", handle);
                     }
                 }
             }
@@ -99,7 +99,7 @@ impl Drop for WindowsResourceManager {
                         // 尝试ReleaseDC
                         let release_result = ReleaseDC(std::ptr::null_mut(), dc);
                         if release_result == 0 {
-                            println!("警告: 释放DC失败: {:?}", dc);
+                            tracing::info!("警告: 释放DC失败: {:?}", dc);
                         }
                     }
                 }
@@ -112,13 +112,13 @@ impl Drop for WindowsResourceManager {
                 unsafe {
                     let result = DestroyIcon(icon);
                     if result == 0 {
-                        println!("警告: 销毁图标失败: {:?}", icon);
+                        tracing::info!("警告: 销毁图标失败: {:?}", icon);
                     }
                 }
             }
         }
         
-        println!("Windows资源管理器清理完成: {} handles, {} DCs, {} icons", 
+        tracing::info!("Windows资源管理器清理完成: {} handles, {} DCs, {} icons", 
                 self.handles.len(), self.dcs.len(), self.icons.len());
     }
 } 

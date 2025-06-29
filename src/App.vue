@@ -6,6 +6,7 @@ import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
 import { useToast } from './composables/useToast'
+import { logger } from './composables/useLogger'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -48,9 +49,9 @@ const HISTORY_CLEAN_INTERVAL = 60 * 60 * 1000
 const saveSettings = async (settings: AppSettings) => {
   try {
     await invoke('save_settings', { settings })
-    console.log('Settings saved successfully')
+    logger.info('Settings saved successfully')
   } catch (error) {
-    console.error('Failed to save settings:', error)
+    logger.error('Failed to save settings', { error: String(error) })
     throw error // 让调用者处理错误
   }
 }
@@ -128,7 +129,9 @@ const trimMemoryHistory = () => {
       }
     }
     
-    console.log(`内存优化：从显示列表中移除了 ${removed} 条旧记录（数据库中仍保留）`)
+    if (removed > 0) {
+      logger.debug('内存优化清理完成', { removed, totalItems: clipboardHistory.value.length })
+    }
   }
   
   // 强制垃圾回收（如果可用）
@@ -185,7 +188,7 @@ const formatTime = (() => {
   // 添加清理缓存的方法
   ;(formatFunction as any).clearCache = () => {
     timeCache.clear()
-    console.log('时间格式化缓存已清理')
+    logger.debug('时间格式化缓存已清理')
   }
   
   return formatFunction as typeof formatFunction & { clearCache: () => void }
@@ -213,13 +216,11 @@ const resetToDefault = async () => {
   // 选中第一个条目（如果存在）
   if (filteredHistory.value.length > 0) {
     selectedItem.value = filteredHistory.value[0]
-    console.log('Selected first item:', selectedItem.value.id)
     
     // 滚动到选中的条目
     await scrollToSelectedItem(selectedItem.value.id)
   } else {
     selectedItem.value = null
-    console.log('No items available to select')
   }
 }
 
@@ -228,13 +229,11 @@ const focusSearchInput = async () => {
   await nextTick()
   if (searchInputRef.value) {
     searchInputRef.value.focus()
-    console.log('Search input focused')
   }
 }
 
 // 处理窗口焦点事件，当窗口显示/获得焦点时重置状态
 const handleWindowFocus = async () => {
-  console.log('Window focused, resetting to default state')
   await resetToDefault()
   await focusSearchInput()
 }
@@ -244,13 +243,11 @@ const hideWindow = async () => {
   try {
     const appWindow = getCurrentWindow()
     await appWindow.hide()
-    console.log('Window hidden via Esc key')
+    logger.debug('窗口已隐藏')
   } catch (error) {
-    console.error('Failed to hide window:', error)
+    logger.error('隐藏窗口失败', { error: String(error) })
   }
 }
-
-
 
 // 滚动到选中的条目
 const scrollToSelectedItem = async (itemId: number) => {
@@ -262,22 +259,16 @@ const scrollToSelectedItem = async (itemId: number) => {
       block: 'nearest',
       inline: 'nearest'
     })
-    console.log('Scrolled to selected item:', itemId)
   }
 }
 
 const filteredHistory = computed(() => {
-  console.log('Computing filteredHistory, selectedTabIndex:', selectedTabIndex.value)
-  console.log('Current clipboardHistory:', clipboardHistory.value.map(item => ({ id: item.id, isFavorite: item.isFavorite })))
-  
   const query = searchQuery.value.toLowerCase()
   
   // 根据标签页筛选：All显示所有，Favorites只显示收藏的
   const items = selectedTabIndex.value === 0 
     ? clipboardHistory.value 
     : clipboardHistory.value.filter(item => item.isFavorite === true)
-  
-  console.log('Filtered items count:', items.length)
   
   // 应用搜索过滤
   const result = items.filter(item => 
@@ -289,7 +280,6 @@ const filteredHistory = computed(() => {
 
 const toggleFavorite = async (item: any) => {
   try {
-    console.log('Toggling favorite for item:', item.id, 'Current status:', item.isFavorite, 'Current tab:', selectedTabIndex.value)
     const newFavoriteStatus = !item.isFavorite
     
     // 更新数据库
@@ -297,7 +287,6 @@ const toggleFavorite = async (item: any) => {
       `UPDATE clipboard_history SET is_favorite = ? WHERE id = ?`,
       [newFavoriteStatus ? 1 : 0, item.id]
     )
-    console.log('Database updated successfully')
     
     // 更新内存中的状态
     const index = clipboardHistory.value.findIndex(i => i.id === item.id)
@@ -309,7 +298,6 @@ const toggleFavorite = async (item: any) => {
         }
         return historyItem
       })
-      console.log('Memory state updated, new favorite status:', newFavoriteStatus)
       
       // 如果在收藏夹标签页取消收藏
       if (selectedTabIndex.value === 1 && !newFavoriteStatus) {
@@ -317,14 +305,10 @@ const toggleFavorite = async (item: any) => {
         if (selectedItem.value?.id === item.id) {
           selectedItem.value = null
         }
-        // 强制重新计算过滤后的列表
-        nextTick(() => {
-          console.log('Recomputing filtered list after unfavorite in Favorites tab')
-        })
       }
     }
   } catch (error) {
-    console.error('Failed to toggle favorite:', error)
+    logger.error('切换收藏状态失败', { itemId: item.id, error: String(error) })
   }
 }
 
@@ -356,7 +340,7 @@ const checkDuplicateContent = async (content: string, contentType: 'text' | 'ima
     
     return null
   } catch (error) {
-    console.error('检查重复内容失败:', error)
+    logger.error('检查重复内容失败', { error: String(error) })
     return null
   }
 }
@@ -371,7 +355,6 @@ const moveItemToFront = async (itemId: number) => {
       `UPDATE clipboard_history SET timestamp = ? WHERE id = ?`,
       [newTimestamp, itemId]
     )
-    console.log('Database timestamp updated for item:', itemId)
     
     // 在内存中找到该条目
     const itemIndex = clipboardHistory.value.findIndex(item => item.id === itemId)
@@ -385,12 +368,9 @@ const moveItemToFront = async (itemId: number) => {
       // 添加到最前面
       clipboardHistory.value.unshift(item)
       
-      console.log('Item moved to front in memory:', itemId, 'new timestamp:', newTimestamp)
-      
       // 如果移动的项目就是当前选中的项目，更新选中项目的引用
       if (selectedItem.value?.id === itemId) {
         selectedItem.value = item
-        console.log('Updated selected item reference after move to front')
       }
       
       // 如果在搜索模式下，也需要更新原始数据中的对应项目
@@ -401,12 +381,10 @@ const moveItemToFront = async (itemId: number) => {
           originalClipboardHistory.splice(originalIndex, 1)
           // 添加到最前面并更新时间戳
           originalClipboardHistory.unshift({ ...item, timestamp: newTimestamp })
-          console.log('Updated item position in original data as well')
         }
       }
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
-      console.warn('Item not found in memory, reloading from database:', itemId)
       const dbResult = await db.select(
         'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon FROM clipboard_history WHERE id = ?',
         [itemId]
@@ -430,12 +408,10 @@ const moveItemToFront = async (itemId: number) => {
         
         // 执行内存清理以防止列表过长
         trimMemoryHistory()
-        
-        console.log('Item reloaded from database and moved to front:', itemId)
       }
     }
   } catch (error) {
-    console.error('Failed to move item to front:', error)
+    logger.error('移动项目到前面失败', { itemId, error: String(error) })
   }
 }
 
@@ -444,21 +420,17 @@ const copyToClipboard = async (item: any) => {
   if (!item) return
   
   try {
-    console.log('智能复制和粘贴项目:', item.type, item.id)
+    logger.debug('开始智能复制和粘贴', { type: item.type, id: item.id })
     
     // 使用之前保存的目标应用信息（在快捷键触发时获取的）
     let targetApp: SourceAppInfo | null = previousActiveApp.value
     
-    console.log('使用预保存的目标应用信息:', targetApp?.name || 'null', '(bundle:', targetApp?.bundle_id || 'null', ')')
-    
     // 如果没有预保存的信息，则尝试获取（但此时可能已经不准确）
     if (!targetApp) {
-      console.warn('没有预保存的目标应用信息，尝试实时获取（可能不准确）')
       try {
         targetApp = await invoke('get_active_window_info') as SourceAppInfo
-        console.log('实时获取到应用信息:', targetApp.name, '(bundle:', targetApp.bundle_id, ')')
       } catch (error) {
-        console.warn('获取活动窗口信息失败:', error)
+        logger.warn('获取活动窗口信息失败', { error: String(error) })
         targetApp = null
       }
     }
@@ -475,7 +447,7 @@ const copyToClipboard = async (item: any) => {
         const fullImage = await invoke('load_image_file', { imagePath: item.imagePath }) as string
         contentToCopy = fullImage
       } catch (error) {
-        console.warn('Failed to load full image, using content field:', error)
+        logger.warn('加载完整图片失败，使用缩略图', { error: String(error) })
         contentToCopy = item.content
       }
     }
@@ -489,15 +461,12 @@ const copyToClipboard = async (item: any) => {
       (async () => {
         if (item.type === 'text') {
           await writeText(contentToCopy)
-          console.log('文本内容已复制到剪贴板:', item.id)
         } else if (item.type === 'image') {
           // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
           const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
           if (base64Data) {
             await writeImageBase64(base64Data)
-            console.log('图片内容已复制到剪贴板:', item.id)
           } else {
-            console.warn('No valid base64 data found for image item:', item.id)
             throw new Error('Invalid image data')
           }
         }
@@ -506,50 +475,30 @@ const copyToClipboard = async (item: any) => {
       appWindow.hide()
     ])
     
-    console.log('剪贴板和窗口操作完成，准备智能粘贴')
-    
     // 极短等待，让窗口隐藏生效
     await new Promise(resolve => setTimeout(resolve, 50))
     
     // 使用智能粘贴：如果有目标应用信息，就激活目标应用再粘贴
-    console.log('🔍 检查智能粘贴条件:')
-    console.log('  - targetApp存在:', !!targetApp)
-    console.log('  - targetApp.name:', targetApp?.name || 'undefined')
-    console.log('  - targetApp.name !== "Unknown":', targetApp?.name !== 'Unknown')
-    console.log('  - 不包含Clipboard:', !targetApp?.name?.includes('Clipboard'))
-    console.log('  - 不包含clipboard:', !targetApp?.name?.includes('clipboard'))
-    
     if (targetApp && targetApp.name && targetApp.name !== 'Unknown' && 
         !targetApp.name.includes('Clipboard') && !targetApp.name.includes('clipboard')) {
-      console.log('✅ 满足智能粘贴条件，执行智能粘贴到应用:', targetApp.name, '(bundle:', targetApp.bundle_id, ')')
+      logger.debug('执行智能粘贴', { targetApp: targetApp.name })
       await invoke('smart_paste_to_app', { 
         appName: targetApp.name,
         bundleId: targetApp.bundle_id || null
       })
-      console.log('智能粘贴完成:', item.id)
     } else {
-      console.log('❌ 不满足智能粘贴条件，回退到普通自动粘贴')
-      if (!targetApp) {
-        console.log('  原因: targetApp为null')
-      } else if (!targetApp.name) {
-        console.log('  原因: targetApp.name为空')
-      } else if (targetApp.name === 'Unknown') {
-        console.log('  原因: targetApp.name为Unknown')
-      } else if (targetApp.name.includes('Clipboard') || targetApp.name.includes('clipboard')) {
-        console.log('  原因: targetApp.name包含Clipboard字符串')
-      }
+      logger.debug('执行普通粘贴')
       await invoke('auto_paste')
-      console.log('普通粘贴完成:', item.id)
     }
     
   } catch (error) {
-    console.error('复制和粘贴失败:', error)
+    logger.error('复制和粘贴失败', { error: String(error) })
     // 如果出错，重新显示窗口
     try {
       const appWindow = getCurrentWindow()
       await appWindow.show()
     } catch (showError) {
-      console.error('显示窗口失败:', showError)
+      logger.error('显示窗口失败', { error: String(showError) })
     }
   }
 }
@@ -627,14 +576,11 @@ const handleKeyDown = (e: KeyboardEvent) => {
     // 验证新选中的项目确实存在且有有效ID
     if (newSelectedItem && newSelectedItem.id) {
       selectedItem.value = newSelectedItem
-      console.log('Keyboard navigation: selected item', newSelectedItem.id, 'at index', newIndex)
       
       // 滚动到新选中的条目
       nextTick(() => {
         scrollToSelectedItem(newSelectedItem.id)
       })
-    } else {
-      console.warn('Invalid item at index', newIndex, newSelectedItem)
     }
   }
 }
@@ -645,7 +591,6 @@ const handleDoubleClick = (item: any) => {
 }
 
 const handleTabChange = async (index: number) => {
-  console.log('Tab changed to:', index)
   selectedTabIndex.value = index
   // 重置搜索和选中状态
   searchQuery.value = ''
@@ -679,35 +624,30 @@ watch(selectedItem, async (newItem) => {
       // 使用新插件：图片数据直接存储在content字段中
       if (newItem.imagePath) {
         // 如果有文件路径，尝试从文件加载（兼容旧数据）
-        console.log('Loading full image from path:', newItem.imagePath)
         const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
         
         // 检查图片大小，如果过大则不在内存中保存
         if (fullImage.length > MAX_IMAGE_PREVIEW_SIZE) {
-          console.warn('完整图片过大，使用缩略图显示')
           fullImageContent.value = newItem.content
         } else {
           fullImageContent.value = fullImage
         }
       } else {
         // 新插件模式：直接使用content中的base64数据
-        console.log('Using base64 image data from content field')
         if (newItem.content && typeof newItem.content === 'string') {
           // 检查图片大小
           if (newItem.content.length > MAX_IMAGE_PREVIEW_SIZE) {
-            console.warn('图片数据过大，限制显示')
             // 即使过大也显示，因为这是唯一的数据源
             fullImageContent.value = newItem.content
           } else {
             fullImageContent.value = newItem.content
           }
         } else {
-          console.warn('图片项目缺少内容数据')
           fullImageContent.value = null
         }
       }
     } catch (error) {
-      console.error('Failed to load image:', error)
+      logger.warn('加载图片失败', { error: String(error) })
       // 如果加载失败，尝试使用content作为后备
       fullImageContent.value = (newItem.content && typeof newItem.content === 'string') ? newItem.content : null
     }
@@ -733,7 +673,7 @@ const searchFromDatabase = async () => {
     if (!isInSearchMode) {
       originalClipboardHistory = [...clipboardHistory.value]
       isInSearchMode = true
-      console.log('进入搜索模式，保存原始数据:', originalClipboardHistory.length, '条')
+      logger.debug('进入搜索模式', { originalDataCount: originalClipboardHistory.length })
     }
     
     const query = searchQuery.value.toLowerCase()
@@ -772,7 +712,6 @@ const searchFromDatabase = async () => {
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
-          console.warn('搜索结果中发现重复ID:', item.id)
           return false
         }
         seenIds.add(item.id)
@@ -785,9 +724,9 @@ const searchFromDatabase = async () => {
     // 重置选中状态，避免状态混乱
     selectedItem.value = null
     
-    console.log(`数据库搜索完成，找到 ${searchResults.length} 条记录`)
+    logger.debug('数据库搜索完成', { resultCount: searchResults.length })
   } catch (error) {
-    console.error('数据库搜索失败:', error)
+    logger.error('数据库搜索失败', { error: String(error) })
   } finally {
     isSearching.value = false
   }
@@ -808,7 +747,7 @@ const debouncedSearch = debounce(searchFromDatabase, 300)
 // 退出搜索模式，恢复原始数据
 const exitSearchMode = async () => {
   if (isInSearchMode) {
-    console.log('退出搜索模式，恢复原始数据:', originalClipboardHistory.length, '条')
+    logger.debug('退出搜索模式，恢复原始数据', { originalDataCount: originalClipboardHistory.length })
     
     // 合并在搜索期间可能新增的数据
     const currentNewestItems = clipboardHistory.value.filter((item: any) => {
@@ -831,7 +770,6 @@ const exitSearchMode = async () => {
     const seenIds = new Set()
     const finalDeduplicatedItems = allItems.filter((item: any) => {
       if (seenIds.has(item.id)) {
-        console.warn('退出搜索时发现重复ID:', item.id)
         return false
       }
       seenIds.add(item.id)
@@ -843,7 +781,7 @@ const exitSearchMode = async () => {
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     )
     
-    console.log(`数据恢复完成: ${currentNewestItems.length} 条新增 + ${deduplicatedOriginal.length} 条原始，最终去重后 ${finalDeduplicatedItems.length} 条`)
+    logger.debug('数据恢复完成', { newItemsCount: currentNewestItems.length, originalItemsCount: deduplicatedOriginal.length, totalItems: finalDeduplicatedItems.length })
     
     // 清空保存的数据和重置选中状态
     originalClipboardHistory = []
@@ -892,7 +830,7 @@ const loadMoreHistory = async () => {
     
     if (rows.length === 0) {
       hasMoreData.value = false
-      console.log('没有更多数据了')
+      logger.debug('没有更多数据了')
       return
     }
     
@@ -911,14 +849,14 @@ const loadMoreHistory = async () => {
     clipboardHistory.value.push(...newItems)
     currentOffset.value += rows.length
     
-    console.log(`加载了 ${rows.length} 条更多记录，总计 ${clipboardHistory.value.length} 条`)
+    logger.debug('加载了更多记录', { loadedCount: rows.length, totalCount: clipboardHistory.value.length })
     
     // 如果返回的记录数少于请求的数量，说明没有更多数据了
     if (rows.length < 50) {
       hasMoreData.value = false
     }
   } catch (error) {
-    console.error('加载更多记录失败:', error)
+    logger.error('加载更多记录失败', { error: String(error) })
   } finally {
     isLoadingMore.value = false
   }
@@ -971,7 +909,6 @@ const loadRecentHistory = async () => {
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
-          console.warn('加载历史记录时发现重复ID:', item.id)
           return false
         }
         seenIds.add(item.id)
@@ -985,16 +922,19 @@ const loadRecentHistory = async () => {
     hasMoreData.value = true
     selectedItem.value = null
     
-    console.log(`加载了 ${clipboardHistory.value.length} 条最近的记录（去重后）`)
+    logger.debug('加载了最近的记录', { totalCount: clipboardHistory.value.length })
   } catch (error) {
-    console.error('加载历史记录失败:', error)
+    logger.error('加载历史记录失败', { error: String(error) })
   }
 }
 
 onMounted(async () => {
   try {
+    // 初始化日志系统
+    logger.info('应用程序启动', { timestamp: new Date().toISOString() })
+    
     const dbPath = 'sqlite:clipboard.db'
-    console.log('Connecting to database:', dbPath)
+    logger.info('连接数据库', { dbPath })
     db = await Database.load(dbPath)
     
     // 初始加载最近的历史记录
@@ -1002,22 +942,22 @@ onMounted(async () => {
 
     // 启动新的剪贴板监听器（使用tauri-plugin-clipboard）
     unlistenClipboard = await startListening()
-    console.log('剪贴板监听器已启动（无内存泄漏版本）')
+    logger.info('剪贴板监听器已启动（无内存泄漏版本）')
 
     // 注册剪贴板文本变化监听器
     unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
-        console.log('检测到文本剪贴板变化:', newText.length, '字符')
+        logger.debug('检测到文本剪贴板变化', { length: newText.length })
         
         // 防止并发处理
         if (isProcessingClipboard) {
-          console.log('正在处理其他剪贴板事件，跳过')
+          logger.debug('正在处理其他剪贴板事件，跳过')
           return
         }
         
         // 限制内容长度
         if (newText && newText.length > 100_000) {
-          console.warn('文本内容过长，跳过')
+          logger.warn('文本内容过长，跳过')
           return
         }
         
@@ -1026,7 +966,7 @@ onMounted(async () => {
         const timeDiff = currentTime - lastTextProcessTime
         
         if (timeDiff < 1000 && lastTextContent === newText) { // 1秒内相同内容视为重复
-          console.log('检测到时间窗口内的重复文本事件，跳过')
+          logger.debug('检测到时间窗口内的重复文本事件，跳过')
           return
         }
         
@@ -1039,7 +979,7 @@ onMounted(async () => {
         // 检查是否是重复内容
           const duplicateItemId = await checkDuplicateContent(newText, 'text')
         if (duplicateItemId) {
-          console.log('Duplicate text content detected, moving item to front:', duplicateItemId)
+                      logger.debug('Duplicate text content detected, moving item to front', { itemId: duplicateItemId })
           await moveItemToFront(duplicateItemId)
           return
           }
@@ -1055,20 +995,11 @@ onMounted(async () => {
           bundle_id: undefined
         }
         
-        console.log('🔍 [文本] 开始获取源应用信息...')
         try {
-          console.log('🔍 [文本] 调用 get_active_window_info_for_clipboard 命令（剪贴板专用）')
           const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
           sourceAppInfo = appInfo
-          console.log('✅ [文本] 获取到源应用信息:', {
-            name: sourceAppInfo.name,
-            bundle_id: sourceAppInfo.bundle_id,
-            hasIcon: sourceAppInfo.icon !== null,
-            iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
-          })
         } catch (error) {
-          console.error('❌ [文本] 获取源应用信息失败:', error)
-          console.error('❌ [文本] 错误详情:', JSON.stringify(error))
+          logger.error('获取源应用信息失败', { error: String(error) })
         }
 
         const item = {
@@ -1104,23 +1035,17 @@ onMounted(async () => {
               const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
               if (originalExistingIndex === -1) {
                 originalClipboardHistory.unshift(newItem)
-                console.log('新项目也添加到原始数据中')
               }
             }
-            
-            console.log('新文本项目已添加到内存，ID:', id)
-          } else {
-            console.warn('内存中已存在相同ID的项目，跳过添加:', id)
           }
           
           // 立即执行内存清理
-          console.log('执行内存清理')
           trimMemoryHistory()
         } catch (dbError) {
-          console.error('数据库操作失败:', dbError)
+          logger.error('数据库操作失败', { error: String(dbError) })
         }
       } catch (error) {
-        console.error('Failed to process clipboard text:', error)
+        logger.error('处理剪贴板文本失败', { error: String(error) })
       } finally {
         // 确保在所有情况下都清除处理标志
         isProcessingClipboard = false
@@ -1130,17 +1055,15 @@ onMounted(async () => {
     // 注册剪贴板图片变化监听器
     unlistenClipboardImage = await onImageUpdate(async (base64Image: string) => {
       try {
-        console.log('检测到图片剪贴板变化:', base64Image.length, '字符')
-        
         // 防止并发处理
         if (isProcessingClipboard) {
-          console.log('正在处理其他剪贴板事件，跳过')
+          logger.debug('正在处理其他剪贴板事件，跳过')
           return
         }
         
         // 检查图片大小
         if (base64Image && base64Image.length > MAX_IMAGE_PREVIEW_SIZE) {
-          console.warn('图片过大，跳过')
+          logger.warn('图片过大，跳过')
           return
         }
         
@@ -1149,7 +1072,7 @@ onMounted(async () => {
         const timeDiff = currentTime - lastImageProcessTime
         
         if (timeDiff < 2000) { // 2秒内视为重复
-          console.log('检测到时间窗口内的重复图片事件，跳过')
+          logger.debug('检测到时间窗口内的重复图片事件，跳过')
           return
         }
         
@@ -1163,7 +1086,7 @@ onMounted(async () => {
         // 检查是否是重复内容
         const duplicateItemId = await checkDuplicateContent(imageDataUrl, 'image')
         if (duplicateItemId) {
-          console.log('Duplicate image content detected, moving item to front:', duplicateItemId)
+          logger.debug('Duplicate image content detected, moving item to front', { itemId: duplicateItemId })
           await moveItemToFront(duplicateItemId)
           return
         }
@@ -1175,20 +1098,11 @@ onMounted(async () => {
           bundle_id: undefined
         }
         
-        console.log('🔍 [图片] 开始获取源应用信息...')
         try {
-          console.log('🔍 [图片] 调用 get_active_window_info_for_clipboard 命令（剪贴板专用）')
           const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
           sourceAppInfo = appInfo
-          console.log('✅ [图片] 获取到源应用信息:', {
-            name: sourceAppInfo.name,
-            bundle_id: sourceAppInfo.bundle_id,
-            hasIcon: sourceAppInfo.icon !== null,
-            iconLength: sourceAppInfo.icon ? sourceAppInfo.icon.length : 0
-          })
         } catch (error) {
-          console.error('❌ [图片] 获取源应用信息失败:', error)
-          console.error('❌ [图片] 错误详情:', JSON.stringify(error))
+          logger.error('获取源应用信息失败', { error: String(error) })
         }
 
         const item = {
@@ -1224,22 +1138,17 @@ onMounted(async () => {
               const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
               if (originalExistingIndex === -1) {
                 originalClipboardHistory.unshift(newItem)
-                console.log('新图片项目也添加到原始数据中')
               }
             }
-            
-            console.log('新图片项目已添加到内存，ID:', id)
-          } else {
-            console.warn('内存中已存在相同ID的图片项目，跳过添加:', id)
           }
           
           // 立即执行内存清理
           trimMemoryHistory()
         } catch (dbError) {
-          console.error('数据库操作失败:', dbError)
+          logger.error('数据库操作失败', { error: String(dbError) })
         }
       } catch (error) {
-        console.error('Failed to process clipboard image:', error)
+        logger.error('处理剪贴板图片失败', { error: String(error) })
       } finally {
         // 确保在所有情况下都清除处理标志
         isProcessingClipboard = false
@@ -1253,7 +1162,6 @@ onMounted(async () => {
     
     // 监听前一个活动应用程序信息事件
     const unlistenPreviousAppFunc = await appWindow.listen<SourceAppInfo>('previous-app-info', (event) => {
-      console.log('📥 收到前一个活动应用信息:', event.payload.name)
       previousActiveApp.value = event.payload
     })
     
@@ -1263,7 +1171,6 @@ onMounted(async () => {
     // 监听窗口焦点事件
     const unlistenFocusFunc = await appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
-        console.log('Window focused via Tauri API, resetting to default state')
         handleWindowFocus()
       }
     })
@@ -1276,7 +1183,7 @@ onMounted(async () => {
       event.preventDefault()
       // 隐藏窗口到系统托盘
       await appWindow.hide()
-      console.log('Window hidden to system tray')
+      logger.debug('窗口隐藏到系统托盘')
     })
     
     // 组件挂载后自动聚焦搜索框
@@ -1285,14 +1192,10 @@ onMounted(async () => {
     // 开发环境下将调试函数绑定到window对象
     if (process.env.NODE_ENV === 'development') {
       (window as any).checkDataConsistency = checkDataConsistency
-      console.log('调试函数 checkDataConsistency 已绑定到 window 对象')
     }
     
-
-
     // 定期内存清理
     memoryCleanupInterval = setInterval(() => {
-      console.log('执行定期内存清理')
       trimMemoryHistory()
       
       // 清理选中的完整图片内容（如果没有选中图片）
@@ -1315,28 +1218,25 @@ onMounted(async () => {
     // 这将清理超过设置时间限制的过期历史记录，释放存储空间
     historyCleanupInterval = setInterval(async () => {
       try {
-        console.log('🧹 开始执行定期数据库历史清理...')
         await invoke('cleanup_history')
-        console.log('✅ 定期数据库历史清理完成')
+        logger.info('定期数据库历史清理完成')
         
         // 清理完成后，如果不在搜索模式，重新加载最近的记录以反映清理后的状态
         if (!isInSearchMode && !searchQuery.value.trim()) {
           await loadRecentHistory()
-          console.log('📝 历史清理后已重新加载最近记录')
         }
       } catch (error) {
-        console.error('❌ 定期数据库历史清理失败:', error)
+        logger.error('定期数据库历史清理失败', { error: String(error) })
       }
     }, HISTORY_CLEAN_INTERVAL) // 每小时执行一次 (60分钟 * 60秒 * 1000毫秒)
     
-    console.log('⏰ 定期历史清理定时器已启动，将每小时自动清理一次过期记录')
   } catch (error) {
-    console.error('Database error:', error)
+    logger.error('数据库错误', { error: String(error) })
   }
 })
 
 onUnmounted(() => {
-  console.log('组件卸载，开始清理资源...')
+  logger.debug('组件卸载，开始清理资源...')
   
   // 清理键盘事件监听器
   window.removeEventListener('keydown', handleKeyDown)
@@ -1379,7 +1279,6 @@ onUnmounted(() => {
   if (historyCleanupInterval) {
     clearInterval(historyCleanupInterval)
     historyCleanupInterval = null
-    console.log('定期历史清理定时器已清理')
   }
   
   // 清理图片内容，释放内存
@@ -1404,11 +1303,10 @@ onUnmounted(() => {
   
   // 尝试手动触发垃圾回收
   if (typeof (window as any).gc === 'function') {
-    console.log('手动触发垃圾回收')
     ;(window as any).gc()
   }
   
-  console.log('资源清理完成')
+  logger.debug('资源清理完成')
 })
 
 
@@ -1427,19 +1325,20 @@ watch(selectedTabIndex, () => {
 
 // 数据一致性检查函数（调试用）
 const checkDataConsistency = () => {
-  console.log('=== 数据一致性检查 ===')
-  console.log('clipboardHistory 长度:', clipboardHistory.value.length)
-  console.log('filteredHistory 长度:', filteredHistory.value.length)
-  console.log('selectedItem ID:', selectedItem.value?.id)
-  console.log('isInSearchMode:', isInSearchMode)
-  console.log('originalClipboardHistory 长度:', originalClipboardHistory.length)
+  const report = {
+    clipboardHistoryLength: clipboardHistory.value.length,
+    filteredHistoryLength: filteredHistory.value.length,
+    selectedItemId: selectedItem.value?.id,
+    isInSearchMode,
+    originalHistoryLength: originalClipboardHistory.length
+  }
+  
+  logger.debug('数据一致性检查', report)
   
   // 检查重复ID
   const ids = clipboardHistory.value.map((item: any) => item.id)
   const uniqueIds = new Set(ids)
   if (ids.length !== uniqueIds.size) {
-    console.warn('⚠️ 发现重复ID!', ids.length, '项 vs', uniqueIds.size, '唯一ID')
-    
     // 找出重复的ID
     const duplicates: any[] = []
     const seen = new Set()
@@ -1449,70 +1348,33 @@ const checkDataConsistency = () => {
       }
       seen.add(id)
     })
-    console.warn('重复的ID:', duplicates)
+    logger.warn('发现重复ID', { duplicateIds: duplicates })
   } else {
-    console.log('✅ 无重复ID')
+    logger.debug('数据一致性检查通过：无重复ID')
   }
   
   // 检查选中项是否在列表中
   if (selectedItem.value) {
     const found = filteredHistory.value.find((item: any) => item.id === selectedItem.value?.id)
     if (!found) {
-      console.warn('⚠️ 选中项不在过滤列表中!', selectedItem.value.id)
+      logger.warn('选中项不在过滤列表中', { selectedItemId: selectedItem.value.id })
     } else {
-      console.log('✅ 选中项有效')
+      logger.debug('选中项有效')
     }
   }
-  
-  console.log('=== 检查结束 ===')
 }
-
-// 手动清理过期历史记录
-// const manualCleanupHistory = async () => {
-//   try {
-//     console.log('🧹 手动执行历史清理...')
-    
-//     // 显示确认对话框
-//     if (!confirm('确定要清理过期的历史记录吗？\n\n这将删除超过设置时间限制的剪贴板记录，但不会影响收藏的项目。')) {
-//       return
-//     }
-    
-//     await invoke('cleanup_history')
-//     console.log('✅ 手动历史清理完成')
-    
-//     // 清理完成后重新加载最近的记录
-//     if (!isInSearchMode && !searchQuery.value.trim()) {
-//       await loadRecentHistory()
-//       console.log('📝 历史清理后已重新加载最近记录')
-//     }
-    
-//     // 用户反馈
-//     showSuccess(
-//       'Cleanup Complete',
-//       'Expired records cleaned. Favorites preserved.',
-//       4000
-//     )
-//   } catch (error) {
-//     console.error('❌ 手动历史清理失败:', error)
-//     showError(
-//       'Cleanup Failed',
-//       'Could not clean expired records.',
-//       6000
-//     )
-//   }
-// }
 
 // 重置数据库函数（仅用于开发环境修复迁移冲突）
 const resetDatabase = async () => {
   if (confirm('确定要重置数据库吗？这将删除所有剪贴板历史记录！')) {
     try {
       await invoke('reset_database')
-      console.log('数据库重置成功')
+      logger.info('数据库重置成功')
       alert('数据库重置成功！请重启应用程序。')
       // 重新加载页面以重新初始化
       window.location.reload()
     } catch (error) {
-      console.error('重置数据库失败:', error)
+      logger.error('重置数据库失败', { error: String(error) })
       alert('重置数据库失败: ' + error)
     }
   }

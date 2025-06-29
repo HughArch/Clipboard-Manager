@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Manager};
 use crate::types::{AppSettings, DatabaseState};
+use crate::logging;
 use std::fs;
 use std::path::PathBuf;
 use dirs_next::config_dir;
@@ -27,13 +28,13 @@ pub fn greet(name: &str) -> String {
 
 // 清理过期的剪贴板历史数据
 async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result<(), String> {
-    println!("开始清理过期数据，设置：max_items={}, max_time={}", settings.max_history_items, settings.max_history_time);
+    tracing::info!("开始清理过期数据，设置：max_items={}, max_time={}", settings.max_history_items, settings.max_history_time);
     
     // 获取数据库连接池
     let db_state = match app.try_state::<Mutex<DatabaseState>>() {
         Some(state) => state,
         None => {
-            println!("数据库状态还未初始化，跳过清理");
+            tracing::warn!("数据库状态还未初始化，跳过清理");
             return Ok(());
         }
     };
@@ -41,23 +42,23 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     let db_guard = db_state.lock().await;
     let db = &db_guard.pool;
     
-    println!("数据库连接可用，开始清理操作");
+    tracing::debug!("数据库连接可用，开始清理操作");
     
     // 首先查看数据库中的所有记录
     match sqlx::query("SELECT id, timestamp, is_favorite FROM clipboard_history ORDER BY timestamp DESC LIMIT 5")
         .fetch_all(db)
         .await {
         Ok(rows) => {
-            println!("数据库中的前5条记录:");
+            tracing::info!("数据库中的前5条记录:");
             for row in rows {
                 let id: i64 = row.get("id");
                 let timestamp: String = row.get("timestamp");
                 let is_favorite: i64 = row.get("is_favorite");
-                println!("  ID: {}, 时间戳: {}, 收藏: {}", id, timestamp, is_favorite);
+                tracing::info!("  ID: {}, 时间戳: {}, 收藏: {}", id, timestamp, is_favorite);
             }
         }
         Err(e) => {
-            println!("查询记录失败: {}", e);
+            tracing::error!("查询记录失败: {}", e);
         }
     }
     
@@ -66,7 +67,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     let days_ago = chrono::Utc::now() - chrono::Duration::days(settings.max_history_time as i64);
     let timestamp_cutoff = days_ago.to_rfc3339(); // 使用 ISO 8601 格式
     
-    println!("时间清理：删除 {} 之前的记录", timestamp_cutoff);
+    tracing::info!("时间清理：删除 {} 之前的记录", timestamp_cutoff);
     
     // 首先获取需要删除的图片文件路径
     let time_images_query = "
@@ -88,7 +89,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
             paths
         }
         Err(e) => {
-            println!("查询过期图片路径失败: {}", e);
+            tracing::info!("查询过期图片路径失败: {}", e);
             Vec::new()
         }
     };
@@ -96,9 +97,9 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     // 删除过期的图片文件
     for image_path in &time_expired_images {
         if let Err(e) = std::fs::remove_file(image_path) {
-            println!("删除图片文件失败 {}: {}", image_path, e);
+            tracing::info!("删除图片文件失败 {}: {}", image_path, e);
         } else {
-            println!("已删除图片文件: {}", image_path);
+            tracing::info!("已删除图片文件: {}", image_path);
         }
     }
     
@@ -112,10 +113,10 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         .execute(db)
         .await {
         Ok(result) => {
-            println!("按时间清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), time_expired_images.len());
+            tracing::info!("按时间清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), time_expired_images.len());
         }
         Err(e) => {
-            println!("按时间清理失败: {}", e);
+            tracing::error!("按时间清理失败: {}", e);
             return Err(format!("按时间清理数据失败: {}", e));
         }
     }
@@ -128,17 +129,17 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         .await {
         Ok(result) => result,
         Err(e) => {
-            println!("查询记录数量失败: {}", e);
+            tracing::info!("查询记录数量失败: {}", e);
             return Err(format!("查询记录数量失败: {}", e));
         }
     };
     
     let current_count: i64 = count_result.get("count");
-    println!("当前非收藏记录数量: {}, 最大允许: {}", current_count, settings.max_history_items);
+    tracing::info!("当前非收藏记录数量: {}, 最大允许: {}", current_count, settings.max_history_items);
     
     if current_count > settings.max_history_items as i64 {
         let excess_count = current_count - settings.max_history_items as i64;
-        println!("需要删除 {} 条多余记录", excess_count);
+        tracing::info!("需要删除 {} 条多余记录", excess_count);
         
         // 首先获取需要删除的记录的图片路径
         let count_images_query = "
@@ -167,7 +168,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
                 paths
             }
             Err(e) => {
-                println!("查询需删除图片路径失败: {}", e);
+                tracing::info!("查询需删除图片路径失败: {}", e);
                 Vec::new()
             }
         };
@@ -175,9 +176,9 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         // 删除图片文件
         for image_path in &count_expired_images {
             if let Err(e) = std::fs::remove_file(image_path) {
-                println!("删除图片文件失败 {}: {}", image_path, e);
+                tracing::info!("删除图片文件失败 {}: {}", image_path, e);
             } else {
-                println!("已删除图片文件: {}", image_path);
+                tracing::info!("已删除图片文件: {}", image_path);
             }
         }
         
@@ -198,15 +199,15 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
             .execute(db)
             .await {
             Ok(result) => {
-                println!("按数量清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), count_expired_images.len());
+                tracing::info!("按数量清理完成，删除了 {} 条记录，删除了 {} 个图片文件", result.rows_affected(), count_expired_images.len());
             }
             Err(e) => {
-                println!("按数量清理失败: {}", e);
+                tracing::info!("按数量清理失败: {}", e);
                 return Err(format!("按数量清理数据失败: {}", e));
             }
         }
     } else {
-        println!("记录数量未超出限制，无需按数量清理");
+        tracing::info!("记录数量未超出限制，无需按数量清理");
     }
     
     // 清理后再次查看记录数量
@@ -216,10 +217,10 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         Ok(row) => {
             let total: i64 = row.get("total");
             let favorites: i64 = row.get("favorites");
-            println!("清理后统计：总记录数: {}, 收藏数: {}", total, favorites);
+            tracing::info!("清理后统计：总记录数: {}, 收藏数: {}", total, favorites);
         }
         Err(e) => {
-            println!("查询清理后统计失败: {}", e);
+            tracing::info!("查询清理后统计失败: {}", e);
         }
     }
     
@@ -249,7 +250,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
                                         }
                                     }
                                     Err(e) => {
-                                        println!("检查孤立文件失败: {}", e);
+                                        tracing::info!("检查孤立文件失败: {}", e);
                                     }
                                 }
                             }
@@ -259,39 +260,39 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
                     // 删除孤立的图片文件
                     for orphaned_file in &orphaned_files {
                         if let Err(e) = std::fs::remove_file(orphaned_file) {
-                            println!("删除孤立图片文件失败 {}: {}", orphaned_file, e);
+                            tracing::info!("删除孤立图片文件失败 {}: {}", orphaned_file, e);
                         } else {
-                            println!("已删除孤立图片文件: {}", orphaned_file);
+                            tracing::info!("已删除孤立图片文件: {}", orphaned_file);
                         }
                     }
                     
                     if !orphaned_files.is_empty() {
-                        println!("清理了 {} 个孤立的图片文件", orphaned_files.len());
+                        tracing::info!("清理了 {} 个孤立的图片文件", orphaned_files.len());
                     }
                 }
                 Err(e) => {
-                    println!("无法读取图片目录: {}", e);
+                    tracing::info!("无法读取图片目录: {}", e);
                 }
             }
         }
     }
     
-    println!("数据清理完成");
+    tracing::info!("数据清理完成");
     Ok(())
 }
 
 #[tauri::command]
 pub async fn save_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
-    println!("保存设置: {:?}", settings);
+    tracing::info!("保存设置: {:?}", settings);
     let path = settings_file_path()?;
     let json = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     fs::write(path, json).map_err(|e| e.to_string())?;
     
-    println!("设置已保存，开始执行清理");
+    tracing::info!("设置已保存，开始执行清理");
     // 保存设置后自动清理过期数据
     match cleanup_expired_data(&app, &settings).await {
-        Ok(_) => println!("清理操作完成"),
-        Err(e) => println!("清理操作失败: {}", e),
+        Ok(_) => tracing::info!("清理操作完成"),
+        Err(e) => tracing::info!("清理操作失败: {}", e),
     }
     
     Ok(())
@@ -307,7 +308,7 @@ pub async fn load_settings(_app: tauri::AppHandle) -> Result<AppSettings, String
 
 #[tauri::command]
 pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
-    println!("尝试注册快捷键: {}", shortcut);
+    tracing::info!("尝试注册快捷键: {}", shortcut);
     
     // 先尝试注销已有的快捷键
     let _ = app.global_shortcut().unregister_all();
@@ -315,7 +316,7 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
     // 将字符串转换为 Shortcut 类型
     let shortcut_parsed = shortcut.parse::<Shortcut>().map_err(|e| {
         let error_msg = format!("Invalid hotkey format: {}. Please use format like 'Ctrl+Shift+V'", e);
-        println!("快捷键解析失败: {}", error_msg);
+        tracing::info!("快捷键解析失败: {}", error_msg);
         error_msg
     })?;
     
@@ -326,19 +327,19 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
         // 处理常见的错误类型
         if error_str.contains("HotKey already registered") || error_str.contains("already registered") {
             let friendly_msg = format!("HotKey already registered: The hotkey '{}' is already in use by another application", shortcut);
-            println!("快捷键冲突: {}", friendly_msg);
+            tracing::info!("快捷键冲突: {}", friendly_msg);
             friendly_msg
         } else if error_str.contains("Invalid") || error_str.contains("invalid") {
             let friendly_msg = format!("Invalid hotkey format: '{}' is not a valid hotkey format", shortcut);
-            println!("快捷键格式错误: {}", friendly_msg);
+            tracing::info!("快捷键格式错误: {}", friendly_msg);
             friendly_msg
         } else {
-            println!("快捷键注册失败: {}", error_str);
+            tracing::info!("快捷键注册失败: {}", error_str);
             format!("Failed to register hotkey '{}': {}", shortcut, error_str)
         }
     })?;
     
-    println!("快捷键注册成功: {}", shortcut);
+    tracing::info!("快捷键注册成功: {}", shortcut);
     Ok(())
 }
 
@@ -477,15 +478,15 @@ fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
 fn set_macos_auto_start(enable: bool, app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> Result<(), String> {
     use std::process::Command;
     
-    println!("🍎 macOS: 设置自启动状态: {} (应用: {})", enable, app_name);
+    tracing::debug!("🍎 macOS: 设置自启动状态: {} (应用: {})", enable, app_name);
     
     if enable {
         // 方法1: 尝试使用 Login Items (推荐方法)
         if let Err(e1) = add_to_login_items_applescript(app_name, exe_path) {
-            println!("⚠️ AppleScript 方法失败: {}", e1);
+            tracing::warn!("⚠️ AppleScript 方法失败: {}", e1);
             
             // 方法2: 回退到 LaunchAgent 方法
-            println!("🔄 尝试 LaunchAgent 方法...");
+            tracing::debug!("🔄 尝试 LaunchAgent 方法...");
             add_to_launch_agent(app_name, bundle_id, exe_path)?;
         }
     } else {
@@ -499,7 +500,7 @@ fn set_macos_auto_start(enable: bool, app_name: &str, bundle_id: &str, exe_path:
 
 #[cfg(target_os = "macos")]
 fn get_macos_auto_start_status(app_name: &str, bundle_id: &str) -> Result<bool, String> {
-    println!("🔍 macOS: 检查自启动状态: {}", app_name);
+    tracing::debug!("🔍 macOS: 检查自启动状态: {}", app_name);
     
     // 方法1: 检查 Login Items
     if check_login_items_status(app_name).unwrap_or(false) {
@@ -532,7 +533,7 @@ fn add_to_login_items_applescript(app_name: &str, exe_path: &PathBuf) -> Result<
         exe_path.to_string_lossy().to_string()
     };
     
-    println!("📁 应用 Bundle 路径: {}", app_bundle_path);
+    tracing::debug!("📁 应用 Bundle 路径: {}", app_bundle_path);
     
     let script = format!(r#"
 tell application "System Events"
@@ -564,7 +565,7 @@ end tell
     
     if output.status.success() {
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        println!("✅ AppleScript 结果: {}", result);
+        tracing::info!("✅ AppleScript 结果: {}", result);
         Ok(())
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -598,7 +599,7 @@ end tell
     
     if output.status.success() {
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        println!("✅ 移除结果: {}", result);
+        tracing::info!("✅ 移除结果: {}", result);
         Ok(())
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -681,7 +682,7 @@ fn add_to_launch_agent(app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> R
     fs::write(&plist_path, plist_content)
         .map_err(|e| format!("写入 plist 文件失败: {}", e))?;
     
-    println!("✅ LaunchAgent plist 已创建: {}", plist_path.display());
+    tracing::info!("✅ LaunchAgent plist 已创建: {}", plist_path.display());
     Ok(())
 }
 
@@ -702,7 +703,7 @@ fn remove_from_launch_agent(bundle_id: &str) -> Result<(), String> {
     if plist_path.exists() {
         fs::remove_file(&plist_path)
             .map_err(|e| format!("删除 plist 文件失败: {}", e))?;
-        println!("✅ LaunchAgent plist 已删除: {}", plist_path.display());
+        tracing::info!("✅ LaunchAgent plist 已删除: {}", plist_path.display());
     }
     
     Ok(())
@@ -731,7 +732,7 @@ fn set_linux_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Res
     use std::fs;
     use std::path::Path;
     
-    println!("🐧 Linux: 设置自启动状态: {} (应用: {})", enable, app_name);
+    tracing::debug!("🐧 Linux: 设置自启动状态: {} (应用: {})", enable, app_name);
     
     let home_dir = std::env::var("HOME")
         .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
@@ -762,14 +763,14 @@ X-GNOME-Autostart-enabled=true
         fs::write(&desktop_path, desktop_content)
             .map_err(|e| format!("写入 .desktop 文件失败: {}", e))?;
         
-        println!("✅ Linux: 自启动 .desktop 文件已创建: {}", desktop_path.display());
+        tracing::info!("✅ Linux: 自启动 .desktop 文件已创建: {}", desktop_path.display());
     } else {
         // 删除 .desktop 文件
         if desktop_path.exists() {
             fs::remove_file(&desktop_path)
                 .map_err(|e| format!("删除 .desktop 文件失败: {}", e))?;
             
-            println!("✅ Linux: 自启动 .desktop 文件已删除: {}", desktop_path.display());
+            tracing::info!("✅ Linux: 自启动 .desktop 文件已删除: {}", desktop_path.display());
         }
     }
     
@@ -780,7 +781,7 @@ X-GNOME-Autostart-enabled=true
 fn get_linux_auto_start_status(app_name: &str) -> Result<bool, String> {
     use std::path::Path;
     
-    println!("🔍 Linux: 检查自启动状态: {}", app_name);
+    tracing::debug!("🔍 Linux: 检查自启动状态: {}", app_name);
     
     let home_dir = std::env::var("HOME")
         .map_err(|_| "无法获取 HOME 环境变量".to_string())?;
@@ -791,7 +792,7 @@ fn get_linux_auto_start_status(app_name: &str) -> Result<bool, String> {
         .join(&desktop_filename);
     
     let exists = desktop_path.exists();
-    println!("📋 Linux: .desktop 文件状态: {}", if exists { "存在" } else { "不存在" });
+    tracing::debug!("📋 Linux: .desktop 文件状态: {}", if exists { "存在" } else { "不存在" });
     
     Ok(exists)
 }
@@ -812,7 +813,7 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
 // 改进的自动粘贴功能 - 先激活目标应用，再执行粘贴
 #[tauri::command]
 pub async fn auto_paste() -> Result<(), String> {
-    println!("开始执行智能自动粘贴...");
+    tracing::info!("开始执行智能自动粘贴...");
     
     // 短暂等待确保窗口已隐藏
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -837,15 +838,15 @@ pub async fn auto_paste() -> Result<(), String> {
     
     match result {
         Ok(Ok(())) => {
-            println!("智能自动粘贴操作完成");
+            tracing::info!("智能自动粘贴操作完成");
             Ok(())
         }
         Ok(Err(e)) => {
-            println!("自动粘贴失败: {}", e);
+            tracing::info!("自动粘贴失败: {}", e);
             Err(format!("粘贴操作失败: {}", e))
         }
         Err(e) => {
-            println!("粘贴任务执行失败: {}", e);
+            tracing::info!("粘贴任务执行失败: {}", e);
             Err(format!("粘贴任务失败: {}", e))
         }
     }
@@ -854,7 +855,7 @@ pub async fn auto_paste() -> Result<(), String> {
 // 新增：智能粘贴功能 - 先激活指定应用，再粘贴
 #[tauri::command]
 pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> Result<(), String> {
-    println!("开始执行智能粘贴到应用: {} (bundle: {:?})", app_name, bundle_id);
+    tracing::info!("开始执行智能粘贴到应用: {} (bundle: {:?})", app_name, bundle_id);
     
     // 短暂等待确保窗口已隐藏
     tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
@@ -890,15 +891,15 @@ pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> 
     
     match result {
         Ok(Ok(())) => {
-            println!("智能粘贴到应用 {} 完成", app_name_for_log);
+            tracing::info!("智能粘贴到应用 {} 完成", app_name_for_log);
             Ok(())
         }
         Ok(Err(e)) => {
-            println!("智能粘贴失败: {}", e);
+            tracing::info!("智能粘贴失败: {}", e);
             Err(format!("粘贴操作失败: {}", e))
         }
         Err(e) => {
-            println!("粘贴任务执行失败: {}", e);
+            tracing::info!("粘贴任务执行失败: {}", e);
             Err(format!("粘贴任务失败: {}", e))
         }
     }
@@ -910,12 +911,12 @@ fn activate_application(app_name: &str, bundle_id: Option<&str>) -> Result<(), S
     
     #[cfg(target_os = "macos")]
     {
-        println!("🎯 macOS: 激活应用程序 {} (bundle: {:?})", app_name, bundle_id);
+        tracing::info!("🎯 macOS: 激活应用程序 {} (bundle: {:?})", app_name, bundle_id);
         
         // 方法1: 如果有 bundle_id，优先使用 bundle identifier 激活（最可靠）
         if let Some(bundle) = bundle_id {
             if !bundle.is_empty() && bundle != "missing value" {
-                println!("尝试使用 bundle identifier 激活: {}", bundle);
+                tracing::info!("尝试使用 bundle identifier 激活: {}", bundle);
                 let script = format!(r#"tell application id "{}" to activate"#, bundle);
                 let output = Command::new("osascript")
                     .arg("-e")
@@ -924,17 +925,17 @@ fn activate_application(app_name: &str, bundle_id: Option<&str>) -> Result<(), S
                     .map_err(|e| format!("使用 bundle ID 激活失败: {}", e))?;
                 
                 if output.status.success() {
-                    println!("✅ 成功通过 bundle ID 激活应用程序: {}", app_name);
+                    tracing::info!("✅ 成功通过 bundle ID 激活应用程序: {}", app_name);
                     return Ok(());
                 } else {
                     let error_msg = String::from_utf8_lossy(&output.stderr);
-                    println!("⚠️ bundle ID 激活失败，尝试其他方法: {}", error_msg);
+                    tracing::warn!("⚠️ bundle ID 激活失败，尝试其他方法: {}", error_msg);
                 }
             }
         }
         
         // 方法2: 使用 open 命令激活应用程序（通过应用名称）
-        println!("尝试使用 open 命令激活应用程序");
+        tracing::info!("尝试使用 open 命令激活应用程序");
         let open_output = Command::new("open")
             .arg("-a")
             .arg(app_name)
@@ -942,15 +943,15 @@ fn activate_application(app_name: &str, bundle_id: Option<&str>) -> Result<(), S
             .map_err(|e| format!("open 命令执行失败: {}", e))?;
         
         if open_output.status.success() {
-            println!("✅ 成功通过 open 命令激活应用程序: {}", app_name);
+            tracing::info!("✅ 成功通过 open 命令激活应用程序: {}", app_name);
             return Ok(());
         } else {
             let open_error = String::from_utf8_lossy(&open_output.stderr);
-            println!("⚠️ open 命令激活失败，尝试其他方法: {}", open_error);
+            tracing::warn!("⚠️ open 命令激活失败，尝试其他方法: {}", open_error);
         }
         
         // 方法3: 使用 System Events 通过进程名称激活
-        println!("尝试使用 System Events 激活应用程序");
+        tracing::info!("尝试使用 System Events 激活应用程序");
         let script = format!(r#"
 tell application "System Events"
     set targetApp to first application process whose name is "{}"
@@ -965,14 +966,14 @@ end tell
             .map_err(|e| format!("System Events 激活失败: {}", e))?;
         
         if output.status.success() {
-            println!("✅ 成功通过 System Events 激活应用程序: {}", app_name);
+            tracing::info!("✅ 成功通过 System Events 激活应用程序: {}", app_name);
             Ok(())
         } else {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            println!("❌ System Events 激活失败: {}", error_msg);
+            tracing::error!("❌ System Events 激活失败: {}", error_msg);
             
             // 方法4: 最后尝试直接通过应用名称激活
-            println!("尝试直接通过应用名称激活");
+            tracing::info!("尝试直接通过应用名称激活");
             let backup_script = format!(r#"tell application "{}" to activate"#, app_name);
             let backup_output = Command::new("osascript")
                 .arg("-e")
@@ -981,7 +982,7 @@ end tell
                 .map_err(|e| format!("直接激活失败: {}", e))?;
             
             if backup_output.status.success() {
-                println!("✅ 成功通过直接方法激活应用程序: {}", app_name);
+                tracing::info!("✅ 成功通过直接方法激活应用程序: {}", app_name);
                 Ok(())
             } else {
                 let backup_error = String::from_utf8_lossy(&backup_output.stderr);
@@ -992,14 +993,14 @@ end tell
     
     #[cfg(target_os = "windows")]
     {
-        println!("🎯 Windows: 激活应用程序 {}", app_name);
+        tracing::info!("🎯 Windows: 激活应用程序 {}", app_name);
         // TODO: 实现 Windows 的应用程序激活
         Ok(())
     }
     
     #[cfg(target_os = "linux")]
     {
-        println!("🎯 Linux: 激活应用程序 {}", app_name);
+        tracing::info!("🎯 Linux: 激活应用程序 {}", app_name);
         // TODO: 实现 Linux 的应用程序激活
         Ok(())
     }
@@ -1014,7 +1015,7 @@ fn macos_simple_paste() -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
     
-    println!("使用 rdev 库执行 macOS 自动粘贴...");
+    tracing::info!("使用 rdev 库执行 macOS 自动粘贴...");
     
     fn send_with_delay(event_type: &EventType, delay_ms: u64) -> Result<(), SimulateError> {
         let delay = Duration::from_millis(delay_ms);
@@ -1024,10 +1025,10 @@ fn macos_simple_paste() -> Result<(), String> {
     }
     
     // 鉴于时序不稳定问题，优先使用最可靠的 AppleScript 方案
-    println!("🎯 开始模拟 Cmd+V 按键组合...");
+    tracing::info!("🎯 开始模拟 Cmd+V 按键组合...");
     
     // 方法1: 优先使用 AppleScript（最可靠的方案）
-    println!("方法1: 使用 AppleScript (最可靠)");
+    tracing::info!("方法1: 使用 AppleScript (最可靠)");
     let applescript_result = std::process::Command::new("osascript")
         .arg("-e")
         .arg("tell application \"System Events\" to keystroke \"v\" using command down")
@@ -1035,88 +1036,88 @@ fn macos_simple_paste() -> Result<(), String> {
     
     match applescript_result {
         Ok(output) if output.status.success() => {
-            println!("✅ AppleScript 粘贴成功");
+            tracing::info!("✅ AppleScript 粘贴成功");
             return Ok(());
         }
         Ok(output) => {
             let error = String::from_utf8_lossy(&output.stderr);
-            println!("❌ AppleScript 失败: {}", error);
+            tracing::error!("❌ AppleScript 失败: {}", error);
         }
         Err(e) => {
-            println!("❌ 执行 AppleScript 失败: {}", e);
+            tracing::error!("❌ 执行 AppleScript 失败: {}", e);
         }
     }
     
     // 方法2: rdev 备用方案（改进的时序控制）
-    println!("方法2: 使用 rdev (改进时序控制)");
+    tracing::info!("方法2: 使用 rdev (改进时序控制)");
     let rdev_result = (|| -> Result<(), SimulateError> {
-        println!("🔧 使用改进的时序控制...");
+        tracing::debug!("🔧 使用改进的时序控制...");
         
         // 1. 按下 Cmd 键并等待系统注册
         send_with_delay(&EventType::KeyPress(Key::MetaLeft), 150)?;
-        println!("✅ Cmd键按下，等待150ms确保系统注册");
+        tracing::info!("✅ Cmd键按下，等待150ms确保系统注册");
         
         // 2. 按下 V 键
         send_with_delay(&EventType::KeyPress(Key::KeyV), 50)?;
-        println!("✅ V键按下");
+        tracing::info!("✅ V键按下");
         
         // 3. 保持一段时间让组合键生效
         thread::sleep(Duration::from_millis(100));
-        println!("⏳ 保持按键状态100ms");
+        tracing::debug!("⏳ 保持按键状态100ms");
         
         // 4. 释放 V 键
         send_with_delay(&EventType::KeyRelease(Key::KeyV), 50)?;
-        println!("✅ V键释放");
+        tracing::info!("✅ V键释放");
         
         // 5. 释放 Cmd 键
         send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 50)?;
-        println!("✅ Cmd键释放");
+        tracing::info!("✅ Cmd键释放");
         
         Ok(())
     })();
     
     match rdev_result {
         Ok(()) => {
-            println!("✅ rdev 方法2执行成功");
+            tracing::info!("✅ rdev 方法2执行成功");
             return Ok(());
         }
         Err(e) => {
-            println!("❌ rdev 方法2失败: {:?}", e);
+            tracing::error!("❌ rdev 方法2失败: {:?}", e);
         }
     }
     
     // 方法3: 更激进的 rdev 方案（更长延迟）
-    println!("方法3: 使用 rdev (极长延迟)");
+    tracing::info!("方法3: 使用 rdev (极长延迟)");
     let aggressive_result = (|| -> Result<(), SimulateError> {
-        println!("🔧 使用极长延迟策略...");
+        tracing::debug!("🔧 使用极长延迟策略...");
         
         // 使用更长的延迟
         send_with_delay(&EventType::KeyPress(Key::MetaLeft), 300)?;
-        println!("✅ Cmd键按下，等待300ms");
+        tracing::info!("✅ Cmd键按下，等待300ms");
         
         send_with_delay(&EventType::KeyPress(Key::KeyV), 100)?;
-        println!("✅ V键按下，等待100ms");
+        tracing::info!("✅ V键按下，等待100ms");
         
         // 保持更长时间
         thread::sleep(Duration::from_millis(200));
-        println!("⏳ 保持按键状态200ms");
+        tracing::debug!("⏳ 保持按键状态200ms");
         
         send_with_delay(&EventType::KeyRelease(Key::KeyV), 100)?;
-        println!("✅ V键释放，等待100ms");
+        tracing::info!("✅ V键释放，等待100ms");
         
         send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 100)?;
-        println!("✅ Cmd键释放");
+        tracing::info!("✅ Cmd键释放");
         
         Ok(())
     })();
     
     match aggressive_result {
         Ok(()) => {
-            println!("✅ rdev 方法3 (极长延迟) 执行成功");
+            tracing::info!("✅ rdev 方法3 (极长延迟) 执行成功");
             Ok(())
         }
         Err(e) => {
-            println!("❌ 所有方法都失败了");
+            tracing::error!("❌ 所有方法都失败了");
             Err(format!("所有键盘模拟方法都失败: 最后一个错误: {:?}", e))
         }
     }
@@ -1131,7 +1132,7 @@ fn windows_auto_paste() -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
     
-    println!("使用 rdev 库执行 Windows 自动粘贴...");
+    tracing::info!("使用 rdev 库执行 Windows 自动粘贴...");
     
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
         let delay = Duration::from_millis(10);
@@ -1153,7 +1154,7 @@ fn windows_auto_paste() -> Result<(), String> {
     send(&EventType::KeyRelease(Key::ControlLeft))
         .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
     
-    println!("rdev Windows 粘贴操作执行完成");
+    tracing::info!("rdev Windows 粘贴操作执行完成");
     Ok(())
 }
 
@@ -1164,7 +1165,7 @@ fn linux_auto_paste() -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
     
-    println!("使用 rdev 库执行 Linux 自动粘贴...");
+    tracing::info!("使用 rdev 库执行 Linux 自动粘贴...");
     
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
         let delay = Duration::from_millis(10);
@@ -1186,7 +1187,7 @@ fn linux_auto_paste() -> Result<(), String> {
     send(&EventType::KeyRelease(Key::ControlLeft))
         .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
     
-    println!("rdev Linux 粘贴操作执行完成");
+    tracing::info!("rdev Linux 粘贴操作执行完成");
     Ok(())
 }
 
@@ -1219,7 +1220,7 @@ fn get_app_images_dir() -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub async fn reset_database(app: AppHandle) -> Result<(), String> {
-    println!("开始重置数据库...");
+    tracing::info!("开始重置数据库...");
     
     // 尝试获取数据库状态
     if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
@@ -1240,7 +1241,7 @@ pub async fn reset_database(app: AppHandle) -> Result<(), String> {
                 paths
             }
             Err(e) => {
-                println!("查询图片路径失败: {}", e);
+                tracing::info!("查询图片路径失败: {}", e);
                 Vec::new()
             }
         };
@@ -1248,20 +1249,20 @@ pub async fn reset_database(app: AppHandle) -> Result<(), String> {
         // 删除所有图片文件
         for image_path in &all_images {
             if let Err(e) = std::fs::remove_file(image_path) {
-                println!("删除图片文件失败 {}: {}", image_path, e);
+                tracing::info!("删除图片文件失败 {}: {}", image_path, e);
             } else {
-                println!("已删除图片文件: {}", image_path);
+                tracing::info!("已删除图片文件: {}", image_path);
             }
         }
-        println!("已删除 {} 个图片文件", all_images.len());
+        tracing::info!("已删除 {} 个图片文件", all_images.len());
         
         // 删除整个图片目录（如果存在且为空）
         if let Ok(images_dir) = get_app_images_dir() {
             if images_dir.exists() {
                 if let Err(e) = std::fs::remove_dir(&images_dir) {
-                    println!("删除图片目录失败（可能不为空）: {}", e);
+                    tracing::info!("删除图片目录失败（可能不为空）: {}", e);
                 } else {
-                    println!("已删除图片目录: {:?}", images_dir);
+                    tracing::info!("已删除图片目录: {:?}", images_dir);
                 }
             }
         }
@@ -1270,7 +1271,7 @@ pub async fn reset_database(app: AppHandle) -> Result<(), String> {
         sqlx::query("DELETE FROM clipboard_history").execute(pool).await
             .map_err(|e| format!("清空表数据失败: {}", e))?;
         
-        println!("数据库数据已清空");
+        tracing::info!("数据库数据已清空");
         
         // 不需要手动添加列，因为迁移系统已经处理了这些
         // 只确保索引存在
@@ -1278,7 +1279,7 @@ pub async fn reset_database(app: AppHandle) -> Result<(), String> {
             .execute(pool).await
             .map_err(|e| format!("创建索引失败: {}", e))?;
         
-        println!("数据库重置完成");
+        tracing::info!("数据库重置完成");
         Ok(())
     } else {
         Err("无法访问数据库状态".to_string())
@@ -1303,5 +1304,223 @@ pub async fn load_image_file(image_path: String) -> Result<String, String> {
     let data_url = format!("data:image/png;base64,{}", b64);
     
     Ok(data_url)
+}
+
+// ===== 日志相关命令 =====
+
+/// 前端写入日志到文件
+#[tauri::command]
+pub async fn write_frontend_log(
+    level: String,
+    message: String,
+    context: Option<String>,
+) -> Result<(), String> {
+    match level.as_str() {
+        "error" => {
+            if let Some(ctx) = context {
+                tracing::error!(target: "frontend", context = %ctx, "{}", message);
+            } else {
+                tracing::error!(target: "frontend", "{}", message);
+            }
+        }
+        "warn" => {
+            if let Some(ctx) = context {
+                tracing::warn!(target: "frontend", context = %ctx, "{}", message);
+            } else {
+                tracing::warn!(target: "frontend", "{}", message);
+            }
+        }
+        "info" => {
+            if let Some(ctx) = context {
+                tracing::info!(target: "frontend", context = %ctx, "{}", message);
+            } else {
+                tracing::info!(target: "frontend", "{}", message);
+            }
+        }
+        "debug" => {
+            if let Some(ctx) = context {
+                tracing::debug!(target: "frontend", context = %ctx, "{}", message);
+            } else {
+                tracing::debug!(target: "frontend", "{}", message);
+            }
+        }
+        _ => {
+            if let Some(ctx) = context {
+                tracing::trace!(target: "frontend", context = %ctx, "{}", message);
+            } else {
+                tracing::trace!(target: "frontend", "{}", message);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 获取日志目录路径
+#[tauri::command]
+pub fn get_log_directory() -> Result<String, String> {
+    let log_dir = logging::get_log_dir();
+    Ok(log_dir.to_string_lossy().to_string())
+}
+
+/// 获取当前日志文件路径
+#[tauri::command]
+pub fn get_current_log_file() -> Result<String, String> {
+    let log_file = logging::get_current_log_file();
+    Ok(log_file.to_string_lossy().to_string())
+}
+
+/// 获取所有日志文件列表
+#[tauri::command]
+pub fn get_log_files() -> Result<Vec<String>, String> {
+    let files = logging::get_log_files()
+        .map_err(|e| format!("获取日志文件列表失败: {}", e))?;
+    
+    Ok(files.into_iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect())
+}
+
+/// 读取日志文件内容
+#[tauri::command]
+pub async fn read_log_file(file_path: String) -> Result<String, String> {
+    let path = PathBuf::from(file_path);
+    
+    // 安全检查：确保路径在日志目录内
+    let log_dir = logging::get_log_dir();
+    if !path.starts_with(&log_dir) {
+        return Err("无效的日志文件路径".to_string());
+    }
+    
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| format!("读取日志文件失败: {}", e))
+}
+
+/// 清理旧日志文件
+#[tauri::command]
+pub async fn cleanup_old_logs(max_files: Option<usize>) -> Result<(), String> {
+    let log_dir = logging::get_log_dir();
+    let max = max_files.unwrap_or(30);
+    
+    // 这里重用logging模块的清理逻辑
+    if !log_dir.exists() {
+        return Ok(());
+    }
+    
+    let mut log_files = Vec::new();
+    
+    let mut entries = tokio::fs::read_dir(&log_dir)
+        .await
+        .map_err(|e| format!("读取日志目录失败: {}", e))?;
+    
+    while let Some(entry) = entries.next_entry()
+        .await
+        .map_err(|e| format!("读取目录条目失败: {}", e))? {
+        
+        let path = entry.path();
+        
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("app.log") {
+                    if let Ok(metadata) = entry.metadata().await {
+                        if let Ok(created) = metadata.created() {
+                            log_files.push((path, created));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 按创建时间排序，最新的在前
+    log_files.sort_by(|a, b| b.1.cmp(&a.1));
+    
+    // 删除超过限制的文件
+    for (path, _) in log_files.iter().skip(max) {
+        if let Err(e) = tokio::fs::remove_file(path).await {
+            tracing::warn!("删除日志文件失败 {}: {}", path.display(), e);
+        } else {
+            tracing::info!("已删除旧日志文件: {}", path.display());
+        }
+    }
+    
+    Ok(())
+}
+
+/// 打开日志文件夹
+#[tauri::command]
+pub async fn open_log_folder() -> Result<(), String> {
+    let log_dir = logging::get_log_dir();
+    
+    // 确保日志目录存在
+    if !log_dir.exists() {
+        std::fs::create_dir_all(&log_dir)
+            .map_err(|e| format!("创建日志目录失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&log_dir)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&log_dir)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&log_dir)
+            .spawn()
+            .map_err(|e| format!("打开文件夹失败: {}", e))?;
+    }
+    
+    tracing::info!("已打开日志文件夹: {}", log_dir.display());
+    Ok(())
+}
+
+/// 删除所有日志文件
+#[tauri::command]
+pub async fn delete_all_logs() -> Result<(), String> {
+    let log_dir = logging::get_log_dir();
+    
+    if !log_dir.exists() {
+        return Ok(()); // 目录不存在，认为已删除
+    }
+    
+    let mut deleted_count = 0;
+    let mut entries = tokio::fs::read_dir(&log_dir)
+        .await
+        .map_err(|e| format!("读取日志目录失败: {}", e))?;
+    
+    while let Some(entry) = entries.next_entry()
+        .await
+        .map_err(|e| format!("读取目录条目失败: {}", e))? {
+        
+        let path = entry.path();
+        
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.starts_with("app.log") {
+                    if let Err(e) = tokio::fs::remove_file(&path).await {
+                        tracing::warn!("删除日志文件失败 {}: {}", path.display(), e);
+                    } else {
+                        deleted_count += 1;
+                        tracing::info!("已删除日志文件: {}", path.display());
+                    }
+                }
+            }
+        }
+    }
+    
+    tracing::info!("删除操作完成，共删除 {} 个日志文件", deleted_count);
+    Ok(())
 }
 

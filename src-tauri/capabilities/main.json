@@ -111,6 +111,21 @@
       "commands": ["ensure_database_compatibility"]
     },
     {
+      "identifier": "allow-open-log-folder",
+      "description": "Allows opening the log folder in file manager",
+      "commands": ["open_log_folder"]
+    },
+    {
+      "identifier": "allow-delete-all-logs",
+      "description": "Allows deleting all log files",
+      "commands": ["delete_all_logs"]
+    },
+    {
+      "identifier": "allow-write-frontend-log",
+      "description": "Allows writing frontend logs to backend log files",
+      "commands": ["write_frontend_log"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

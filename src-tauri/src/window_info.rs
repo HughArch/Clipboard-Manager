@@ -41,7 +41,7 @@ pub fn get_last_window_info() -> &'static Arc<RwLock<(std::time::Instant, Option
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
-    println!("🔍 get_active_window_info() 被调用");
+    tracing::debug!("🔍 get_active_window_info() 被调用");
     
     // 减少缓存时间以适应剪贴板监听需求（每2秒最多调用一次）
     let cache_duration = Duration::from_secs(2);
@@ -49,21 +49,21 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     if let Ok(guard) = get_last_window_info().read() {
         if guard.0.elapsed() < cache_duration {
             if let Some(ref cached_info) = guard.1 {
-                println!("📋 使用缓存的窗口信息: {}", cached_info.name);
+                tracing::debug!("📋 使用缓存的窗口信息: {}", cached_info.name);
                 return Ok(cached_info.clone());
             }
         }
     }
 
-    println!("🔄 开始获取新的窗口信息...");
+    tracing::debug!("🔄 开始获取新的窗口信息...");
     let new_info = get_active_window_info_impl();
-    println!("✅ 获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
+    tracing::info!("✅ 获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
     
     // 更新缓存
     if let Ok(mut guard) = get_last_window_info().write() {
         guard.0 = std::time::Instant::now();
         guard.1 = Some(new_info.clone());
-        println!("💾 窗口信息已缓存");
+        tracing::debug!("💾 窗口信息已缓存");
     }
 
     Ok(new_info)
@@ -73,28 +73,28 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
-    println!("🔍 get_active_window_info_for_clipboard() 被调用（无缓存）");
+    tracing::debug!("🔍 get_active_window_info_for_clipboard() 被调用（无缓存）");
     
     let new_info = get_active_window_info_impl();
-    println!("✅ 剪贴板专用：获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
+    tracing::info!("✅ 剪贴板专用：获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
 
     Ok(new_info)
 }
 
 #[cfg(target_os = "windows")]
 fn get_active_window_info_impl() -> SourceAppInfo {
-    println!("🪟 开始实现获取活动窗口信息...");
+    tracing::debug!("🪟 开始实现获取活动窗口信息...");
     unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
-            println!("❌ 无法获取前台窗口句柄");
+            tracing::error!("❌ 无法获取前台窗口句柄");
             return SourceAppInfo {
                 name: "Unknown".to_string(),
                 icon: None,
                 bundle_id: None,
             };
         }
-        println!("✅ 获取到前台窗口句柄: {:?}", hwnd);
+        tracing::info!("✅ 获取到前台窗口句柄: {:?}", hwnd);
 
         // 获取窗口标题
         let mut window_title = [0u16; 256];
@@ -106,17 +106,17 @@ fn get_active_window_info_impl() -> SourceAppInfo {
         } else {
             "Empty".to_string()
         };
-        println!("📝 窗口标题: '{}'", window_title_str);
+        tracing::debug!("📝 窗口标题: '{}'", window_title_str);
         
         // 获取进程ID
         let mut process_id = 0;
         GetWindowThreadProcessId(hwnd, &mut process_id);
-        println!("🆔 进程ID: {}", process_id);
+        tracing::debug!("🆔 进程ID: {}", process_id);
         
         // 打开进程句柄
         let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, process_id);
         if process_handle.is_null() {
-            println!("❌ 无法打开进程句柄，使用窗口标题作为应用名");
+            tracing::error!("❌ 无法打开进程句柄，使用窗口标题作为应用名");
             let title = if title_len > 0 {
                 OsString::from_wide(&window_title[..title_len as usize])
                     .to_string_lossy()
@@ -130,7 +130,7 @@ fn get_active_window_info_impl() -> SourceAppInfo {
                 bundle_id: None,
             };
         }
-        println!("✅ 成功打开进程句柄: {:?}", process_handle);
+        tracing::info!("✅ 成功打开进程句柄: {:?}", process_handle);
 
         // 获取进程可执行文件路径
         let mut exe_path = [0u16; 256];
@@ -141,7 +141,7 @@ fn get_active_window_info_impl() -> SourceAppInfo {
         let (app_name, exe_path_str) = if path_len > 0 {
             let path_os = OsString::from_wide(&exe_path[..path_len as usize]);
             let path_str = path_os.to_string_lossy().to_string();
-            println!("📂 可执行文件路径: '{}'", path_str);
+            tracing::debug!("📂 可执行文件路径: '{}'", path_str);
             
             // 提取文件名（不包含扩展名）
             let name = if let Some(file_name) = std::path::Path::new(&path_str).file_stem() {
@@ -149,48 +149,48 @@ fn get_active_window_info_impl() -> SourceAppInfo {
             } else {
                 "Unknown".to_string()
             };
-            println!("📛 提取的应用名: '{}'", name);
+            tracing::debug!("📛 提取的应用名: '{}'", name);
             (name, Some(path_str))
         } else if title_len > 0 {
             // 如果无法获取进程路径，使用窗口标题
-            println!("⚠️  无法获取可执行文件路径，使用窗口标题");
+            tracing::warn!("⚠️  无法获取可执行文件路径，使用窗口标题");
             let title = OsString::from_wide(&window_title[..title_len as usize])
                 .to_string_lossy()
                 .to_string();
             (title, None)
         } else {
-            println!("❌ 无法获取进程信息和窗口标题");
+            tracing::error!("❌ 无法获取进程信息和窗口标题");
             ("Unknown".to_string(), None)
         };
 
         // 获取应用程序图标（使用改进的缓存）
         let icon_base64 = if let Some(exe_path_str) = exe_path_str {
-            println!("🎨 开始获取应用图标...");
+            tracing::debug!("🎨 开始获取应用图标...");
             
             // 先检查缓存
             let icon_cache = get_icon_cache();
             if let Ok(mut cache) = icon_cache.write() {
                 if let Some(cached_icon) = cache.get(&exe_path_str) {
-                    println!("📋 使用缓存的图标");
+                    tracing::debug!("📋 使用缓存的图标");
                     cached_icon
                 } else {
-                    println!("🔄 获取新图标...");
+                    tracing::debug!("🔄 获取新图标...");
                     // 获取图标
                     let icon = get_app_icon_base64(&exe_path[..path_len as usize]);
                     if icon.is_some() {
-                        println!("✅ 成功获取图标，长度: {}", icon.as_ref().unwrap().len());
+                        tracing::info!("✅ 成功获取图标，长度: {}", icon.as_ref().unwrap().len());
                     } else {
-                        println!("❌ 获取图标失败");
+                        tracing::error!("❌ 获取图标失败");
                     }
                     cache.insert(exe_path_str, icon.clone());
                     icon
                 }
             } else {
-                println!("❌ 无法访问图标缓存，直接获取");
+                tracing::error!("❌ 无法访问图标缓存，直接获取");
                 get_app_icon_base64(&exe_path[..path_len as usize])
             }
         } else {
-            println!("⚠️  没有可执行文件路径，跳过图标获取");
+            tracing::warn!("⚠️  没有可执行文件路径，跳过图标获取");
             None
         };
 
@@ -200,14 +200,14 @@ fn get_active_window_info_impl() -> SourceAppInfo {
             bundle_id: None, // Windows 下没有 bundle_id
         };
         
-        println!("🎯 最终结果: 名称='{}', 图标={}", result.name, if result.icon.is_some() { "有" } else { "无" });
+        tracing::info!("🎯 最终结果: 名称='{}', 图标={}", result.name, if result.icon.is_some() { "有" } else { "无" });
         result
     }
 }
 
 #[cfg(target_os = "windows")]
 pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
-    println!("🎨 开始获取应用图标 (get_app_icon_base64)");
+    tracing::debug!("🎨 开始获取应用图标 (get_app_icon_base64)");
     // 使用资源管理器确保所有图标都被正确释放
     let mut resource_manager = WindowsResourceManager::new();
     
@@ -226,7 +226,7 @@ pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
         );
 
         if icon_count > 0 && !large_icons[0].is_null() {
-            println!("✅ 通过ExtractIconExW获取到大图标");
+            tracing::info!("✅ 通过ExtractIconExW获取到大图标");
             // 注册图标资源到管理器
             resource_manager.track_icon(large_icons[0]);
             if !small_icons[0].is_null() {
@@ -236,7 +236,7 @@ pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
             let icon_base64 = hicon_to_base64(large_icons[0]);
             
             if icon_base64.is_some() {
-                println!("✅ 大图标转换成功");
+                tracing::info!("✅ 大图标转换成功");
                 return icon_base64;
             }
         } else {
@@ -262,12 +262,12 @@ pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
         );
 
         if result != 0 && !shfi.hIcon.is_null() {
-            println!("✅ 通过SHGetFileInfoW获取到超大图标");
+            tracing::info!("✅ 通过SHGetFileInfoW获取到超大图标");
             // 注册图标到资源管理器
             resource_manager.track_icon(shfi.hIcon);
             let icon_base64 = hicon_to_base64(shfi.hIcon);
             if icon_base64.is_some() {
-                println!("✅ 超大图标转换成功");
+                tracing::info!("✅ 超大图标转换成功");
                 return icon_base64;
             }
         }
@@ -283,17 +283,17 @@ pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
         );
 
         if result != 0 && !shfi.hIcon.is_null() {
-            println!("✅ 通过SHGetFileInfoW获取到标准大图标");
+            tracing::info!("✅ 通过SHGetFileInfoW获取到标准大图标");
             // 注册图标到资源管理器
             resource_manager.track_icon(shfi.hIcon);
             let icon_base64 = hicon_to_base64(shfi.hIcon);
             if icon_base64.is_some() {
-                println!("✅ 标准大图标转换成功");
+                tracing::info!("✅ 标准大图标转换成功");
                 return icon_base64;
             }
         }
 
-        println!("❌ 所有图标获取方法都失败了");
+        tracing::error!("❌ 所有图标获取方法都失败了");
         None
         
         // 所有图标资源将由resource_manager的Drop trait自动清理
@@ -304,7 +304,7 @@ pub fn get_app_icon_base64(exe_path: &[u16]) -> Option<String> {
 pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
     use std::mem;
     
-    println!("🖼️  开始转换图标为base64 (hicon_to_base64)");
+    tracing::debug!("🖼️  开始转换图标为base64 (hicon_to_base64)");
     // 使用资源管理器确保所有资源都被正确释放
     let mut resource_manager = WindowsResourceManager::new();
     
@@ -315,7 +315,7 @@ pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
         // 获取屏幕 DC
         let screen_dc = GetDC(ptr::null_mut());
         if screen_dc.is_null() {
-            println!("警告: 无法获取屏幕DC");
+            tracing::info!("警告: 无法获取屏幕DC");
             return None;
         }
         resource_manager.track_dc(screen_dc);
@@ -323,7 +323,7 @@ pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
         // 创建兼容的内存 DC
         let mem_dc = CreateCompatibleDC(screen_dc);
         if mem_dc.is_null() {
-            println!("警告: 无法创建内存DC");
+            tracing::info!("警告: 无法创建内存DC");
             return None;
         }
         resource_manager.track_dc(mem_dc);
@@ -331,7 +331,7 @@ pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
         // 创建位图
         let bitmap = CreateCompatibleBitmap(screen_dc, icon_size, icon_size);
         if bitmap.is_null() {
-            println!("警告: 无法创建位图");
+            tracing::info!("警告: 无法创建位图");
             return None;
         }
         resource_manager.track_handle(bitmap as winapi::shared::windef::HGDIOBJ);
@@ -368,7 +368,7 @@ pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
             0x0003 // DI_NORMAL
         );
         
-        println!("🎨 DrawIconEx结果: {}", if draw_result != 0 { "成功" } else { "失败" });
+        tracing::debug!("🎨 DrawIconEx结果: {}", if draw_result != 0 { "成功" } else { "失败" });
 
         let result = if draw_result != 0 {
             // 准备位图信息结构
@@ -418,7 +418,7 @@ pub fn hicon_to_base64(hicon: winapi::shared::windef::HICON) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 pub fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> Option<String> {
-    println!("🔄 开始转换BGRA到PNG, 尺寸: {}x{}", width, height);
+    tracing::debug!("🔄 开始转换BGRA到PNG, 尺寸: {}x{}", width, height);
     
     // 转换 BGRA 到 RGBA，并处理预乘alpha问题
     let mut rgba_data = Vec::with_capacity(bgra_data.len());
@@ -453,10 +453,10 @@ pub fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> 
     
     if encoder.write_image(&img, width, height, image::ColorType::Rgba8).is_ok() {
         let base64_string = general_purpose::STANDARD.encode(&png_buffer);
-        println!("✅ PNG转换成功，大小: {} bytes", png_buffer.len());
+        tracing::info!("✅ PNG转换成功，大小: {} bytes", png_buffer.len());
         Some(format!("data:image/png;base64,{}", base64_string))
     } else {
-        println!("❌ PNG编码失败");
+        tracing::error!("❌ PNG编码失败");
         None
     }
 }
@@ -466,7 +466,7 @@ pub fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> 
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     use std::process::Command;
     
-    println!("🔍 macOS: 获取当前活动窗口信息");
+    tracing::debug!("🔍 macOS: 获取当前活动窗口信息");
     
     // 使用 AppleScript 获取当前活动应用程序的信息
     let script = r#"
@@ -492,14 +492,14 @@ end tell
             let app_name = parts[0].to_string();
             let bundle_id = parts[1].to_string();
             
-            println!("✅ 获取到活动应用: {} ({})", app_name, bundle_id);
+            tracing::info!("✅ 获取到活动应用: {} ({})", app_name, bundle_id);
             
             // 获取应用图标
             let app_icon = get_app_icon_base64_macos(&bundle_id);
             if app_icon.is_some() {
-                println!("✅ 成功获取应用图标");
+                tracing::info!("✅ 成功获取应用图标");
             } else {
-                println!("⚠️ 无法获取应用图标");
+                tracing::warn!("⚠️ 无法获取应用图标");
             }
             
             Ok(SourceAppInfo {
@@ -508,7 +508,7 @@ end tell
                 bundle_id: Some(bundle_id),
             })
         } else {
-            println!("⚠️ 解析应用信息失败: {}", result);
+            tracing::warn!("⚠️ 解析应用信息失败: {}", result);
             Ok(SourceAppInfo {
                 name: result,
                 icon: None,
@@ -517,7 +517,7 @@ end tell
         }
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        println!("❌ 获取活动窗口失败: {}", error_msg);
+        tracing::error!("❌ 获取活动窗口失败: {}", error_msg);
             Ok(SourceAppInfo {
         name: "Unknown".to_string(),
         icon: None,
@@ -531,7 +531,7 @@ end tell
 pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
     use std::process::Command;
     
-    println!("🔍 Linux: 获取当前活动窗口信息（剪贴板专用，无缓存）");
+    tracing::debug!("🔍 Linux: 获取当前活动窗口信息（剪贴板专用，无缓存）");
     
     // 尝试使用 xdotool 获取活动窗口信息
     let window_id_output = Command::new("xdotool")
@@ -550,7 +550,7 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
             if let Ok(name_output) = window_name_output {
                 if name_output.status.success() {
                     let window_name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
-                    println!("✅ 剪贴板专用：获取到活动窗口: {}", window_name);
+                    tracing::info!("✅ 剪贴板专用：获取到活动窗口: {}", window_name);
                     
                     return Ok(SourceAppInfo {
                         name: window_name,
@@ -561,7 +561,7 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
             }
         }
         _ => {
-            println!("⚠️ xdotool 不可用，回退到默认值");
+            tracing::warn!("⚠️ xdotool 不可用，回退到默认值");
         }
     }
     
@@ -578,7 +578,7 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
 fn get_app_icon_base64_macos(bundle_id: &str) -> Option<String> {
     use std::process::Command;
     
-    println!("🎨 macOS: 开始获取应用图标，bundle_id: {}", bundle_id);
+    tracing::debug!("🎨 macOS: 开始获取应用图标，bundle_id: {}", bundle_id);
     
     // 方法1：使用 mdfind 查找应用路径
     let find_output = Command::new("mdfind")
@@ -591,14 +591,14 @@ fn get_app_icon_base64_macos(bundle_id: &str) -> Option<String> {
             let app_path = app_paths.lines().next();
             
             if let Some(path) = app_path {
-                println!("📁 macOS: 找到应用路径: {}", path);
+                tracing::debug!("📁 macOS: 找到应用路径: {}", path);
                 return get_icon_from_app_path(path);
             }
         }
     }
     
     // 方法2：回退到通过 System Events 获取路径
-    println!("🔄 macOS: 尝试备用方法...");
+    tracing::debug!("🔄 macOS: 尝试备用方法...");
     get_app_icon_simple_macos(bundle_id)
 }
 
@@ -608,7 +608,7 @@ fn get_icon_from_app_path(app_path: &str) -> Option<String> {
     use std::process::Command;
     use std::time::Duration;
     
-    println!("🔍 macOS: 从应用路径提取图标: {}", app_path);
+    tracing::debug!("🔍 macOS: 从应用路径提取图标: {}", app_path);
     
     // 方法1: 直接提取 .app bundle 中的 icon 文件
     let icon_paths = vec![
@@ -628,7 +628,7 @@ fn get_icon_from_app_path(app_path: &str) -> Option<String> {
     
     for icon_path in &icon_paths {
         if std::path::Path::new(icon_path).exists() {
-            println!("📁 macOS: 找到图标文件: {}", icon_path);
+            tracing::debug!("📁 macOS: 找到图标文件: {}", icon_path);
             
             if let Some(icon_data) = extract_icon_with_sips(icon_path) {
                 return Some(icon_data);
@@ -637,18 +637,18 @@ fn get_icon_from_app_path(app_path: &str) -> Option<String> {
     }
     
     // 方法2: 使用更简单的 iconutil 方法
-    println!("🔄 macOS: 尝试 iconutil 方法...");
+    tracing::debug!("🔄 macOS: 尝试 iconutil 方法...");
     if let Some(icon_data) = extract_icon_with_iconutil(app_path) {
         return Some(icon_data);
     }
     
     // 方法3: 最后尝试 osascript 获取图标（避免使用 qlmanage）
-    println!("🔄 macOS: 尝试 AppleScript 方法...");
+    tracing::debug!("🔄 macOS: 尝试 AppleScript 方法...");
     if let Some(icon_data) = extract_icon_with_applescript(app_path) {
         return Some(icon_data);
     }
     
-    println!("❌ macOS: 所有图标提取方法都失败了");
+    tracing::error!("❌ macOS: 所有图标提取方法都失败了");
     None
 }
 
@@ -659,7 +659,7 @@ fn extract_icon_with_sips(icon_path: &str) -> Option<String> {
     
     let tmp_png = format!("/tmp/clipboard_icon_{}.png", std::process::id());
     
-    println!("🔧 macOS: 使用 sips 转换图标: {} -> {}", icon_path, tmp_png);
+    tracing::debug!("🔧 macOS: 使用 sips 转换图标: {} -> {}", icon_path, tmp_png);
     
     // 直接使用 sips 命令，不依赖 timeout
     let sips_output = Command::new("sips")
@@ -668,7 +668,7 @@ fn extract_icon_with_sips(icon_path: &str) -> Option<String> {
     
     match sips_output {
         Ok(result) if result.status.success() => {
-            println!("✅ macOS: sips 转换成功");
+            tracing::info!("✅ macOS: sips 转换成功");
             
             // 检查输出文件是否存在
             if std::path::Path::new(&tmp_png).exists() {
@@ -690,11 +690,11 @@ fn extract_icon_with_sips(icon_path: &str) -> Option<String> {
                         }
                     }
                     Ok(b64_result) => {
-                        println!("⚠️ macOS: base64 转换失败: {}", String::from_utf8_lossy(&b64_result.stderr));
+                        tracing::warn!("⚠️ macOS: base64 转换失败: {}", String::from_utf8_lossy(&b64_result.stderr));
                         None
                     }
                     Err(e) => {
-                        println!("❌ macOS: base64 命令执行失败: {}", e);
+                        tracing::error!("❌ macOS: base64 命令执行失败: {}", e);
                         None
                     }
                 };
@@ -703,25 +703,25 @@ fn extract_icon_with_sips(icon_path: &str) -> Option<String> {
                 let _ = Command::new("rm").arg(&tmp_png).output();
                 
                 if base64_result.is_some() {
-                    println!("✅ macOS: 成功从 icns 提取图标");
+                    tracing::info!("✅ macOS: 成功从 icns 提取图标");
                 }
                 
                 base64_result
             } else {
-                println!("⚠️ macOS: sips 没有生成输出文件");
+                tracing::warn!("⚠️ macOS: sips 没有生成输出文件");
                 None
             }
         }
         Ok(result) => {
-            println!("⚠️ macOS: sips 转换失败，返回码: {}", result.status);
-            println!("⚠️ macOS: sips stderr: {}", String::from_utf8_lossy(&result.stderr));
-            println!("⚠️ macOS: sips stdout: {}", String::from_utf8_lossy(&result.stdout));
+            tracing::warn!("⚠️ macOS: sips 转换失败，返回码: {}", result.status);
+            tracing::warn!("⚠️ macOS: sips stderr: {}", String::from_utf8_lossy(&result.stderr));
+            tracing::warn!("⚠️ macOS: sips stdout: {}", String::from_utf8_lossy(&result.stdout));
             // 清理可能的临时文件
             let _ = Command::new("rm").arg(&tmp_png).output();
             None
         }
         Err(e) => {
-            println!("❌ macOS: sips 命令执行失败: {}", e);
+            tracing::error!("❌ macOS: sips 命令执行失败: {}", e);
             None
         }
     }
@@ -736,7 +736,7 @@ fn extract_icon_with_iconutil(app_path: &str) -> Option<String> {
     let iconset_path = format!("{}/Contents/Resources/AppIcon.iconset", app_path);
     
     if std::path::Path::new(&iconset_path).exists() {
-        println!("📁 macOS: 找到 iconset: {}", iconset_path);
+        tracing::debug!("📁 macOS: 找到 iconset: {}", iconset_path);
         
         let tmp_png = format!("/tmp/clipboard_iconset_{}.png", std::process::id());
         
@@ -750,7 +750,7 @@ fn extract_icon_with_iconutil(app_path: &str) -> Option<String> {
         
         for icon_file in &icon_files {
             if std::path::Path::new(icon_file).exists() {
-                println!("📁 macOS: 找到图标文件: {}", icon_file);
+                tracing::debug!("📁 macOS: 找到图标文件: {}", icon_file);
                 
                 // 直接复制文件
                 let cp_output = Command::new("cp")
@@ -774,7 +774,7 @@ fn extract_icon_with_iconutil(app_path: &str) -> Option<String> {
                                 let _ = Command::new("rm").arg(&tmp_png).output();
                                 
                                 if !base64_data.is_empty() {
-                                    println!("✅ macOS: 成功从 iconset 提取图标");
+                                    tracing::info!("✅ macOS: 成功从 iconset 提取图标");
                                     return Some(format!("data:image/png;base64,{}", base64_data));
                                 }
                             }
@@ -797,7 +797,7 @@ fn extract_icon_with_iconutil(app_path: &str) -> Option<String> {
 fn extract_icon_with_applescript(app_path: &str) -> Option<String> {
     use std::process::Command;
     
-    println!("🍎 macOS: 尝试使用 osascript 获取图标");
+    tracing::debug!("🍎 macOS: 尝试使用 osascript 获取图标");
     
     // 方法1: 最简单的方法，直接用应用路径
     if let Some(icon_data) = extract_icon_with_mdls(app_path) {
@@ -809,7 +809,7 @@ fn extract_icon_with_applescript(app_path: &str) -> Option<String> {
         return Some(icon_data);
     }
     
-    println!("❌ macOS: AppleScript 方法全部失败");
+    tracing::error!("❌ macOS: AppleScript 方法全部失败");
     None
 }
 
@@ -818,7 +818,7 @@ fn extract_icon_with_applescript(app_path: &str) -> Option<String> {
 fn extract_icon_with_mdls(app_path: &str) -> Option<String> {
     use std::process::Command;
     
-    println!("🔍 macOS: 使用 mdls 方法获取图标");
+    tracing::debug!("🔍 macOS: 使用 mdls 方法获取图标");
     
     // 获取应用的 CFBundleIconFile
     let mdls_output = Command::new("mdls")
@@ -828,7 +828,7 @@ fn extract_icon_with_mdls(app_path: &str) -> Option<String> {
     if let Ok(result) = mdls_output {
         if result.status.success() {
             let output_str = String::from_utf8_lossy(&result.stdout);
-            println!("📋 macOS: mdls 输出: {}", output_str);
+            tracing::debug!("📋 macOS: mdls 输出: {}", output_str);
         }
     }
     
@@ -862,14 +862,14 @@ end try
     match output {
         Ok(result) if result.status.success() => {
             let response = String::from_utf8_lossy(&result.stdout).trim().to_string();
-            println!("📋 macOS: osascript 返回: {}", response);
+            tracing::debug!("📋 macOS: osascript 返回: {}", response);
             
             if response.contains("SUCCESS") && std::path::Path::new(&tmp_png).exists() {
                 // 转换为 base64
                 if let Some(base64_data) = convert_png_to_base64(&tmp_png) {
                     // 清理临时文件
                     let _ = Command::new("rm").arg(&tmp_png).output();
-                    println!("✅ macOS: mdls 方法成功");
+                    tracing::info!("✅ macOS: mdls 方法成功");
                     return Some(base64_data);
                 }
             }
@@ -878,10 +878,10 @@ end try
             let _ = Command::new("rm").arg(&tmp_png).output();
         }
         Ok(result) => {
-            println!("⚠️ macOS: osascript 失败: {}", String::from_utf8_lossy(&result.stderr));
+            tracing::warn!("⚠️ macOS: osascript 失败: {}", String::from_utf8_lossy(&result.stderr));
         }
         Err(e) => {
-            println!("❌ macOS: osascript 命令失败: {}", e);
+            tracing::error!("❌ macOS: osascript 命令失败: {}", e);
         }
     }
     
@@ -893,7 +893,7 @@ end try
 fn extract_icon_with_shell(app_path: &str) -> Option<String> {
     use std::process::Command;
     
-    println!("🐚 macOS: 使用纯 shell 方法获取图标");
+    tracing::debug!("🐚 macOS: 使用纯 shell 方法获取图标");
     
     let tmp_png = format!("/tmp/clipboard_shell_icon_{}.png", std::process::id());
     
@@ -937,7 +937,7 @@ echo "FAILED"
     match output {
         Ok(result) if result.status.success() => {
             let response = String::from_utf8_lossy(&result.stdout);
-            println!("📋 macOS: shell 脚本输出: {}", response);
+            tracing::debug!("📋 macOS: shell 脚本输出: {}", response);
             
             if (response.contains("SUCCESS_SIPS") || response.contains("SUCCESS_ICONSET")) 
                 && std::path::Path::new(&tmp_png).exists() {
@@ -945,7 +945,7 @@ echo "FAILED"
                 if let Some(base64_data) = convert_png_to_base64(&tmp_png) {
                     // 清理临时文件
                     let _ = Command::new("rm").arg(&tmp_png).output();
-                    println!("✅ macOS: shell 方法成功");
+                    tracing::info!("✅ macOS: shell 方法成功");
                     return Some(base64_data);
                 }
             }
@@ -954,11 +954,11 @@ echo "FAILED"
             let _ = Command::new("rm").arg(&tmp_png).output();
         }
         Ok(result) => {
-            println!("⚠️ macOS: shell 脚本失败: {}", String::from_utf8_lossy(&result.stderr));
+            tracing::warn!("⚠️ macOS: shell 脚本失败: {}", String::from_utf8_lossy(&result.stderr));
             let _ = Command::new("rm").arg(&tmp_png).output();
         }
         Err(e) => {
-            println!("❌ macOS: shell 命令失败: {}", e);
+            tracing::error!("❌ macOS: shell 命令失败: {}", e);
         }
     }
     
@@ -1017,7 +1017,7 @@ end try
             let app_path = String::from_utf8_lossy(&result.stdout).trim().to_string();
             
             if !app_path.is_empty() {
-                println!("📁 macOS: 获取到应用路径: {}", app_path);
+                tracing::debug!("📁 macOS: 获取到应用路径: {}", app_path);
                 
                 // 使用 sips 命令提取图标
                 let icon_output = Command::new("sips")
@@ -1043,7 +1043,7 @@ end try
                                     .output();
                                 
                                 if !base64_data.is_empty() {
-                                    println!("✅ macOS: 备用方法成功获取图标");
+                                    tracing::info!("✅ macOS: 备用方法成功获取图标");
                                     return Some(format!("data:image/png;base64,{}", base64_data));
                                 }
                             }
@@ -1054,7 +1054,7 @@ end try
         }
     }
     
-    println!("❌ macOS: 所有图标获取方法都失败了");
+    tracing::error!("❌ macOS: 所有图标获取方法都失败了");
     None
 }
 
@@ -1064,7 +1064,7 @@ end try
 pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, String> {
     use std::process::Command;
     
-    println!("🔍 macOS: 获取当前活动窗口信息（剪贴板专用，无缓存）");
+    tracing::debug!("🔍 macOS: 获取当前活动窗口信息（剪贴板专用，无缓存）");
     
     // 使用 AppleScript 获取当前活动应用程序的信息
     let script = r#"
@@ -1090,14 +1090,14 @@ end tell
             let app_name = parts[0].to_string();
             let bundle_id = parts[1].to_string();
             
-            println!("✅ 剪贴板专用：获取到活动应用: {} ({})", app_name, bundle_id);
+            tracing::info!("✅ 剪贴板专用：获取到活动应用: {} ({})", app_name, bundle_id);
             
             // 获取应用图标
             let app_icon = get_app_icon_base64_macos(&bundle_id);
             if app_icon.is_some() {
-                println!("✅ 成功获取应用图标");
+                tracing::info!("✅ 成功获取应用图标");
             } else {
-                println!("⚠️ 无法获取应用图标");
+                tracing::warn!("⚠️ 无法获取应用图标");
             }
             
             Ok(SourceAppInfo {
@@ -1106,7 +1106,7 @@ end tell
                 bundle_id: Some(bundle_id),
             })
         } else {
-            println!("⚠️ 解析应用信息失败: {}", result);
+            tracing::warn!("⚠️ 解析应用信息失败: {}", result);
             Ok(SourceAppInfo {
                 name: result,
                 icon: None,
@@ -1115,7 +1115,7 @@ end tell
         }
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        println!("❌ 获取活动窗口失败: {}", error_msg);
+        tracing::error!("❌ 获取活动窗口失败: {}", error_msg);
         Ok(SourceAppInfo {
             name: "Unknown".to_string(),
             icon: None,
@@ -1129,7 +1129,7 @@ end tell
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     use std::process::Command;
     
-    println!("🔍 Linux: 获取当前活动窗口信息");
+    tracing::debug!("🔍 Linux: 获取当前活动窗口信息");
     
     // 尝试使用 xdotool 获取活动窗口信息
     let window_id_output = Command::new("xdotool")
@@ -1148,7 +1148,7 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
             if let Ok(name_output) = window_name_output {
                 if name_output.status.success() {
                     let window_name = String::from_utf8_lossy(&name_output.stdout).trim().to_string();
-                    println!("✅ 获取到活动窗口: {}", window_name);
+                    tracing::info!("✅ 获取到活动窗口: {}", window_name);
                     
                     return Ok(SourceAppInfo {
                         name: window_name,
@@ -1159,7 +1159,7 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
             }
         }
         _ => {
-            println!("⚠️ xdotool 不可用，回退到默认值");
+            tracing::warn!("⚠️ xdotool 不可用，回退到默认值");
         }
     }
     

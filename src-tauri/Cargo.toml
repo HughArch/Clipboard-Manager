@@ -38,6 +38,10 @@ sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "chron
 tokio = { version = "1.45.1", features = ["full"] }
 enigo = "0.2"
 rdev = "0.4"
+# 日志相关依赖
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time", "local-time"] }
+tracing-appender = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

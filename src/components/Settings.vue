@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { logger } from '../composables/useLogger'
 
 interface AppSettings {
   max_history_items: number
@@ -30,6 +31,37 @@ const settings = ref<AppSettings>({
 const isRecording = ref(false)
 const recordingKeys = ref<Set<string>>(new Set())
 const hotkeyInputRef = ref<HTMLInputElement | null>(null)
+
+// 标签页状态
+const activeTab = ref<'general' | 'logs'>('general')
+
+// 打开日志文件夹
+const openLogFolder = async () => {
+  try {
+    await invoke('open_log_folder')
+    logger.info('打开日志文件夹成功')
+    emit('show-toast', { type: 'success', title: 'Folder Opened', message: 'Log folder opened successfully' })
+  } catch (error) {
+    logger.error('打开日志文件夹失败', { error: String(error) })
+    emit('show-toast', { type: 'error', title: 'Open Failed', message: 'Failed to open log folder' })
+  }
+}
+
+// 删除所有日志
+const deleteAllLogs = async () => {
+  if (!confirm('确定要删除所有日志文件吗？\n\n此操作不可恢复！')) {
+    return
+  }
+  
+  try {
+    await invoke('delete_all_logs')
+    logger.info('删除所有日志成功')
+    emit('show-toast', { type: 'success', title: 'Logs Deleted', message: 'All log files have been deleted successfully' })
+  } catch (error) {
+    logger.error('删除所有日志失败', { error: String(error) })
+    emit('show-toast', { type: 'error', title: 'Delete Failed', message: 'Failed to delete log files' })
+  }
+}
 
 // 键盘录制功能
 const startRecording = () => {
@@ -250,11 +282,39 @@ const handleSubmit = async () => {
           </div>
           <h2 class="text-xl font-semibold text-gray-900">Settings</h2>
         </div>
+        
+        <!-- Tabs -->
+        <div class="flex space-x-1 mt-4">
+          <button
+            @click="activeTab = 'general'"
+            :class="[
+              'px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-200',
+              activeTab === 'general' 
+                ? 'bg-blue-500 text-white' 
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            ]"
+          >
+            General
+          </button>
+          <button
+            @click="activeTab = 'logs'"
+            :class="[
+              'px-3 py-2 text-sm font-medium rounded-lg transition-colors duration-200',
+              activeTab === 'logs' 
+                ? 'bg-blue-500 text-white' 
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            ]"
+          >
+            Logs
+          </button>
+        </div>
       </div>
       
       <!-- Content -->
       <div class="p-6">
-        <form @submit.prevent="handleSubmit" class="space-y-6">
+        <!-- General Tab -->
+        <div v-if="activeTab === 'general'">
+          <form @submit.prevent="handleSubmit" class="space-y-6">
           <!-- 最大历史记录数 -->
           <div class="space-y-2">
             <label class="block text-sm font-medium text-gray-700">
@@ -358,6 +418,75 @@ const handleSubmit = async () => {
             </button>
           </div>
         </form>
+        </div>
+        
+        <!-- Logs Tab -->
+        <div v-if="activeTab === 'logs'" class="space-y-6">
+          <div class="text-center">
+            <h3 class="text-lg font-medium text-gray-900 mb-2">Log Management</h3>
+            <p class="text-sm text-gray-600">Manage application logs and debugging information</p>
+          </div>
+          
+          <div class="grid grid-cols-1 gap-4">
+            <!-- Open Log Folder Card -->
+            <div class="p-6 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-lg">
+              <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0">
+                  <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                    <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z"></path>
+                    </svg>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <h4 class="text-lg font-medium text-gray-900">Open Log Directory</h4>
+                  <p class="text-sm text-gray-600">Open the folder containing all application log files in your file manager</p>
+                </div>
+                <button
+                  @click="openLogFolder"
+                  class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors duration-200"
+                >
+                  Open Folder
+                </button>
+              </div>
+            </div>
+
+            <!-- Delete Logs Card -->
+            <div class="p-6 bg-gradient-to-r from-red-50 to-pink-50 border border-red-200 rounded-lg">
+              <div class="flex items-center space-x-4">
+                <div class="flex-shrink-0">
+                  <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                    <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                  </div>
+                </div>
+                <div class="flex-1">
+                  <h4 class="text-lg font-medium text-gray-900">Delete All Logs</h4>
+                  <p class="text-sm text-gray-600">Permanently delete all log files to free up disk space</p>
+                </div>
+                <button
+                  @click="deleteAllLogs"
+                  class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors duration-200"
+                >
+                  Delete All
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div class="flex items-start space-x-3">
+              <svg class="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <div class="text-sm text-blue-800">
+                <p class="font-medium mb-1">About Logs</p>
+                <p>Application logs help diagnose issues and track system behavior. Log files are automatically rotated daily and cleaned up after 30 days.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

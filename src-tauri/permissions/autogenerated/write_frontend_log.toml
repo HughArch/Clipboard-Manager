@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-write-frontend-log"
+description = "Enables the write_frontend_log command without any pre-configured scope."
+commands.allow = ["write_frontend_log"]
+
+[[permission]]
+identifier = "deny-write-frontend-log"
+description = "Denies the write_frontend_log command without any pre-configured scope."
+commands.deny = ["write_frontend_log"]

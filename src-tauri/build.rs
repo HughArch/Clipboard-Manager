@@ -19,7 +19,9 @@ fn main() {
                 "start_new_clipboard_watcher",
                 "stop_clipboard_watcher",
                 "ensure_database_compatibility",
-                "get_active_window_info"
+                "get_active_window_info",
+                "open_log_folder",
+                "delete_all_logs"
             ]))
     ).unwrap();
 }

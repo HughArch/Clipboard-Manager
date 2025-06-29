@@ -85,7 +85,7 @@ pub fn cleanup_icon_cache() {
                     break;
                 }
             }
-            println!("清理图标缓存，保留 {} 项", cache_guard.len());
+            tracing::info!("清理图标缓存，保留 {} 项", cache_guard.len());
         }
     }
 } 

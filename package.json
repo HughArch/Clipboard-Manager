@@ -4,7 +4,7 @@
   "version": "1.0.116",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "cross-env DEV=true vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -31,6 +31,7 @@
     "@types/node": "^22.15.17",
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.4.17",
+    "cross-env": "^7.0.3",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "~5.6.2",

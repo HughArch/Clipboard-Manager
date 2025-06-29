@@ -4,6 +4,7 @@ mod resource_manager;
 mod icon_cache;
 mod window_info;
 mod commands;
+mod logging;
 
 // 重新导出公共类型
 pub use types::*;
@@ -61,7 +62,7 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .await
         .map_err(|e| format!("无法创建索引: {}", e))?;
     
-    println!("数据库初始化完成");
+    tracing::info!("数据库初始化完成");
     Ok(pool)
 }
 
@@ -71,13 +72,29 @@ fn start_clipboard_watcher(_app: tauri::AppHandle) -> Arc<AtomicBool> {
     
     // 使用新的插件，剪贴板监听由插件自动处理
     // 不再需要手动轮询，避免了arboard的内存泄漏问题
-    println!("剪贴板监听器已初始化（事件驱动模式，无内存泄漏）");
+    tracing::info!("剪贴板监听器已初始化（事件驱动模式，无内存泄漏）");
     
     should_stop
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化日志系统
+    if let Err(e) = logging::init_logging(logging::LogConfig::default()) {
+        eprintln!("日志系统初始化失败: {}", e);
+        // 注意：此时日志系统尚未初始化，必须使用eprintln!
+    }
+    
+    // 在生产环境中重定向stdio到日志
+    if !cfg!(debug_assertions) {
+        if let Err(e) = logging::redirect_stdio_to_log() {
+            tracing::warn!("重定向stdio失败: {}", e);
+        }
+    }
+    
+    tracing::info!("🚀 应用程序启动中...");
+    tracing::info!("📋 准备初始化 Tauri Builder...");
+    
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard::init())
@@ -114,7 +131,7 @@ pub fn run() {
                     Ok(pool) => {
                         // 将数据库连接池注册为应用状态
                         app_handle_for_delayed.manage(Mutex::new(DatabaseState { pool }));
-                        println!("数据库状态已注册");
+                        tracing::info!("数据库状态已注册");
                         
                         // 加载设置并注册默认快捷键
                         match commands::load_settings(app_handle_for_delayed.clone()).await {
@@ -134,7 +151,7 @@ pub fn run() {
                         }
                     }
                     Err(e) => {
-                        println!("数据库初始化失败: {}", e);
+                        tracing::error!("数据库初始化失败: {}", e);
                     }
                 }
             });
@@ -178,11 +195,12 @@ pub fn run() {
                             "quit" => {
                                 // 停止剪贴板监听器
                                 should_stop_clone.store(true, Ordering::Relaxed);
-                                println!("正在停止剪贴板监听器...");
+                                tracing::info!("正在停止剪贴板监听器...");
                                 
                                 // 等待一小段时间让监听器线程停止
                                 std::thread::sleep(std::time::Duration::from_millis(100));
                                 
+                                tracing::info!("应用程序正常退出");
                                 app.exit(0);
                             }
                             _ => {}
@@ -206,7 +224,11 @@ pub fn run() {
             commands::get_auto_start_status,
             commands::register_shortcut,
             window_info::get_active_window_info,
-            window_info::get_active_window_info_for_clipboard
+            window_info::get_active_window_info_for_clipboard,
+            // 日志相关命令  
+            commands::open_log_folder,
+            commands::delete_all_logs,
+            commands::write_frontend_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -255,10 +277,10 @@ fn show_window_with_context(app: &tauri::AppHandle) {
             
             // 将活动窗口信息发送给前端
             if let Ok(app_info) = active_app_info {
-                println!("📤 发送前一个活动应用信息到前端: {}", app_info.name);
+                tracing::debug!("📤 发送前一个活动应用信息到前端: {}", app_info.name);
                 let _ = window.emit("previous-app-info", app_info);
             } else {
-                println!("⚠️ 无法获取前一个活动应用信息");
+                tracing::warn!("⚠️ 无法获取前一个活动应用信息");
             }
             
             // 添加小延迟确保窗口完全显示
