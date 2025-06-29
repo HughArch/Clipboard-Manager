@@ -133,11 +133,12 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
             if let Ok(native_window) = window.ns_window() {
                 let ns_window = native_window as id;
                 
-                // 逐步尝试不同的窗口级别
+                // 逐步尝试不同的窗口级别，从低到高
                 let levels_to_try = [
                     (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),
                     (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"), 
                     (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),
+                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),
                 ];
                 
                 let mut level_set = false;
@@ -158,7 +159,35 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                     tracing::warn!("⚠️ 所有级别设置都失败，保持当前级别");
                 }
                 
-                tracing::info!("✅ 窗口级别设置完成");
+                // 设置集合行为，允许在全屏空间中显示 - 这是关键！
+                tracing::info!("🔧 准备设置窗口集合行为以支持全屏显示");
+                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;
+                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8;
+                let behavior = ns_window_collection_behavior_can_join_all_spaces | 
+                              ns_window_collection_behavior_full_screen_auxiliary;
+                
+                let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+                tracing::info!("✅ 设置窗口集合行为: {} (支持全屏显示)", behavior);
+                
+                // 设置其他重要属性
+                tracing::info!("🔧 设置窗口其他属性");
+                let _: () = msg_send![ns_window, setCanHide: false];
+                let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
+                let _: () = msg_send![ns_window, setIsExcludedFromWindowsMenu: false];
+                
+                // 强制窗口显示在最前面
+                tracing::info!("🔧 强制窗口显示在最前面");
+                let _: () = msg_send![ns_window, orderFrontRegardless];
+                let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                
+                // 获取最终状态
+                let final_level: i32 = msg_send![ns_window, level];
+                let final_visible: bool = msg_send![ns_window, isVisible];
+                let final_key: bool = msg_send![ns_window, isKeyWindow];
+                tracing::info!("🔍 最终窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}", 
+                              final_level, final_visible, final_key);
+                
+                tracing::info!("✅ 窗口级别和集合行为设置完成");
                 return Ok(());
             }
         }
