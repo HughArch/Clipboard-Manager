@@ -13,7 +13,9 @@ const OVERLAY_WINDOW_LEVEL: i32 = 25; // kCGOverlayWindowLevelKey - 覆盖层级
 #[cfg(target_os = "macos")]
 const SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000; // kCGScreenSaverWindowLevel - 更高级别
 #[cfg(target_os = "macos")]
-const MAXIMUM_WINDOW_LEVEL: i32 = 2147483647; // CGWindowLevelForKey(kCGMaximumWindowLevelKey)
+const FLOATING_WINDOW_LEVEL: i32 = 3; // NSFloatingWindowLevel - 浮动窗口级别
+#[cfg(target_os = "macos")]
+const MODAL_PANEL_WINDOW_LEVEL: i32 = 8; // NSModalPanelWindowLevel - 模态面板级别
 
 #[cfg(target_os = "macos")]
 pub fn detect_fullscreen_app() -> Result<bool, String> {
@@ -63,17 +65,39 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
             if let Ok(native_window) = window.ns_window() {
                 let ns_window = native_window as id;
                 
-                // 首先尝试最高级别，确保能覆盖全屏应用
-                let _: () = msg_send![ns_window, setLevel: MAXIMUM_WINDOW_LEVEL];
-                tracing::info!("🔧 设置窗口级别为最高级别: {}", MAXIMUM_WINDOW_LEVEL);
+                // 逐步尝试不同的窗口级别，从保守到激进
+                let levels_to_try = [
+                    (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),
+                    (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"), 
+                    (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),
+                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别")
+                ];
+                
+                let mut level_set = false;
+                for (level, description) in levels_to_try.iter().rev() {
+                    // 从最高级别开始尝试
+                    let _: () = msg_send![ns_window, setLevel: *level];
+                    let actual_level: i32 = msg_send![ns_window, level];
+                    
+                    if actual_level == *level {
+                        tracing::info!("🔧 成功设置窗口级别为{}: {}", description, level);
+                        level_set = true;
+                        break;
+                    } else {
+                        tracing::warn!("⚠️ 设置{}失败，尝试次级别", description);
+                    }
+                }
+                
+                if !level_set {
+                    tracing::warn!("⚠️ 所有级别设置都失败，使用默认级别");
+                }
                 
                 // 设置窗口集合行为，允许在全屏空间中显示
-                let ns_window_collection_behavior_can_join_all_spaces: i32 = 1 << 0;
-                let ns_window_collection_behavior_full_screen_auxiliary: i32 = 1 << 8;
-                let ns_window_collection_behavior_stationary: i32 = 1 << 4;
+                // 使用正确的类型：macOS 期望 NSUInteger (u64)
+                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;
+                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8;
                 let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_full_screen_auxiliary |
-                              ns_window_collection_behavior_stationary;
+                              ns_window_collection_behavior_full_screen_auxiliary;
                 
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
                 tracing::info!("🔧 设置窗口集合行为: {}", behavior);
@@ -114,7 +138,7 @@ pub fn reset_window_level(app: &AppHandle) -> Result<(), String> {
                 let _: () = msg_send![ns_window, setLevel: normal_level];
                 
                 // 重置集合行为
-                let ns_window_collection_behavior_default: i32 = 0;
+                let ns_window_collection_behavior_default: u64 = 0;
                 let _: () = msg_send![ns_window, setCollectionBehavior: ns_window_collection_behavior_default];
                 
                 tracing::info!("✅ 窗口级别已重置为普通级别");
@@ -146,7 +170,7 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
                 let _ = window.show();
                 let _ = window.unminimize();
                 
-                // 使用原生方法强制显示窗口
+                // 安全地显示窗口
                 unsafe {
                     if let Ok(native_window) = window.ns_window() {
                         let ns_window = native_window as id;
@@ -156,36 +180,37 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
                         let visible_before: bool = msg_send![ns_window, isVisible];
                         tracing::info!("🔍 显示前状态 - 级别: {}, 可见: {}", level_before, visible_before);
                         
-                        // 设置窗口为非透明，确保可见
+                        // 保守地设置窗口属性
                         let _: () = msg_send![ns_window, setOpaque: true];
                         let _: () = msg_send![ns_window, setAlphaValue: 1.0f64];
                         tracing::info!("🔧 设置窗口透明度为完全不透明");
                         
-                        // 强制显示在最前方
+                        // 使用最基本的显示方法
                         let _: () = msg_send![ns_window, orderFrontRegardless];
                         tracing::info!("🔧 执行 orderFrontRegardless");
                         
-                        let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
-                        tracing::info!("🔧 执行 makeKeyAndOrderFront");
+                        // 等待一小段时间让窗口系统处理
+                        std::thread::sleep(std::time::Duration::from_millis(10));
                         
-                        // 设置窗口为关键窗口
+                        // 安全地激活应用程序
+                        if let Some(app_class) = runtime::Class::get("NSApplication") {
+                            let shared_app: id = msg_send![app_class, sharedApplication];
+                            let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
+                            tracing::info!("🔧 激活应用程序忽略其他应用");
+                        } else {
+                            tracing::warn!("⚠️ 无法获取 NSApplication 类");
+                        }
+                        
+                        // 最后设置为关键窗口（这一步比较安全）
                         let _: () = msg_send![ns_window, makeKeyWindow];
-                        let _: () = msg_send![ns_window, makeMainWindow];
-                        tracing::info!("🔧 设置为关键和主窗口");
-                        
-                        // 激活应用程序
-                        let app_class = runtime::Class::get("NSApplication").unwrap();
-                        let shared_app: id = msg_send![app_class, sharedApplication];
-                        let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
-                        tracing::info!("🔧 激活应用程序忽略其他应用");
+                        tracing::info!("🔧 设置为关键窗口");
                         
                         // 获取显示后的状态
                         let level_after: i32 = msg_send![ns_window, level];
                         let visible_after: bool = msg_send![ns_window, isVisible];
                         let is_key_after: bool = msg_send![ns_window, isKeyWindow];
-                        let is_main_after: bool = msg_send![ns_window, isMainWindow];
-                        tracing::info!("🔍 显示后状态 - 级别: {}, 可见: {}, 关键窗口: {}, 主窗口: {}", 
-                                      level_after, visible_after, is_key_after, is_main_after);
+                        tracing::info!("🔍 显示后状态 - 级别: {}, 可见: {}, 关键窗口: {}", 
+                                      level_after, visible_after, is_key_after);
                     }
                 }
                 
