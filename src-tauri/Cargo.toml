@@ -42,6 +42,7 @@ rdev = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time", "local-time"] }
 tracing-appender = "0.2"
+backtrace = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [
@@ -65,8 +66,8 @@ opt-level = 0
 # 发布模式优化
 lto = true              # 启用链接时优化
 codegen-units = 1       # 使用单个代码生成单元以获得更好的优化
-panic = "abort"         # 使用abort而不是unwind以减小二进制大小
-strip = true            # 去除调试符号
+panic = "unwind"        # 使用unwind以支持panic hook和backtrace
+strip = false           # 保留调试符号以便异常跟踪
 opt-level = "z"         # 优化二进制大小
 
 # 优化依赖编译速度

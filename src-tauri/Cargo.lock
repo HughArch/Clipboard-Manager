@@ -6,6 +6,7 @@ version = 4
 name = "Clipboard-Manager"
 version = "1.0.116"
 dependencies = [
+ "backtrace",
  "base64 0.21.7",
  "chrono",
  "dirs-next",

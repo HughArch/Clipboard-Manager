@@ -8,6 +8,7 @@ use tracing_subscriber::{
     EnvFilter,
     Layer,
 };
+use backtrace::Backtrace;
 
 /// 日志配置结构
 #[derive(Clone)]
@@ -46,12 +47,48 @@ fn get_app_log_dir() -> PathBuf {
 
 /// 初始化日志系统
 pub fn init_logging(config: LogConfig) -> Result<(), Box<dyn std::error::Error>> {
+    // 设置 RUST_BACKTRACE 环境变量以启用堆栈跟踪
+    if std::env::var("RUST_BACKTRACE").is_err() {
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "1");
+        }
+    }
+    
+    // 设置 panic hook 来捕获并记录 panic 异常
+    std::panic::set_hook(Box::new(|panic_info| {
+        let panic_message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic".to_string()
+        };
+        
+        let location = if let Some(location) = panic_info.location() {
+            format!(" at {}:{}:{}", location.file(), location.line(), location.column())
+        } else {
+            " at unknown location".to_string()
+        };
+        
+        // 获取堆栈跟踪
+        let bt = Backtrace::new();
+        
+        // 使用 eprintln! 确保在日志系统失败时也能输出
+        eprintln!("🔥 PANIC: {}{}", panic_message, location);
+        eprintln!("🔥 BACKTRACE:\n{:?}", bt);
+        
+        // 如果 tracing 已初始化，也记录到日志文件
+        tracing::error!("🔥 PANIC: {}{}", panic_message, location);
+        tracing::error!("🔥 BACKTRACE:\n{:?}", bt);
+    }));
+    
     // 确保日志目录存在
     fs::create_dir_all(&config.log_dir)?;
     
     // 打印调试信息到stderr，确保我们知道路径
     eprintln!("🔧 [DEBUG] 日志目录: {}", config.log_dir.display());
     eprintln!("🔧 [DEBUG] 日志目录是否存在: {}", config.log_dir.exists());
+    eprintln!("🔧 [DEBUG] RUST_BACKTRACE: {}", std::env::var("RUST_BACKTRACE").unwrap_or_default());
     
     // 清理旧日志文件
     cleanup_old_logs(&config.log_dir, config.max_log_files)?;

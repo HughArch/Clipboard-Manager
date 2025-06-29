@@ -35,12 +35,23 @@ class Logger {
       this.flushSync()
     })
 
-    // 捕获未处理的错误
+    // 捕获未处理的错误（包含堆栈跟踪）
     window.addEventListener('error', (event) => {
       this.error('Uncaught Error', {
         message: event.message,
         filename: event.filename,
-        line: event.lineno
+        line: event.lineno,
+        column: event.colno,
+        stack: event.error?.stack || 'No stack trace available'
+      })
+    })
+
+    // 捕获未处理的Promise拒绝
+    window.addEventListener('unhandledrejection', (event) => {
+      this.error('Unhandled Promise Rejection', {
+        reason: event.reason,
+        stack: event.reason?.stack || 'No stack trace available',
+        promise: event.promise.toString()
       })
     })
   }
@@ -144,14 +155,24 @@ class Logger {
   error(message: string, context?: LogContext) {
     const timestamp = new Date().toISOString()
     const logMessage = `[${timestamp}] ${message}`
+    
+    // 自动获取调用栈信息
+    const stack = new Error().stack
+    const enhancedContext = {
+      ...context,
+      stack: stack || 'No stack trace available',
+      userAgent: navigator.userAgent,
+      url: window.location.href
+    }
+    
     this.buffer.push({
       level: LogLevel.ERROR,
       message: logMessage,
-      context: context ? JSON.stringify(context) : undefined
+      context: JSON.stringify(enhancedContext)
     })
     
     // 在控制台中使用带样式的输出，便于识别前端日志
-    console.error(`🔴 [FRONTEND ERROR] ${logMessage}`, context)
+    console.error(`🔴 [FRONTEND ERROR] ${logMessage}`, enhancedContext)
     
     // 错误日志立即刷新
     this.flushImmediately()
@@ -208,6 +229,35 @@ class Logger {
       this.flushImmediately()
     }
   }
+
+  // 专门用于记录异常的方法
+  exception(error: Error, message?: string, context?: LogContext) {
+    const timestamp = new Date().toISOString()
+    const errorMessage = message || error.message || 'Unknown error'
+    const logMessage = `[${timestamp}] EXCEPTION: ${errorMessage}`
+    
+    const enhancedContext = {
+      ...context,
+      errorName: error.name,
+      errorMessage: error.message,
+      stack: error.stack || 'No stack trace available',
+      userAgent: navigator.userAgent,
+      url: window.location.href,
+      timestamp: timestamp
+    }
+    
+    this.buffer.push({
+      level: LogLevel.ERROR,
+      message: logMessage,
+      context: JSON.stringify(enhancedContext)
+    })
+    
+    // 在控制台中使用带样式的输出，便于识别前端日志
+    console.error(`🔥 [FRONTEND EXCEPTION] ${logMessage}`, enhancedContext)
+    
+    // 异常日志立即刷新
+    this.flushImmediately()
+  }
 }
 
 // 全局logger实例
@@ -226,6 +276,7 @@ export const logger = {
   warn: (message: string, context?: LogContext) => useLogger().warn(message, context),
   info: (message: string, context?: LogContext) => useLogger().info(message, context),
   debug: (message: string, context?: LogContext) => useLogger().debug(message, context),
+  exception: (error: Error, message?: string, context?: LogContext) => useLogger().exception(error, message, context),
   
   // 添加手动刷新和状态检查方法
   flush: async () => {
