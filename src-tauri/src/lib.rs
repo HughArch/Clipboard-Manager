@@ -120,7 +120,7 @@ pub fn run() {
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
-                app.set_activation_policy(ActivationPolicy::Accessory)?;
+                app.set_activation_policy(ActivationPolicy::Accessory);
                 tracing::info!("🔧 [macOS] 应用激活策略已设置为 Accessory");
             }
 
