@@ -14,19 +14,23 @@
       {
         "label": "main",
         "title": "Clipboard Manager",
-        "width": 1000,
-        "height": 700,
-        "center": true,
+        "width": 900,
+        "height": 600,
+        "center": false,
+        "x": 100,
+        "y": 100,
         "resizable": true,
-        "minimizable": true,
-        "maximizable": true,
+        "minimizable": false,
+        "maximizable": false,
         "closable": true,
-        "skipTaskbar": false,
-        "alwaysOnTop": false,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
         "decorations": false,
         "transparent": false,
-        "visible": true,
-        "devtools": true
+        "visible": false,
+        "devtools": true,
+        "shadow": true,
+        "titleBarStyle": "Overlay"
       }
     ],
     "security": {
