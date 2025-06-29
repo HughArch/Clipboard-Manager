@@ -98,17 +98,11 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
                 
                 // 设置窗口集合行为，允许在全屏空间中显示
                 // 使用正确的类型：macOS 期望 NSUInteger (u64)  
-                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
-                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2  
-                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
+                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2 - 切换到活动空间
                 
-                // 使用保守的集合行为设置
-                let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_move_to_active_space |
-                              ns_window_collection_behavior_full_screen_auxiliary;
-                
-                let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
-                tracing::info!("🔧 设置窗口集合行为: {} (保守模式)", behavior);
+                // 根据Apple文档，只能设置一个Spaces行为
+                let _: () = msg_send![ns_window, setCollectionBehavior: ns_window_collection_behavior_move_to_active_space];
+                tracing::info!("🔧 设置窗口集合行为: MoveToActiveSpace (2)");
                 
                 // 确保窗口不会被全屏应用遮挡
                 let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
@@ -171,12 +165,38 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 // 设置集合行为 - 根据Apple文档，一次只能使用一个Spaces行为
                 tracing::info!("🔧 准备设置窗口集合行为以支持全屏显示");
                 
-                // 根据Apple官方建议，只使用CanJoinAllSpaces让窗口出现在所有空间
-                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
+                // 尝试两种不同的策略
+                let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1 - 出现在所有空间
+                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2 - 切换到活动空间
                 
-                tracing::info!("🔧 设置集合行为为CanJoinAllSpaces (1)");
-                let _: () = msg_send![ns_window, setCollectionBehavior: ns_window_collection_behavior_can_join_all_spaces];
-                tracing::info!("✅ 成功设置集合行为: CanJoinAllSpaces (1)");
+                let behaviors_to_try = [
+                    (ns_window_collection_behavior_move_to_active_space, "MoveToActiveSpace (2)"),
+                    (ns_window_collection_behavior_can_join_all_spaces, "CanJoinAllSpaces (1)"),
+                ];
+                
+                let mut behavior_set = false;
+                for (behavior, description) in behaviors_to_try {
+                    tracing::info!("🔧 尝试设置集合行为为 {}", description);
+                    let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+                    
+                    // 验证窗口是否在活动空间
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    let is_on_active_space_after: bool = msg_send![ns_window, isOnActiveSpace];
+                    
+                    tracing::info!("✅ 设置后在活动空间: {}", is_on_active_space_after);
+                    
+                    if is_on_active_space_after {
+                        tracing::info!("🎯 成功！使用 {} 让窗口进入活动空间", description);
+                        behavior_set = true;
+                        break;
+                    } else {
+                        tracing::warn!("⚠️ {} 没有生效，尝试下一个", description);
+                    }
+                }
+                
+                if !behavior_set {
+                    tracing::warn!("⚠️ 所有集合行为都没有让窗口进入活动空间");
+                }
                 
                 // 设置其他重要属性
                 tracing::info!("🔧 设置窗口其他属性");
