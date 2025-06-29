@@ -30,9 +30,9 @@ class Logger {
       this.flush()
     }, 1000) // 1秒刷新一次
     
-    // 页面卸载时确保日志被写入
+    // 页面卸载时确保日志被写入和清理定时器
     window.addEventListener('beforeunload', () => {
-      this.flushSync()
+      this.destroy()
     })
 
     // 捕获未处理的错误（包含堆栈跟踪）
@@ -150,6 +150,21 @@ class Logger {
     } catch (error) {
       this.logInternal('error', 'Failed to flush immediately:', error)
     }
+  }
+
+  // 清理资源的方法
+  public destroy() {
+    this.logInternal('debug', 'Destroying logger and cleaning up resources')
+    
+    // 清理定时器
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer)
+      this.flushTimer = null
+      this.logInternal('debug', 'Flush timer cleared')
+    }
+    
+    // 最后一次同步刷新
+    this.flushSync()
   }
 
   error(message: string, context?: LogContext) {
