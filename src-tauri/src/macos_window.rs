@@ -5,17 +5,21 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 use cocoa::base::id;
 #[cfg(target_os = "macos")]
+use cocoa::foundation::{NSRect, NSPoint, NSSize};
+#[cfg(target_os = "macos")]
 use objc::{msg_send, sel, sel_impl, runtime};
 
-// macOS 窗口级别常量
-#[cfg(target_os = "macos")]
-const OVERLAY_WINDOW_LEVEL: i32 = 25; // kCGOverlayWindowLevelKey - 覆盖层级别
-#[cfg(target_os = "macos")]
-const SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000; // kCGScreenSaverWindowLevel - 更高级别
+// macOS 窗口级别常量 (基于Apple官方文档和网络搜索结果)
 #[cfg(target_os = "macos")]
 const FLOATING_WINDOW_LEVEL: i32 = 3; // NSFloatingWindowLevel - 浮动窗口级别
 #[cfg(target_os = "macos")]
 const MODAL_PANEL_WINDOW_LEVEL: i32 = 8; // NSModalPanelWindowLevel - 模态面板级别
+#[cfg(target_os = "macos")]
+const OVERLAY_WINDOW_LEVEL: i32 = 25; // kCGOverlayWindowLevelKey - 覆盖层级别
+#[cfg(target_os = "macos")]
+const SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000; // kCGScreenSaverWindowLevel - 屏保级别
+#[cfg(target_os = "macos")]
+const ASSISTIVE_TECH_HIGH_LEVEL: i32 = 1500; // kCGAssistiveTechHighWindowLevel - 辅助技术高级别
 
 #[cfg(target_os = "macos")]
 pub fn detect_fullscreen_app() -> Result<bool, String> {
@@ -142,7 +146,8 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                     (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),        // 3
                     (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"),    // 8  
                     (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),          // 25
-                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),       // 1000 - Apple推荐用于覆盖全屏
+                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),       // 1000
+                    (ASSISTIVE_TECH_HIGH_LEVEL, "辅助技术高级别"), // 1500 - 专用于覆盖全屏应用
                 ];
                 
                 let mut level_set = false;
@@ -200,12 +205,30 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                     tracing::info!("🔧 激活应用程序");
                 }
                 
-                // 获取最终状态
+                // 获取最终状态和详细位置信息
                 let final_level: i32 = msg_send![ns_window, level];
                 let final_visible: bool = msg_send![ns_window, isVisible];
                 let final_key: bool = msg_send![ns_window, isKeyWindow];
-                tracing::info!("🔍 最终窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}", 
-                              final_level, final_visible, final_key);
+                let final_main: bool = msg_send![ns_window, isMainWindow];
+                let is_on_active_space: bool = msg_send![ns_window, isOnActiveSpace];
+                
+                // 获取窗口位置和大小
+                let frame: NSRect = msg_send![ns_window, frame];
+                let screen_frame: NSRect = {
+                    let screen: id = msg_send![ns_window, screen];
+                    if !screen.is_null() {
+                        msg_send![screen, frame]
+                    } else {
+                        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0))
+                    }
+                };
+                
+                tracing::info!("🔍 最终窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}, 主窗口: {}", 
+                              final_level, final_visible, final_key, final_main);
+                tracing::info!("🔍 窗口空间状态 - 在活动空间: {}", is_on_active_space);
+                tracing::info!("🔍 窗口位置 - x: {:.0}, y: {:.0}, 宽: {:.0}, 高: {:.0}", 
+                              frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
+                tracing::info!("🔍 屏幕尺寸 - 宽: {:.0}, 高: {:.0}", screen_frame.size.width, screen_frame.size.height);
                 
                 tracing::info!("✅ 窗口级别和集合行为设置完成");
                 return Ok(());
