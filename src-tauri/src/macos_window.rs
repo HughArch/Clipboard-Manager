@@ -3,11 +3,9 @@ use std::process::Command;
 use tauri::{AppHandle, Manager};
 
 #[cfg(target_os = "macos")]
-use cocoa::appkit::{NSWindow, NSWindowLevel};
-#[cfg(target_os = "macos")]
 use cocoa::base::id;
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use objc::msg_send;
 
 // macOS 窗口级别常量
 #[cfg(target_os = "macos")]
