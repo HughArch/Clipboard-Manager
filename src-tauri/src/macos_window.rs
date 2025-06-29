@@ -19,6 +19,14 @@ const NS_MODAL_PANEL_WINDOW_LEVEL: i32 = 8;
 #[cfg(target_os = "macos")]
 const NS_SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000;
 
+// macOS 窗口集合行为常量
+#[cfg(target_os = "macos")]
+const NS_WINDOW_COLLECTION_BEHAVIOR_DEFAULT: u64 = 0;
+#[cfg(target_os = "macos")]
+const NS_WINDOW_COLLECTION_BEHAVIOR_CAN_JOIN_ALL_SPACES: u64 = 1 << 0;
+#[cfg(target_os = "macos")]
+const NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY: u64 = 1 << 8;
+
 /// 检测是否有应用处于全屏模式
 #[cfg(target_os = "macos")]
 pub fn detect_fullscreen_app() -> Result<String, String> {
@@ -89,6 +97,13 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                 let new_level: i32 = msg_send![ns_window, level];
                 tracing::info!("✅ 窗口级别设置完成，新级别: {}", new_level);
                 
+                // --- 新增：设置窗口集合行为，这是覆盖全屏的关键 ---
+                let behavior = NS_WINDOW_COLLECTION_BEHAVIOR_CAN_JOIN_ALL_SPACES 
+                             | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY;
+                let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+                tracing::info!("🔧 设置窗口集合行为: CanJoinAllSpaces + FullScreenAuxiliary");
+                // --- 结束新增 ---
+                
                 // 确保窗口在最前面
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
                 let _: () = msg_send![ns_window, orderFrontRegardless];
@@ -135,6 +150,11 @@ pub fn reset_window_level(app: &AppHandle) -> Result<(), String> {
                 // 重置为普通窗口级别
                 let normal_level = NS_NORMAL_WINDOW_LEVEL;
                 let _: () = msg_send![ns_window, setLevel: normal_level];
+                
+                // --- 新增：重置集合行为 ---
+                let _: () = msg_send![ns_window, setCollectionBehavior: NS_WINDOW_COLLECTION_BEHAVIOR_DEFAULT];
+                tracing::info!("✅ 窗口集合行为已重置");
+                // --- 结束新增 ---
                 
                 tracing::info!("✅ 窗口级别已重置为普通级别: {}", normal_level);
             }
