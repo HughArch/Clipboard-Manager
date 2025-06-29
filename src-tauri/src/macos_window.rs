@@ -126,6 +126,50 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
+    // 只设置窗口级别，不设置其他属性
+    if let Some(window) = app.get_webview_window("main") {
+        unsafe {
+            if let Ok(native_window) = window.ns_window() {
+                let ns_window = native_window as id;
+                
+                // 逐步尝试不同的窗口级别
+                let levels_to_try = [
+                    (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),
+                    (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"), 
+                    (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),
+                ];
+                
+                let mut level_set = false;
+                for (level, description) in levels_to_try.iter().rev() {
+                    let _: () = msg_send![ns_window, setLevel: *level];
+                    let actual_level: i32 = msg_send![ns_window, level];
+                    
+                    if actual_level == *level {
+                        tracing::info!("🔧 成功设置窗口级别为{}: {}", description, level);
+                        level_set = true;
+                        break;
+                    } else {
+                        tracing::warn!("⚠️ 设置{}失败，尝试次级别", description);
+                    }
+                }
+                
+                if !level_set {
+                    tracing::warn!("⚠️ 所有级别设置都失败，保持当前级别");
+                }
+                
+                tracing::info!("✅ 窗口级别设置完成");
+                return Ok(());
+            }
+        }
+        
+        return Err("无法获取原生窗口句柄".to_string());
+    }
+    
+    Err("无法找到主窗口".to_string())
+}
+
+#[cfg(target_os = "macos")]
 pub fn reset_window_level(app: &AppHandle) -> Result<(), String> {
     // 重置窗口级别为普通级别
     if let Some(window) = app.get_webview_window("main") {
@@ -158,20 +202,21 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
         Ok(true) => {
             tracing::info!("🔍 检测到全屏应用，将窗口设置为覆盖模式");
             
-            // 首先设置窗口为覆盖级别
-            if let Err(e) = set_window_overlay_level(app) {
-                tracing::warn!("❌ 设置覆盖级别失败: {}, 尝试普通显示", e);
-                return show_window_normal(app);
-            }
-            
-            // 显示窗口
+            // 先用普通方式显示窗口，然后再设置覆盖级别
             if let Some(window) = app.get_webview_window("main") {
+                tracing::info!("🔧 准备调用 Tauri window.show()");
                 // 首先确保窗口是可见的
-                let _ = window.show();
-                let _ = window.unminimize();
+                let show_result = window.show();
+                tracing::info!("✅ Tauri window.show() 完成，结果: {:?}", show_result);
+                
+                tracing::info!("🔧 准备调用 Tauri window.unminimize()");
+                let unminimize_result = window.unminimize();
+                tracing::info!("✅ Tauri window.unminimize() 完成，结果: {:?}", unminimize_result);
                 
                 // 安全地显示窗口，逐步调试每个方法调用
+                tracing::info!("🔧 准备获取原生窗口句柄用于显示");
                 unsafe {
+                    tracing::info!("🔧 准备调用 window.ns_window()");
                     if let Ok(native_window) = window.ns_window() {
                         let ns_window = native_window as id;
                         tracing::info!("🔧 成功获取原生窗口句柄，地址: {:p}", ns_window);
@@ -241,6 +286,13 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
                 
                 // 使用 Tauri 的方法再次确保焦点
                 let _ = window.set_focus();
+                
+                tracing::info!("✅ 窗口显示完成，现在设置覆盖级别");
+                
+                // 现在只设置窗口级别，不重复其他属性
+                if let Err(e) = set_window_level_only(app) {
+                    tracing::warn!("❌ 设置窗口级别失败: {}, 但窗口已显示", e);
+                }
                 
                 tracing::info!("✅ 窗口已在全屏模式下显示");
             }
