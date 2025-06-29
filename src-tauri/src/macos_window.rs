@@ -171,9 +171,18 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 
                 // 设置其他重要属性
                 tracing::info!("🔧 设置窗口其他属性");
+                
+                tracing::info!("🔧 准备设置 setCanHide: false");
                 let _: () = msg_send![ns_window, setCanHide: false];
+                tracing::info!("✅ 成功设置 setCanHide: false");
+                
+                tracing::info!("🔧 准备设置 setIgnoresMouseEvents: false");
                 let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
+                tracing::info!("✅ 成功设置 setIgnoresMouseEvents: false");
+                
+                tracing::info!("🔧 准备设置 setIsExcludedFromWindowsMenu: false");
                 let _: () = msg_send![ns_window, setIsExcludedFromWindowsMenu: false];
+                tracing::info!("✅ 成功设置 setIsExcludedFromWindowsMenu: false");
                 
                 // 强制窗口显示在最前面
                 tracing::info!("🔧 强制窗口显示在最前面");
