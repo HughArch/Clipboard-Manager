@@ -5,9 +5,9 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 use cocoa::appkit::NSWindow;
 #[cfg(target_os = "macos")]
-use cocoa::base::id;
+use cocoa::base::{id, YES};
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use objc::{class, msg_send, sel, sel_impl};
 
 // macOS 窗口级别常量（基于 NSWindowLevel）
 #[cfg(target_os = "macos")]
@@ -102,11 +102,20 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                              | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY;
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
                 tracing::info!("🔧 设置窗口集合行为: CanJoinAllSpaces + FullScreenAuxiliary");
+                
+                // --- 新增：强制激活应用和窗口 ---
+                // 1. 强制将窗口置于所有窗口之上
+                let _: () = msg_send![ns_window, orderFrontRegardless];
+                tracing::info!("🔧 强制置顶窗口 (orderFrontRegardless)");
+                
+                // 2. 激活我们的应用，忽略其它应用
+                let ns_app: id = msg_send![class!(NSApplication), sharedApplication];
+                let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
+                tracing::info!("🔧 强制激活应用 (activateIgnoringOtherApps)");
                 // --- 结束新增 ---
                 
                 // 确保窗口在最前面
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
-                let _: () = msg_send![ns_window, orderFrontRegardless];
                 
                 // 设置窗口属性以确保能够覆盖全屏应用
                 let _: () = msg_send![ns_window, setCanHide: false];
