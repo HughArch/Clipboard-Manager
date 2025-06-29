@@ -229,7 +229,10 @@ pub fn run() {
             // 日志相关命令  
             commands::open_log_folder,
             commands::delete_all_logs,
-            commands::write_frontend_log
+            commands::write_frontend_log,
+            // macOS 窗口管理测试命令
+            commands::test_fullscreen_overlay,
+            commands::test_window_overlay_directly
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
