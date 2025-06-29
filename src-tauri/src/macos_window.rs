@@ -46,7 +46,7 @@ pub fn detect_fullscreen_app() -> Result<bool, String> {
         .output()
         .map_err(|e| format!("Failed to detect fullscreen: {}", e))?;
 
-    let result = String::from_utf8_lossy(&output.stdout).trim();
+    let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
     tracing::info!("全屏检测结果: {}", result);
     
     Ok(result.starts_with("fullscreen:"))
