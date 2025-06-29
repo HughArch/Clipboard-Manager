@@ -98,10 +98,9 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
                 tracing::info!("✅ setCollectionBehavior 完成");
 
-                // 3. 设置为 Panel-like 行为
-                tracing::info!("🔧 [调试] 设置窗口为 becomesKeyOnlyIfNeeded");
-                let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: YES];
-                tracing::info!("✅ setBecomesKeyOnlyIfNeeded 完成");
+                // 移除有问题的调用：setBecomesKeyOnlyIfNeeded
+                // 这个方法在标准 NSWindow 上调用会引发 Objective-C 异常
+                tracing::info!("⚠️ [调试] 跳过 setBecomesKeyOnlyIfNeeded 调用");
 
                 // 4. 将窗口提到最前面
                 tracing::info!("🔧 [调试] 调用 makeKeyAndOrderFront");
