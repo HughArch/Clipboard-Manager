@@ -5,11 +5,15 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 use cocoa::base::id;
 #[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
+use objc::{msg_send, sel, sel_impl, runtime};
 
 // macOS 窗口级别常量
 #[cfg(target_os = "macos")]
 const OVERLAY_WINDOW_LEVEL: i32 = 25; // kCGOverlayWindowLevelKey - 覆盖层级别
+#[cfg(target_os = "macos")]
+const SCREEN_SAVER_WINDOW_LEVEL: i32 = 1000; // kCGScreenSaverWindowLevel - 更高级别
+#[cfg(target_os = "macos")]
+const MAXIMUM_WINDOW_LEVEL: i32 = 2147483647; // CGWindowLevelForKey(kCGMaximumWindowLevelKey)
 
 #[cfg(target_os = "macos")]
 pub fn detect_fullscreen_app() -> Result<bool, String> {
@@ -59,22 +63,33 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
             if let Ok(native_window) = window.ns_window() {
                 let ns_window = native_window as id;
                 
-                // 设置窗口级别为覆盖级别
-                let _: () = msg_send![ns_window, setLevel: OVERLAY_WINDOW_LEVEL];
+                // 首先尝试最高级别，确保能覆盖全屏应用
+                let _: () = msg_send![ns_window, setLevel: MAXIMUM_WINDOW_LEVEL];
+                tracing::info!("🔧 设置窗口级别为最高级别: {}", MAXIMUM_WINDOW_LEVEL);
                 
                 // 设置窗口集合行为，允许在全屏空间中显示
                 let ns_window_collection_behavior_can_join_all_spaces: i32 = 1 << 0;
                 let ns_window_collection_behavior_full_screen_auxiliary: i32 = 1 << 8;
+                let ns_window_collection_behavior_stationary: i32 = 1 << 4;
                 let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_full_screen_auxiliary;
+                              ns_window_collection_behavior_full_screen_auxiliary |
+                              ns_window_collection_behavior_stationary;
                 
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+                tracing::info!("🔧 设置窗口集合行为: {}", behavior);
                 
                 // 确保窗口不会被全屏应用遮挡
                 let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
                 let _: () = msg_send![ns_window, setCanHide: false];
+                let _: () = msg_send![ns_window, setIsExcludedFromWindowsMenu: false];
                 
-                tracing::info!("✅ 窗口已设置为覆盖级别，可在全屏模式下显示");
+                // 获取当前窗口状态用于调试
+                let current_level: i32 = msg_send![ns_window, level];
+                let is_visible: bool = msg_send![ns_window, isVisible];
+                let is_key: bool = msg_send![ns_window, isKeyWindow];
+                tracing::info!("🔍 窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}", current_level, is_visible, is_key);
+                
+                tracing::info!("✅ 窗口已设置为最高级别，可在全屏模式下显示");
                 
                 return Ok(());
             }
@@ -127,17 +142,55 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
             
             // 显示窗口
             if let Some(window) = app.get_webview_window("main") {
+                // 首先确保窗口是可见的
                 let _ = window.show();
-                let _ = window.set_focus();
+                let _ = window.unminimize();
                 
-                // 确保窗口在前台
+                // 使用原生方法强制显示窗口
                 unsafe {
                     if let Ok(native_window) = window.ns_window() {
                         let ns_window = native_window as id;
-                        let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                        
+                        // 获取显示前的状态
+                        let level_before: i32 = msg_send![ns_window, level];
+                        let visible_before: bool = msg_send![ns_window, isVisible];
+                        tracing::info!("🔍 显示前状态 - 级别: {}, 可见: {}", level_before, visible_before);
+                        
+                        // 设置窗口为非透明，确保可见
+                        let _: () = msg_send![ns_window, setOpaque: true];
+                        let _: () = msg_send![ns_window, setAlphaValue: 1.0f64];
+                        tracing::info!("🔧 设置窗口透明度为完全不透明");
+                        
+                        // 强制显示在最前方
                         let _: () = msg_send![ns_window, orderFrontRegardless];
+                        tracing::info!("🔧 执行 orderFrontRegardless");
+                        
+                        let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                        tracing::info!("🔧 执行 makeKeyAndOrderFront");
+                        
+                        // 设置窗口为关键窗口
+                        let _: () = msg_send![ns_window, makeKeyWindow];
+                        let _: () = msg_send![ns_window, makeMainWindow];
+                        tracing::info!("🔧 设置为关键和主窗口");
+                        
+                        // 激活应用程序
+                        let app_class = runtime::Class::get("NSApplication").unwrap();
+                        let shared_app: id = msg_send![app_class, sharedApplication];
+                        let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
+                        tracing::info!("🔧 激活应用程序忽略其他应用");
+                        
+                        // 获取显示后的状态
+                        let level_after: i32 = msg_send![ns_window, level];
+                        let visible_after: bool = msg_send![ns_window, isVisible];
+                        let is_key_after: bool = msg_send![ns_window, isKeyWindow];
+                        let is_main_after: bool = msg_send![ns_window, isMainWindow];
+                        tracing::info!("🔍 显示后状态 - 级别: {}, 可见: {}, 关键窗口: {}, 主窗口: {}", 
+                                      level_after, visible_after, is_key_after, is_main_after);
                     }
                 }
+                
+                // 使用 Tauri 的方法再次确保焦点
+                let _ = window.set_focus();
                 
                 tracing::info!("✅ 窗口已在全屏模式下显示");
             }
