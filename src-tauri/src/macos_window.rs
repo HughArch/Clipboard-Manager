@@ -180,9 +180,9 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
                 tracing::info!("✅ 成功设置 setIgnoresMouseEvents: false");
                 
-                tracing::info!("🔧 准备设置 setIsExcludedFromWindowsMenu: false");
-                let _: () = msg_send![ns_window, setIsExcludedFromWindowsMenu: false];
-                tracing::info!("✅ 成功设置 setIsExcludedFromWindowsMenu: false");
+                // 移除有问题的 setIsExcludedFromWindowsMenu 方法调用
+                // 这个方法在某些 macOS 版本中可能不可用或有问题
+                tracing::info!("⚠️ 跳过 setIsExcludedFromWindowsMenu 设置（已知问题）");
                 
                 // 强制窗口显示在最前面
                 tracing::info!("🔧 强制窗口显示在最前面");
