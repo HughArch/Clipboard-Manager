@@ -5,6 +5,7 @@ mod icon_cache;
 mod window_info;
 mod commands;
 mod logging;
+mod macos_window;
 
 // 重新导出公共类型
 pub use types::*;
@@ -239,7 +240,11 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         match window.is_visible() {
             Ok(true) => {
-                let _ = window.hide();
+                // 使用智能隐藏，重置窗口级别
+                if let Err(e) = macos_window::hide_window_and_reset(app) {
+                    tracing::warn!("智能隐藏失败，使用默认方式: {}", e);
+                    let _ = window.hide();
+                }
             }
             Ok(false) => {
                 show_window(app);
@@ -252,13 +257,18 @@ fn toggle_window_visibility(app: &tauri::AppHandle) {
 }
 
 fn show_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
-        // 添加小延迟确保窗口完全显示
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        // 再次设置焦点，确保焦点在 webview 上
-        let _ = window.set_focus();
+    // 使用 macOS 智能窗口显示
+    if let Err(e) = macos_window::show_window_smart(app) {
+        tracing::warn!("智能窗口显示失败，回退到默认方式: {}", e);
+        // 回退到默认显示方式
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+            // 添加小延迟确保窗口完全显示
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            // 再次设置焦点，确保焦点在 webview 上
+            let _ = window.set_focus();
+        }
     }
 }
 
@@ -270,12 +280,18 @@ fn show_window_with_context(app: &tauri::AppHandle) {
         // 获取活动窗口信息
         let active_app_info = window_info::get_active_window_info().await;
         
-        // 显示窗口
+        // 使用智能窗口显示
+        if let Err(e) = macos_window::show_window_smart(&app_handle) {
+            tracing::warn!("智能窗口显示失败，回退到默认方式: {}", e);
+            // 回退到默认显示方式
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        
+        // 将活动窗口信息发送给前端
         if let Some(window) = app_handle.get_webview_window("main") {
-            let _ = window.show();
-            let _ = window.set_focus();
-            
-            // 将活动窗口信息发送给前端
             if let Ok(app_info) = active_app_info {
                 tracing::debug!("📤 发送前一个活动应用信息到前端: {}", app_info.name);
                 let _ = window.emit("previous-app-info", app_info);

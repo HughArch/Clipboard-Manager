@@ -55,6 +55,10 @@ winapi = { version = "0.3", features = [
   "objbase",
 ] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.25"
+objc = "0.2"
+
 # 构建优化配置
 [profile.dev]
 # 开发模式优化，提高编译速度
