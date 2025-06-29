@@ -137,14 +137,12 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
             if let Ok(native_window) = window.ns_window() {
                 let ns_window = native_window as id;
                 
-                // 逐步尝试不同的窗口级别，从低到高，包括极高级别
-                let ultra_high_level: i32 = 2147483640; // 接近最大值但安全的级别
+                // 使用Apple推荐的窗口级别，从低到高
                 let levels_to_try = [
-                    (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),
-                    (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"), 
-                    (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),
-                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),
-                    (ultra_high_level, "超高级别"),
+                    (FLOATING_WINDOW_LEVEL, "浮动窗口级别"),        // 3
+                    (MODAL_PANEL_WINDOW_LEVEL, "模态面板级别"),    // 8  
+                    (OVERLAY_WINDOW_LEVEL, "覆盖层级别"),          // 25
+                    (SCREEN_SAVER_WINDOW_LEVEL, "屏保级别"),       // 1000 - Apple推荐用于覆盖全屏
                 ];
                 
                 let mut level_set = false;
@@ -165,35 +163,15 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                     tracing::warn!("⚠️ 所有级别设置都失败，保持当前级别");
                 }
                 
-                // 设置集合行为，允许在全屏空间中显示 - 使用保守的设置
+                // 设置集合行为 - 根据Apple文档，一次只能使用一个Spaces行为
                 tracing::info!("🔧 准备设置窗口集合行为以支持全屏显示");
                 
-                // 只使用已知稳定的行为标志
+                // 根据Apple官方建议，只使用CanJoinAllSpaces让窗口出现在所有空间
                 let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
-                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2 - 关键！  
-                let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
                 
-                // 保守的组合，逐步尝试
-                let behaviors_to_try = [
-                    (ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_full_screen_auxiliary, "基础全屏支持"),
-                    (ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_move_to_active_space | ns_window_collection_behavior_full_screen_auxiliary, "增强全屏支持"),
-                ];
-                
-                let mut behavior_set = false;
-                for (behavior, description) in behaviors_to_try.iter().rev() {
-                    tracing::info!("🔧 尝试设置集合行为: {} ({})", description, behavior);
-                    let _: () = msg_send![ns_window, setCollectionBehavior: *behavior];
-                    
-                    // 验证设置是否成功
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                    tracing::info!("✅ 成功设置集合行为: {} ({})", description, behavior);
-                    behavior_set = true;
-                    break;
-                }
-                
-                if !behavior_set {
-                    tracing::warn!("⚠️ 所有集合行为设置都失败，使用默认值");
-                }
+                tracing::info!("🔧 设置集合行为为CanJoinAllSpaces (1)");
+                let _: () = msg_send![ns_window, setCollectionBehavior: ns_window_collection_behavior_can_join_all_spaces];
+                tracing::info!("✅ 成功设置集合行为: CanJoinAllSpaces (1)");
                 
                 // 设置其他重要属性
                 tracing::info!("🔧 设置窗口其他属性");
@@ -210,27 +188,16 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 // 这个方法在某些 macOS 版本中可能不可用或有问题
                 tracing::info!("⚠️ 跳过 setIsExcludedFromWindowsMenu 设置（已知问题）");
                 
-                // 强制窗口显示在最前面
+                // 使用Apple推荐的方式强制显示窗口
                 tracing::info!("🔧 强制窗口显示在最前面");
-                let _: () = msg_send![ns_window, orderFrontRegardless];
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                let _: () = msg_send![ns_window, orderFrontRegardless];
                 
-                // 额外的强制显示方法
-                tracing::info!("🔧 使用额外的强制显示方法");
-                let _: () = msg_send![ns_window, orderWindow: 1 relativeTo: 0]; // NSWindowAbove
-                
-                // 确保窗口在当前空间显示
-                tracing::info!("🔧 强制窗口到当前空间");
-                // 再次设置基础集合行为确保生效
-                let basic_behavior = ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_full_screen_auxiliary;
-                let _: () = msg_send![ns_window, setCollectionBehavior: basic_behavior];
-                
-                // 激活窗口所属的应用
+                // 激活应用程序
                 if let Some(app_class) = runtime::Class::get("NSApplication") {
                     let shared_app: id = msg_send![app_class, sharedApplication];
                     let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
-                    let _: () = msg_send![shared_app, arrangeInFront: shared_app];
-                    tracing::info!("🔧 重新激活应用并置于前台");
+                    tracing::info!("🔧 激活应用程序");
                 }
                 
                 // 获取最终状态
