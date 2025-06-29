@@ -96,18 +96,15 @@ pub fn set_window_overlay_level(app: &AppHandle) -> Result<(), String> {
                 // 使用正确的类型：macOS 期望 NSUInteger (u64)  
                 let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
                 let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2  
-                let ns_window_collection_behavior_transient: u64 = 1 << 3;             // 8
                 let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
-                let ns_window_collection_behavior_full_screen_allows_tiling: u64 = 1 << 11; // 2048
                 
+                // 使用保守的集合行为设置
                 let behavior = ns_window_collection_behavior_can_join_all_spaces | 
                               ns_window_collection_behavior_move_to_active_space |
-                              ns_window_collection_behavior_transient |
-                              ns_window_collection_behavior_full_screen_auxiliary |
-                              ns_window_collection_behavior_full_screen_allows_tiling;
+                              ns_window_collection_behavior_full_screen_auxiliary;
                 
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
-                tracing::info!("🔧 设置窗口集合行为: {}", behavior);
+                tracing::info!("🔧 设置窗口集合行为: {} (保守模式)", behavior);
                 
                 // 确保窗口不会被全屏应用遮挡
                 let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
@@ -168,25 +165,35 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                     tracing::warn!("⚠️ 所有级别设置都失败，保持当前级别");
                 }
                 
-                // 设置集合行为，允许在全屏空间中显示 - 这是关键！
+                // 设置集合行为，允许在全屏空间中显示 - 使用保守的设置
                 tracing::info!("🔧 准备设置窗口集合行为以支持全屏显示");
+                
+                // 只使用已知稳定的行为标志
                 let ns_window_collection_behavior_can_join_all_spaces: u64 = 1 << 0;  // 1
-                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2  
-                let ns_window_collection_behavior_managed: u64 = 1 << 2;               // 4
-                let ns_window_collection_behavior_transient: u64 = 1 << 3;             // 8
-                let ns_window_collection_behavior_stationary: u64 = 1 << 4;            // 16
+                let ns_window_collection_behavior_move_to_active_space: u64 = 1 << 1;  // 2 - 关键！  
                 let ns_window_collection_behavior_full_screen_auxiliary: u64 = 1 << 8; // 256
-                let ns_window_collection_behavior_full_screen_allows_tiling: u64 = 1 << 11; // 2048
                 
-                // 组合所有相关的行为标志
-                let behavior = ns_window_collection_behavior_can_join_all_spaces | 
-                              ns_window_collection_behavior_move_to_active_space |
-                              ns_window_collection_behavior_transient |
-                              ns_window_collection_behavior_full_screen_auxiliary |
-                              ns_window_collection_behavior_full_screen_allows_tiling;
+                // 保守的组合，逐步尝试
+                let behaviors_to_try = [
+                    (ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_full_screen_auxiliary, "基础全屏支持"),
+                    (ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_move_to_active_space | ns_window_collection_behavior_full_screen_auxiliary, "增强全屏支持"),
+                ];
                 
-                let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
-                tracing::info!("✅ 设置窗口集合行为: {} (支持全屏显示)", behavior);
+                let mut behavior_set = false;
+                for (behavior, description) in behaviors_to_try.iter().rev() {
+                    tracing::info!("🔧 尝试设置集合行为: {} ({})", description, behavior);
+                    let _: () = msg_send![ns_window, setCollectionBehavior: *behavior];
+                    
+                    // 验证设置是否成功
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    tracing::info!("✅ 成功设置集合行为: {} ({})", description, behavior);
+                    behavior_set = true;
+                    break;
+                }
+                
+                if !behavior_set {
+                    tracing::warn!("⚠️ 所有集合行为设置都失败，使用默认值");
+                }
                 
                 // 设置其他重要属性
                 tracing::info!("🔧 设置窗口其他属性");
@@ -214,7 +221,9 @@ pub fn set_window_level_only(app: &AppHandle) -> Result<(), String> {
                 
                 // 确保窗口在当前空间显示
                 tracing::info!("🔧 强制窗口到当前空间");
-                let _: () = msg_send![ns_window, setCollectionBehavior: behavior]; // 再次设置确保生效
+                // 再次设置基础集合行为确保生效
+                let basic_behavior = ns_window_collection_behavior_can_join_all_spaces | ns_window_collection_behavior_full_screen_auxiliary;
+                let _: () = msg_send![ns_window, setCollectionBehavior: basic_behavior];
                 
                 // 激活窗口所属的应用
                 if let Some(app_class) = runtime::Class::get("NSApplication") {
