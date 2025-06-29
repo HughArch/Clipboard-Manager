@@ -87,24 +87,29 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
             unsafe {
                 // 1. 设置极高的窗口级别
                 let level = SUPER_HIGH_WINDOW_LEVEL;
-                tracing::info!("🔧 [最终方案] 设置窗口级别为超高等级: {}", level);
+                tracing::info!("🔧 [调试] 设置窗口级别为超高等级: {}", level);
                 let _: () = msg_send![ns_window, setLevel: level];
+                tracing::info!("✅ setLevel 完成");
                 
-                // 2. 设置正确的集合行为 (JoinAllSpaces + FullScreenAuxiliary)
+                // 2. 设置正确的集合行为
                 let behavior = NS_WINDOW_COLLECTION_BEHAVIOR_CAN_JOIN_ALL_SPACES 
                              | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY;
-                tracing::info!("🔧 [最终方案] 设置窗口集合行为: CanJoinAllSpaces | FullScreenAuxiliary");
+                tracing::info!("🔧 [调试] 设置窗口集合行为，值为: {}", behavior);
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
+                tracing::info!("✅ setCollectionBehavior 完成");
 
-                // 3. 设置为 Panel-like 行为，不窃取焦点
+                // 3. 设置为 Panel-like 行为
+                tracing::info!("🔧 [调试] 设置窗口为 becomesKeyOnlyIfNeeded");
                 let _: () = msg_send![ns_window, setBecomesKeyOnlyIfNeeded: YES];
-                tracing::info!("🔧 [最终方案] 设置窗口为 becomesKeyOnlyIfNeeded");
+                tracing::info!("✅ setBecomesKeyOnlyIfNeeded 完成");
 
                 // 4. 将窗口提到最前面
+                tracing::info!("🔧 [调试] 调用 makeKeyAndOrderFront");
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
+                tracing::info!("✅ makeKeyAndOrderFront 完成");
 
                 let new_level: i32 = msg_send![ns_window, level];
-                tracing::info!("✅ [最终方案] 窗口设置完成，新级别: {}", new_level);
+                tracing::info!("✅ [调试] 窗口设置完成，新级别: {}", new_level);
             }
         } else {
             return Err("无法获取原生窗口句柄".to_string());
