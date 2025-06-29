@@ -170,47 +170,72 @@ pub fn show_window_smart(app: &AppHandle) -> Result<(), String> {
                 let _ = window.show();
                 let _ = window.unminimize();
                 
-                // 安全地显示窗口
+                // 安全地显示窗口，逐步调试每个方法调用
                 unsafe {
                     if let Ok(native_window) = window.ns_window() {
                         let ns_window = native_window as id;
+                        tracing::info!("🔧 成功获取原生窗口句柄，地址: {:p}", ns_window);
                         
-                        // 获取显示前的状态
-                        let level_before: i32 = msg_send![ns_window, level];
-                        let visible_before: bool = msg_send![ns_window, isVisible];
-                        tracing::info!("🔍 显示前状态 - 级别: {}, 可见: {}", level_before, visible_before);
-                        
-                        // 保守地设置窗口属性
-                        let _: () = msg_send![ns_window, setOpaque: true];
-                        let _: () = msg_send![ns_window, setAlphaValue: 1.0f64];
-                        tracing::info!("🔧 设置窗口透明度为完全不透明");
-                        
-                        // 使用最基本的显示方法
-                        let _: () = msg_send![ns_window, orderFrontRegardless];
-                        tracing::info!("🔧 执行 orderFrontRegardless");
-                        
-                        // 等待一小段时间让窗口系统处理
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                        
-                        // 安全地激活应用程序
-                        if let Some(app_class) = runtime::Class::get("NSApplication") {
-                            let shared_app: id = msg_send![app_class, sharedApplication];
-                            let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
-                            tracing::info!("🔧 激活应用程序忽略其他应用");
+                        // 验证窗口对象是否有效
+                        if ns_window.is_null() {
+                            tracing::error!("❌ 窗口句柄为空指针");
                         } else {
-                            tracing::warn!("⚠️ 无法获取 NSApplication 类");
+                            tracing::info!("✅ 窗口对象有效");
+                            
+                            // 获取显示前的状态
+                            tracing::info!("🔧 准备获取窗口级别");
+                            let level_before: i32 = msg_send![ns_window, level];
+                            tracing::info!("🔧 准备获取窗口可见性");
+                            let visible_before: bool = msg_send![ns_window, isVisible];
+                            tracing::info!("🔍 显示前状态 - 级别: {}, 可见: {}", level_before, visible_before);
+                            
+                            // 逐步设置窗口属性，每步都有日志
+                            tracing::info!("🔧 准备设置窗口为不透明");
+                            let _: () = msg_send![ns_window, setOpaque: true];
+                            tracing::info!("✅ 成功设置窗口为不透明");
+                            
+                            tracing::info!("🔧 准备设置窗口透明度");
+                            let _: () = msg_send![ns_window, setAlphaValue: 1.0f64];
+                            tracing::info!("✅ 成功设置窗口透明度为完全不透明");
+                            
+                            // 使用最基本的显示方法
+                            tracing::info!("🔧 准备执行 orderFrontRegardless");
+                            let _: () = msg_send![ns_window, orderFrontRegardless];
+                            tracing::info!("✅ 成功执行 orderFrontRegardless");
+                            
+                            // 等待一小段时间让窗口系统处理
+                            std::thread::sleep(std::time::Duration::from_millis(10));
+                            
+                            // 安全地激活应用程序
+                            tracing::info!("🔧 准备获取 NSApplication 类");
+                            if let Some(app_class) = runtime::Class::get("NSApplication") {
+                                tracing::info!("✅ 成功获取 NSApplication 类");
+                                tracing::info!("🔧 准备获取共享应用实例");
+                                let shared_app: id = msg_send![app_class, sharedApplication];
+                                tracing::info!("✅ 成功获取共享应用实例");
+                                tracing::info!("🔧 准备激活应用程序忽略其他应用");
+                                let _: () = msg_send![shared_app, activateIgnoringOtherApps: true];
+                                tracing::info!("✅ 成功激活应用程序忽略其他应用");
+                            } else {
+                                tracing::warn!("⚠️ 无法获取 NSApplication 类");
+                            }
+                            
+                            // 最后设置为关键窗口（这一步比较安全）
+                            tracing::info!("🔧 准备设置为关键窗口");
+                            let _: () = msg_send![ns_window, makeKeyWindow];
+                            tracing::info!("✅ 成功设置为关键窗口");
+                            
+                            // 获取显示后的状态
+                            tracing::info!("🔧 准备获取显示后的窗口状态");
+                            let level_after: i32 = msg_send![ns_window, level];
+                            let visible_after: bool = msg_send![ns_window, isVisible];
+                            let is_key_after: bool = msg_send![ns_window, isKeyWindow];
+                            tracing::info!("🔍 显示后状态 - 级别: {}, 可见: {}, 关键窗口: {}", 
+                                          level_after, visible_after, is_key_after);
+                            tracing::info!("✅ 窗口显示流程全部完成");
                         }
-                        
-                        // 最后设置为关键窗口（这一步比较安全）
-                        let _: () = msg_send![ns_window, makeKeyWindow];
-                        tracing::info!("🔧 设置为关键窗口");
-                        
-                        // 获取显示后的状态
-                        let level_after: i32 = msg_send![ns_window, level];
-                        let visible_after: bool = msg_send![ns_window, isVisible];
-                        let is_key_after: bool = msg_send![ns_window, isKeyWindow];
-                        tracing::info!("🔍 显示后状态 - 级别: {}, 可见: {}, 关键窗口: {}", 
-                                      level_after, visible_after, is_key_after);
+                    } else {
+                        tracing::error!("❌ 无法获取原生窗口句柄");
                     }
                 }
                 
