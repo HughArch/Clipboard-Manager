@@ -49,6 +49,10 @@ pub fn init_logging(config: LogConfig) -> Result<(), Box<dyn std::error::Error>>
     // 确保日志目录存在
     fs::create_dir_all(&config.log_dir)?;
     
+    // 打印调试信息到stderr，确保我们知道路径
+    eprintln!("🔧 [DEBUG] 日志目录: {}", config.log_dir.display());
+    eprintln!("🔧 [DEBUG] 日志目录是否存在: {}", config.log_dir.exists());
+    
     // 清理旧日志文件
     cleanup_old_logs(&config.log_dir, config.max_log_files)?;
 

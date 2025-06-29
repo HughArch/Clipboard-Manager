@@ -1521,6 +1521,51 @@ pub async fn delete_all_logs() -> Result<(), String> {
     }
     
     tracing::info!("删除操作完成，共删除 {} 个日志文件", deleted_count);
+    
+    // 重新激活日志系统：确保日志目录存在
+    if let Err(e) = std::fs::create_dir_all(&log_dir) {
+        tracing::warn!("重新创建日志目录失败: {}", e);
+    }
+    
+    // 强制创建新的日志文件，绕过tracing_appender的缓存问题
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_file_path = log_dir.join(format!("app.log.{}", today));
+    
+    // 手动创建日志文件来激活文件系统
+    match std::fs::File::create(&log_file_path) {
+        Ok(mut file) => {
+            use std::io::Write;
+            let init_log = format!(
+                "{} INFO [日志系统重新激活] 删除所有日志文件后重新创建\n",
+                chrono::Local::now().to_rfc3339()
+            );
+            if let Err(e) = file.write_all(init_log.as_bytes()) {
+                tracing::warn!("写入初始化日志失败: {}", e);
+            } else {
+                tracing::info!("🔄 已手动创建新日志文件: {}", log_file_path.display());
+            }
+        }
+        Err(e) => {
+            tracing::warn!("手动创建日志文件失败: {}", e);
+        }
+    }
+    
+    // 重新激活日志文件写入器的多重策略：
+    // 1. 写入多条不同级别的日志来激活所有写入器
+    tracing::info!("🔄 日志系统重新激活开始...");
+    tracing::warn!("⚠️  日志文件已清理，正在重新初始化写入器");
+    tracing::error!("🔴 测试错误级别日志写入");
+    tracing::debug!("🔧 测试调试级别日志写入");
+    
+    // 2. 强制刷新日志缓冲区（通过创建大量日志）
+    for i in 1..=5 {
+        tracing::info!("📝 重新激活日志系统 - 步骤 {}/5", i);
+        // 短暂延迟让日志系统处理
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    }
+    
+    tracing::info!("✅ 日志系统重新激活完成，新日志文件已创建");
+    
     Ok(())
 }
 
