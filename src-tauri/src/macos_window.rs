@@ -76,70 +76,40 @@ pub fn show_window_on_top(app: &AppHandle) -> Result<(), String> {
         let _ = window.show();
         let _ = window.set_focus();
         
-        // 获取原生的 NSWindow 指针
         if let Ok(ns_window) = window.ns_window() {
             let ns_window = ns_window as id;
             tracing::info!("✅ 成功获取原生窗口句柄: {:p}", ns_window);
             
             unsafe {
-                // 获取当前窗口级别
-                let current_level: i32 = msg_send![ns_window, level];
-                tracing::info!("🔍 当前窗口级别: {}", current_level);
-                
-                // 使用 NSScreenSaverWindowLevel，这个级别足够高，可以覆盖全屏应用
-                let level = NS_SCREEN_SAVER_WINDOW_LEVEL;
-                tracing::info!("🔧 设置窗口级别为 NSScreenSaverWindowLevel: {}", level);
-                
-                // 调用 NSWindow 的 setLevel: 方法
+                // --- 模仿 Electron 的实现 ---
+                // 1. 设置为浮动窗口级别
+                let level = NS_FLOATING_WINDOW_LEVEL;
+                tracing::info!("🔧 [Electron方案] 设置窗口级别为 NSFloatingWindowLevel: {}", level);
                 let _: () = msg_send![ns_window, setLevel: level];
                 
-                // 验证级别是否设置成功
-                let new_level: i32 = msg_send![ns_window, level];
-                tracing::info!("✅ 窗口级别设置完成，新级别: {}", new_level);
-                
-                // --- 新增：设置窗口集合行为，这是覆盖全屏的关键 ---
+                // 2. 设置正确的集合行为
                 let behavior = NS_WINDOW_COLLECTION_BEHAVIOR_CAN_JOIN_ALL_SPACES 
                              | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_AUXILIARY;
+                tracing::info!("🔧 [Electron方案] 设置窗口集合行为: CanJoinAllSpaces | FullScreenAuxiliary");
                 let _: () = msg_send![ns_window, setCollectionBehavior: behavior];
-                tracing::info!("🔧 设置窗口集合行为: CanJoinAllSpaces + FullScreenAuxiliary");
-                
-                // --- 新增：强制激活应用和窗口 ---
-                // 1. 强制将窗口置于所有窗口之上
-                let _: () = msg_send![ns_window, orderFrontRegardless];
-                tracing::info!("🔧 强制置顶窗口 (orderFrontRegardless)");
-                
-                // 2. 激活我们的应用，忽略其它应用
-                let ns_app: id = msg_send![class!(NSApplication), sharedApplication];
-                let _: () = msg_send![ns_app, activateIgnoringOtherApps: YES];
-                tracing::info!("🔧 强制激活应用 (activateIgnoringOtherApps)");
-                // --- 结束新增 ---
-                
-                // 确保窗口在最前面
+
+                // 3. 确保窗口可见并成为主窗口
                 let _: () = msg_send![ns_window, makeKeyAndOrderFront: ns_window];
-                
-                // 设置窗口属性以确保能够覆盖全屏应用
-                let _: () = msg_send![ns_window, setCanHide: false];
-                let _: () = msg_send![ns_window, setIgnoresMouseEvents: false];
-                
-                // 检查最终状态
+
+                // 验证设置
+                let new_level: i32 = msg_send![ns_window, level];
                 let is_visible: bool = msg_send![ns_window, isVisible];
-                let is_key: bool = msg_send![ns_window, isKeyWindow];
-                let is_main: bool = msg_send![ns_window, isMainWindow];
-                
-                tracing::info!("🔍 最终窗口状态 - 级别: {}, 可见: {}, 关键窗口: {}, 主窗口: {}", 
-                              new_level, is_visible, is_key, is_main);
                 
                 if new_level == level && is_visible {
-                    tracing::info!("🎉 窗口成功设置为屏保级别，可以覆盖全屏应用！");
+                    tracing::info!("🎉 [Electron方案] 窗口设置成功，应该可以覆盖全屏应用！");
                 } else {
-                    tracing::warn!("⚠️ 窗口设置可能不完整");
+                    tracing::warn!("⚠️ [Electron方案] 窗口设置可能不完整。级别: {}, 可见: {}", new_level, is_visible);
                 }
             }
         } else {
             return Err("无法获取原生窗口句柄".to_string());
         }
         
-        // 再次确保焦点
         let _ = window.set_focus();
         
         Ok(())
