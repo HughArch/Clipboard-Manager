@@ -297,61 +297,61 @@ const handleSubmit = async () => {
             <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1">
                 <label class="block text-xs font-medium text-gray-700">Max Items</label>
-                <input
-                  v-model.number="settings.max_history_items"
-                  type="number"
-                  min="1"
+            <input
+              v-model.number="settings.max_history_items"
+              type="number"
+              min="1"
                   class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+            />
+          </div>
               <div class="space-y-1">
                 <label class="block text-xs font-medium text-gray-700">Max Days</label>
-                <input
-                  v-model.number="settings.max_history_time"
-                  type="number"
-                  min="1"
+            <input
+              v-model.number="settings.max_history_time"
+              type="number"
+              min="1"
                   class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
-                />
+            />
               </div>
-            </div>
+          </div>
 
-            <!-- 快捷键 -->
+          <!-- 快捷键 -->
             <div class="space-y-1">
               <label class="block text-xs font-medium text-gray-700">Global Hotkey</label>
-              <div class="relative">
-                <input
-                  ref="hotkeyInputRef"
-                  v-model="settings.hotkey"
-                  type="text"
+            <div class="relative">
+              <input
+                ref="hotkeyInputRef"
+                v-model="settings.hotkey"
+                type="text"
                   :placeholder="isRecording ? 'Press keys...' : 'e.g. Ctrl+Shift+V'"
-                  :readonly="isRecording"
+                :readonly="isRecording"
                   class="w-full border rounded-md px-2 py-1.5 pr-14 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
-                  :class="{
-                    'border-blue-400 bg-blue-50': isRecording,
-                    'border-gray-200': !isRecording
-                  }"
-                  @keydown="handleKeyDown"
-                  @keyup="handleKeyUp"
-                  @blur="isRecording && stopRecording()"
-                />
-                <button
-                  type="button"
-                  @click="isRecording ? stopRecording() : startRecording()"
+                :class="{
+                  'border-blue-400 bg-blue-50': isRecording,
+                  'border-gray-200': !isRecording
+                }"
+                @keydown="handleKeyDown"
+                @keyup="handleKeyUp"
+                @blur="isRecording && stopRecording()"
+              />
+              <button
+                type="button"
+                @click="isRecording ? stopRecording() : startRecording()"
                   class="absolute right-1 top-1/2 transform -translate-y-1/2 px-2 py-0.5 text-xs font-medium rounded transition-all duration-200"
-                  :class="{
-                    'bg-red-500 text-white hover:bg-red-600': isRecording,
-                    'bg-blue-500 text-white hover:bg-blue-600': !isRecording
-                  }"
-                >
-                  {{ isRecording ? 'Stop' : 'Record' }}
-                </button>
-              </div>
+                :class="{
+                  'bg-red-500 text-white hover:bg-red-600': isRecording,
+                  'bg-blue-500 text-white hover:bg-blue-600': !isRecording
+                }"
+              >
+                {{ isRecording ? 'Stop' : 'Record' }}
+              </button>
+            </div>
               <p v-if="isRecording && getRecordingPreview()" class="text-xs text-blue-600">
                 Preview: {{ getRecordingPreview() }}
               </p>
-            </div>
+          </div>
 
-            <!-- 开机自启动 -->
+          <!-- 开机自启动 -->
             <label class="flex items-center space-x-2 p-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors duration-200 cursor-pointer">
               <input
                 v-model="settings.auto_start"

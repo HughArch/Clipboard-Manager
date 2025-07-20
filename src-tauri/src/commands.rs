@@ -815,9 +815,6 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
 pub async fn auto_paste() -> Result<(), String> {
     tracing::info!("开始执行智能自动粘贴...");
     
-    // 短暂等待确保窗口已隐藏
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    
     // 在新线程中执行粘贴操作
     let result = tokio::task::spawn_blocking(|| {
         #[cfg(target_os = "macos")]
@@ -857,9 +854,6 @@ pub async fn auto_paste() -> Result<(), String> {
 pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> Result<(), String> {
     tracing::info!("开始执行智能粘贴到应用: {} (bundle: {:?})", app_name, bundle_id);
     
-    // 短暂等待确保窗口已隐藏
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-    
     // 克隆参数用于后续日志输出
     let app_name_for_log = app_name.clone();
     let bundle_id_clone = bundle_id.clone();
@@ -870,7 +864,7 @@ pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> 
         activate_application(&app_name, bundle_id.as_deref())?;
         
         // 短暂等待应用程序激活
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::thread::sleep(std::time::Duration::from_millis(50));
         
         // 然后执行粘贴
         #[cfg(target_os = "macos")]
@@ -1054,23 +1048,23 @@ fn macos_simple_paste() -> Result<(), String> {
         tracing::debug!("🔧 使用改进的时序控制...");
         
         // 1. 按下 Cmd 键并等待系统注册
-        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 150)?;
-        tracing::info!("✅ Cmd键按下，等待150ms确保系统注册");
+        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 10)?;
+        tracing::info!("✅ Cmd键按下，等待10ms确保系统注册");
         
         // 2. 按下 V 键
-        send_with_delay(&EventType::KeyPress(Key::KeyV), 50)?;
+        send_with_delay(&EventType::KeyPress(Key::KeyV), 5)?;
         tracing::info!("✅ V键按下");
         
         // 3. 保持一段时间让组合键生效
-        thread::sleep(Duration::from_millis(100));
-        tracing::debug!("⏳ 保持按键状态100ms");
+        thread::sleep(Duration::from_millis(10));
+        tracing::debug!("⏳ 保持按键状态10ms");
         
         // 4. 释放 V 键
-        send_with_delay(&EventType::KeyRelease(Key::KeyV), 50)?;
+        send_with_delay(&EventType::KeyRelease(Key::KeyV), 5)?;
         tracing::info!("✅ V键释放");
         
         // 5. 释放 Cmd 键
-        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 50)?;
+        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 5)?;
         tracing::info!("✅ Cmd键释放");
         
         Ok(())
@@ -1092,20 +1086,20 @@ fn macos_simple_paste() -> Result<(), String> {
         tracing::debug!("🔧 使用极长延迟策略...");
         
         // 使用更长的延迟
-        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 300)?;
-        tracing::info!("✅ Cmd键按下，等待300ms");
+        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 50)?;
+        tracing::info!("✅ Cmd键按下，等待50ms");
         
-        send_with_delay(&EventType::KeyPress(Key::KeyV), 100)?;
-        tracing::info!("✅ V键按下，等待100ms");
+        send_with_delay(&EventType::KeyPress(Key::KeyV), 20)?;
+        tracing::info!("✅ V键按下，等待20ms");
         
         // 保持更长时间
-        thread::sleep(Duration::from_millis(200));
-        tracing::debug!("⏳ 保持按键状态200ms");
+        thread::sleep(Duration::from_millis(30));
+        tracing::debug!("⏳ 保持按键状态30ms");
         
-        send_with_delay(&EventType::KeyRelease(Key::KeyV), 100)?;
-        tracing::info!("✅ V键释放，等待100ms");
+        send_with_delay(&EventType::KeyRelease(Key::KeyV), 20)?;
+        tracing::info!("✅ V键释放，等待20ms");
         
-        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 100)?;
+        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 20)?;
         tracing::info!("✅ Cmd键释放");
         
         Ok(())
@@ -1135,7 +1129,7 @@ fn windows_auto_paste() -> Result<(), String> {
     tracing::info!("使用 rdev 库执行 Windows 自动粘贴...");
     
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
-        let delay = Duration::from_millis(10);
+        let delay = Duration::from_millis(5);
         simulate(event_type)?;
         thread::sleep(delay);
         Ok(())
@@ -1168,7 +1162,7 @@ fn linux_auto_paste() -> Result<(), String> {
     tracing::info!("使用 rdev 库执行 Linux 自动粘贴...");
     
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
-        let delay = Duration::from_millis(10);
+        let delay = Duration::from_millis(5);
         simulate(event_type)?;
         thread::sleep(delay);
         Ok(())

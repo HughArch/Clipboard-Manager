@@ -475,9 +475,6 @@ const copyToClipboard = async (item: any) => {
       appWindow.hide()
     ])
     
-    // 极短等待，让窗口隐藏生效
-    await new Promise(resolve => setTimeout(resolve, 50))
-    
     // 使用智能粘贴：如果有目标应用信息，就激活目标应用再粘贴
     if (targetApp && targetApp.name && targetApp.name !== 'Unknown' && 
         !targetApp.name.includes('Clipboard') && !targetApp.name.includes('clipboard')) {
@@ -1193,7 +1190,7 @@ onMounted(async () => {
     if (process.env.NODE_ENV === 'development') {
       (window as any).checkDataConsistency = checkDataConsistency
     }
-    
+
     // 定期内存清理
     memoryCleanupInterval = setInterval(() => {
       trimMemoryHistory()
