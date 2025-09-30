@@ -66,6 +66,25 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
     let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN note TEXT")
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
+
+    // 添加分组字段（如果不存在）
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN group_id INTEGER")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
+
+    // 创建分组表
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL DEFAULT '#3B82F6',
+            created_at TEXT NOT NULL,
+            item_count INTEGER NOT NULL DEFAULT 0
+        )"
+    )
+    .execute(&pool)
+    .await
+    .map_err(|e| format!("无法创建分组表: {}", e))?;
     
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
@@ -274,7 +293,13 @@ pub fn run() {
             commands::write_frontend_log,
             // 备注管理命令
             commands::update_item_note,
-            commands::get_item_note
+            commands::get_item_note,
+            // 分组管理命令
+            commands::create_group,
+            commands::get_groups,
+            commands::update_group,
+            commands::delete_group,
+            commands::add_item_to_group
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

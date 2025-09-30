@@ -1688,3 +1688,211 @@ pub async fn get_item_note(app: AppHandle, item_id: i64) -> Result<Option<String
     }
 }
 
+// 分组管理相关命令
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct Group {
+    pub id: i64,
+    pub name: String,
+    pub color: String,
+    pub created_at: String,
+    pub item_count: i64,
+}
+
+#[tauri::command]
+pub async fn create_group(app: AppHandle, name: String, color: String) -> Result<Group, String> {
+    tracing::info!("创建分组: name='{}', color='{}'", name, color);
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        let created_at = chrono::Utc::now().to_rfc3339();
+        
+        // 插入新分组
+        let result = sqlx::query("INSERT INTO groups (name, color, created_at) VALUES (?, ?, ?)")
+            .bind(&name)
+            .bind(&color)
+            .bind(&created_at)
+            .execute(pool)
+            .await;
+            
+        match result {
+            Ok(_) => {
+                // 获取新创建的分组ID
+                let id_result = sqlx::query_as::<_, (i64,)>("SELECT last_insert_rowid()")
+                    .fetch_one(pool)
+                    .await;
+                    
+                match id_result {
+                    Ok((id,)) => {
+                        tracing::info!("✅ 分组创建成功: ID={}", id);
+                        Ok(Group {
+                            id,
+                            name,
+                            color,
+                            created_at,
+                            item_count: 0,
+                        })
+                    }
+                    Err(e) => {
+                        let error_msg = format!("获取新分组ID失败: {}", e);
+                        tracing::error!("❌ 创建分组失败: {}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+            Err(e) => {
+                let error_msg = format!("插入分组失败: {}", e);
+                tracing::error!("❌ 创建分组失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 创建分组失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn get_groups(app: AppHandle) -> Result<Vec<Group>, String> {
+    tracing::debug!("获取所有分组");
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        let result = sqlx::query_as::<_, (i64, String, String, String, i64)>(
+            "SELECT id, name, color, created_at, 
+                    (SELECT COUNT(*) FROM clipboard_history WHERE group_id = groups.id) as item_count 
+             FROM groups ORDER BY created_at DESC"
+        )
+        .fetch_all(pool)
+        .await;
+        
+        match result {
+            Ok(rows) => {
+                let groups: Vec<Group> = rows.into_iter().map(|(id, name, color, created_at, item_count)| {
+                    Group { id, name, color, created_at, item_count }
+                }).collect();
+                tracing::debug!("✅ 获取分组成功: {} 个分组", groups.len());
+                Ok(groups)
+            }
+            Err(e) => {
+                let error_msg = format!("查询分组失败: {}", e);
+                tracing::error!("❌ 获取分组失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 获取分组失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn update_group(app: AppHandle, id: i64, name: String, color: String) -> Result<(), String> {
+    tracing::info!("更新分组: ID={}, name='{}', color='{}'", id, name, color);
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        let result = sqlx::query("UPDATE groups SET name = ?, color = ? WHERE id = ?")
+            .bind(&name)
+            .bind(&color)
+            .bind(id)
+            .execute(pool)
+            .await;
+            
+        match result {
+            Ok(_) => {
+                tracing::info!("✅ 分组更新成功: ID={}", id);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("更新分组失败: {}", e);
+                tracing::error!("❌ 更新分组失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 更新分组失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn delete_group(app: AppHandle, id: i64) -> Result<(), String> {
+    tracing::info!("删除分组: ID={}", id);
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        // 先将该分组下的所有条目的group_id设为NULL
+        let update_result = sqlx::query("UPDATE clipboard_history SET group_id = NULL WHERE group_id = ?")
+            .bind(id)
+            .execute(pool)
+            .await;
+            
+        if let Err(e) = update_result {
+            let error_msg = format!("清除分组关联失败: {}", e);
+            tracing::error!("❌ 删除分组失败: {}", error_msg);
+            return Err(error_msg);
+        }
+        
+        // 删除分组
+        let result = sqlx::query("DELETE FROM groups WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await;
+            
+        match result {
+            Ok(_) => {
+                tracing::info!("✅ 分组删除成功: ID={}", id);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("删除分组失败: {}", e);
+                tracing::error!("❌ 删除分组失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 删除分组失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn add_item_to_group(app: AppHandle, item_id: i64, group_id: Option<i64>) -> Result<(), String> {
+    tracing::info!("设置条目分组: item_id={}, group_id={:?}", item_id, group_id);
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        let result = sqlx::query("UPDATE clipboard_history SET group_id = ? WHERE id = ?")
+            .bind(group_id)
+            .bind(item_id)
+            .execute(pool)
+            .await;
+            
+        match result {
+            Ok(_) => {
+                tracing::info!("✅ 条目分组设置成功: item_id={}", item_id);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("设置条目分组失败: {}", e);
+                tracing::error!("❌ 设置条目分组失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 设置条目分组失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+

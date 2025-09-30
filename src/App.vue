@@ -4,6 +4,7 @@ import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon, TrashIcon } from '@heroic
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
+import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
 import { useImageCache } from './composables/useImageCache'
@@ -116,6 +117,35 @@ const contextMenuItem = ref<any>(null) // 右键菜单对应的条目
 
 // 备注输入框引用
 const noteInputRef = ref<HTMLInputElement | null>(null)
+
+// 分组管理相关状态
+const showGroupManager = ref(false) // 是否显示分组管理器
+const groups = ref<Group[]>([]) // 分组列表
+const showGroupForm = ref(false) // 是否显示分组表单
+const editingGroup = ref<Group | null>(null) // 正在编辑的分组
+const groupForm = ref({ name: '', color: '#3B82F6' }) // 分组表单数据
+const showGroupSelector = ref(false) // 是否显示分组选择器
+const selectedItemForGroup = ref<any>(null) // 要加入分组的条目
+
+// 确认对话框相关状态
+const showConfirmDialog = ref(false) // 是否显示确认对话框
+const confirmDialog = ref({
+  title: '',
+  message: '',
+  confirmText: '确定',
+  cancelText: '取消',
+  type: 'warning' as 'warning' | 'danger' | 'info',
+  onConfirm: () => {}
+})
+
+// TypeScript 类型定义
+interface Group {
+  id: number
+  name: string
+  color: string
+  created_at: string
+  item_count: number
+}
 const allHistoryCache = shallowRef<any[]>([]) // 缓存全部数据
 
 // 前一个活动应用程序信息（用于智能粘贴）
@@ -422,55 +452,70 @@ const toggleFavorite = async (item: any) => {
 }
 
 // 删除条目功能
-const deleteItem = async (item: any) => {
-  try {
-    // 从数据库删除
-    await db!.execute(
-      'DELETE FROM clipboard_history WHERE id = ?',
-      [item.id]
-    )
+const deleteItem = (item: any) => {
+  const contentPreview = item.type === 'text' 
+    ? (item.content.length > 20 ? item.content.substring(0, 20) + '...' : item.content)
+    : '图片'
     
-    // 从内存中移除
-    const index = clipboardHistory.value.findIndex(i => i.id === item.id)
-    if (index !== -1) {
-      clipboardHistory.value.splice(index, 1)
-      triggerRef(clipboardHistory) // 触发 shallowRef 更新
-    }
-    
-    // 从全部数据缓存中移除
-    if (allDataLoaded.value) {
-      const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
-      if (cacheIndex !== -1) {
-        allHistoryCache.value.splice(cacheIndex, 1)
-        triggerRef(allHistoryCache)
-        logger.debug('从全部数据缓存中移除条目', { itemId: item.id })
+  showConfirm({
+    title: '删除条目',
+    message: `确定删除这个条目吗？\n内容: ${contentPreview}\n\n删除后无法恢复。`,
+    confirmText: '删除',
+    cancelText: '取消',
+    type: 'danger',
+    onConfirm: async () => {
+      try {
+        // 从数据库删除
+        await db!.execute(
+          'DELETE FROM clipboard_history WHERE id = ?',
+          [item.id]
+        )
+        
+        // 从内存中移除
+        const index = clipboardHistory.value.findIndex(i => i.id === item.id)
+        if (index !== -1) {
+          clipboardHistory.value.splice(index, 1)
+          triggerRef(clipboardHistory) // 触发 shallowRef 更新
+        }
+        
+        // 从全部数据缓存中移除
+        if (allDataLoaded.value) {
+          const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
+          if (cacheIndex !== -1) {
+            allHistoryCache.value.splice(cacheIndex, 1)
+            triggerRef(allHistoryCache)
+            logger.debug('从全部数据缓存中移除条目', { itemId: item.id })
+          }
+        }
+        
+        // 如果在搜索模式下，也从原始数据中移除
+        if (isInSearchMode) {
+          const originalIndex = originalClipboardHistory.findIndex(i => i.id === item.id)
+          if (originalIndex !== -1) {
+            originalClipboardHistory.splice(originalIndex, 1)
+          }
+        }
+        
+        // 清理缩略图缓存
+        const itemKey = item.id.toString()
+        if (thumbnailCache.value.has(itemKey)) {
+          thumbnailCache.value.delete(itemKey)
+          triggerRef(thumbnailCache)
+        }
+        
+        // 如果当前选中的项是被删除的项，清除选中状态
+        if (selectedItem.value?.id === item.id) {
+          selectedItem.value = null
+        }
+        
+        showSuccess('条目删除成功')
+        logger.info('条目删除成功', { itemId: item.id, type: item.type })
+      } catch (error) {
+        showError('删除条目失败: ' + String(error))
+        logger.error('删除条目失败', { itemId: item.id, error: String(error) })
       }
     }
-    
-    // 如果在搜索模式下，也从原始数据中移除
-    if (isInSearchMode) {
-      const originalIndex = originalClipboardHistory.findIndex(i => i.id === item.id)
-      if (originalIndex !== -1) {
-        originalClipboardHistory.splice(originalIndex, 1)
-      }
-    }
-    
-    // 清理缩略图缓存
-    const itemKey = item.id.toString()
-    if (thumbnailCache.value.has(itemKey)) {
-      thumbnailCache.value.delete(itemKey)
-      triggerRef(thumbnailCache)
-    }
-    
-    // 如果当前选中的项是被删除的项，清除选中状态
-    if (selectedItem.value?.id === item.id) {
-      selectedItem.value = null
-    }
-    
-    logger.info('条目删除成功', { itemId: item.id, type: item.type })
-  } catch (error) {
-    logger.error('删除条目失败', { itemId: item.id, error: String(error) })
-  }
+  })
 }
 
 // 备注管理功能
@@ -553,6 +598,177 @@ const saveNote = async () => {
   }
 }
 
+// 分组管理相关函数
+
+// 加载分组列表
+const loadGroups = async () => {
+  try {
+    const result = await invoke('get_groups') as Group[]
+    groups.value = result
+    logger.debug('加载分组列表成功', { count: result.length })
+  } catch (error) {
+    logger.error('加载分组列表失败', { error: String(error) })
+    showError('加载分组列表失败: ' + String(error))
+  }
+}
+
+// 创建或更新分组
+const saveGroup = async () => {
+  try {
+    const { name, color } = groupForm.value
+    if (!name.trim()) {
+      showError('分组名称不能为空')
+      return
+    }
+
+    if (editingGroup.value) {
+      // 更新分组
+      await invoke('update_group', {
+        id: editingGroup.value.id,
+        name: name.trim(),
+        color
+      })
+      logger.info('分组更新成功', { id: editingGroup.value.id, name: name.trim() })
+    } else {
+      // 创建分组
+      const newGroup = await invoke('create_group', {
+        name: name.trim(),
+        color
+      }) as Group
+      logger.info('分组创建成功', { id: newGroup.id, name: newGroup.name })
+    }
+
+    await loadGroups() // 重新加载分组列表
+    closeGroupForm()
+    showSuccess(editingGroup.value ? '分组更新成功' : '分组创建成功')
+  } catch (error) {
+    logger.error('保存分组失败', { error: String(error) })
+    showError('保存分组失败: ' + String(error))
+  }
+}
+
+// 删除分组
+const deleteGroup = (group: Group) => {
+  showConfirm({
+    title: '删除分组',
+    message: `确定删除分组 "${group.name}" 吗？\n该分组下的所有条目将移出分组。`,
+    confirmText: '删除',
+    cancelText: '取消',
+    type: 'danger',
+    onConfirm: async () => {
+      try {
+        await invoke('delete_group', { id: group.id })
+        await loadGroups()
+        logger.info('分组删除成功', { id: group.id, name: group.name })
+        showSuccess('分组删除成功')
+      } catch (error) {
+        logger.error('删除分组失败', { error: String(error) })
+        showError('删除分组失败: ' + String(error))
+      }
+    }
+  })
+}
+
+// 打开分组表单
+const openGroupForm = (group?: Group) => {
+  editingGroup.value = group || null
+  groupForm.value = {
+    name: group?.name || '',
+    color: group?.color || '#3B82F6'
+  }
+  showGroupForm.value = true
+}
+
+// 关闭分组表单
+const closeGroupForm = () => {
+  showGroupForm.value = false
+  editingGroup.value = null
+  groupForm.value = { name: '', color: '#3B82F6' }
+}
+
+// 打开分组选择器
+const openGroupSelector = (item: any) => {
+  selectedItemForGroup.value = item
+  showGroupSelector.value = true
+  loadGroups() // 确保分组列表是最新的
+}
+
+// 将条目加入分组
+const addItemToGroup = async (groupId?: number) => {
+  if (!selectedItemForGroup.value) return
+
+  try {
+    await invoke('add_item_to_group', {
+      itemId: selectedItemForGroup.value.id,
+      groupId: groupId || null
+    })
+
+    // 更新内存中的条目
+    const item = selectedItemForGroup.value
+    item.groupId = groupId || null
+
+    // 更新缓存中的数据
+    updateItemInCache(item)
+
+    await loadGroups() // 重新加载分组列表以更新条目计数
+    closeGroupSelector()
+    
+    const actionText = groupId ? '加入分组成功' : '移出分组成功'
+    showSuccess(actionText)
+    logger.info('条目分组设置成功', { itemId: item.id, groupId })
+  } catch (error) {
+    logger.error('设置条目分组失败', { error: String(error) })
+    showError('设置条目分组失败: ' + String(error))
+  }
+}
+
+// 关闭分组选择器
+const closeGroupSelector = () => {
+  showGroupSelector.value = false
+  selectedItemForGroup.value = null
+}
+
+// 更新缓存中的条目数据
+const updateItemInCache = (updatedItem: any) => {
+  // 更新主列表
+  const mainIndex = clipboardHistory.value.findIndex(item => item.id === updatedItem.id)
+  if (mainIndex !== -1) {
+    clipboardHistory.value[mainIndex] = { ...clipboardHistory.value[mainIndex], ...updatedItem }
+    triggerRef(clipboardHistory)
+  }
+
+  // 更新缓存
+  const cacheIndex = allHistoryCache.value.findIndex(item => item.id === updatedItem.id)
+  if (cacheIndex !== -1) {
+    allHistoryCache.value[cacheIndex] = { ...allHistoryCache.value[cacheIndex], ...updatedItem }
+    triggerRef(allHistoryCache)
+  }
+}
+
+// 确认对话框辅助函数
+const showConfirm = (options: {
+  title: string
+  message: string
+  confirmText?: string
+  cancelText?: string
+  type?: 'warning' | 'danger' | 'info'
+  onConfirm: () => void
+}) => {
+  confirmDialog.value = {
+    title: options.title,
+    message: options.message,
+    confirmText: options.confirmText || '确定',
+    cancelText: options.cancelText || '取消',
+    type: options.type || 'warning',
+    onConfirm: options.onConfirm
+  }
+  showConfirmDialog.value = true
+}
+
+const handleConfirmDialogConfirm = () => {
+  confirmDialog.value.onConfirm()
+}
+
 // 右键菜单管理功能
 const showItemContextMenu = (event: MouseEvent, item: any) => {
   event.preventDefault()
@@ -583,6 +799,9 @@ const handleContextMenuAction = (action: string) => {
   switch (action) {
     case 'note':
       openNoteDialog(item)
+      break
+    case 'group':
+      openGroupSelector(item)
       break
     case 'favorite':
       toggleFavorite(item)
@@ -1619,6 +1838,9 @@ onMounted(async () => {
     
     // 初始加载最近的历史记录
     await loadRecentHistory()
+    
+    // 初始加载分组数据
+    await loadGroups()
 
     // 启动新的剪贴板监听器（使用tauri-plugin-clipboard）
     unlistenClipboard = await startListening()
@@ -2710,6 +2932,15 @@ const checkDataConsistency = () => {
               </span>
               <button 
                 class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200"
+                @click="showGroupManager = !showGroupManager"
+                title="分组管理"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+                </svg>
+              </button>
+              <button 
+                class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200"
                 @click="showSettings = !showSettings"
                 title="设置"
               >
@@ -2759,6 +2990,230 @@ const checkDataConsistency = () => {
       </div>
     </div>
 
+    <!-- 分组管理模态框 -->
+    <div 
+      v-if="showGroupManager"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      @click="showGroupManager = false"
+    >
+      <div 
+        class="bg-white rounded-lg shadow-xl w-[500px] max-w-[90vw] max-h-[80vh] overflow-hidden"
+        @click.stop
+      >
+        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+          <h2 class="text-lg font-semibold text-gray-900">分组管理</h2>
+          <button
+            @click="showGroupManager = false"
+            class="text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="p-4 max-h-[60vh] overflow-y-auto">
+          <!-- 添加分组按钮 -->
+          <button
+            @click="openGroupForm()"
+            class="w-full mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            <span>新建分组</span>
+          </button>
+          
+          <!-- 分组列表 -->
+          <div v-if="groups.length === 0" class="text-center py-8 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+            </svg>
+            <p>暂无分组</p>
+            <p class="text-sm">点击上方按钮创建第一个分组</p>
+          </div>
+          
+          <div v-else class="space-y-3">
+            <div
+              v-for="group in groups"
+              :key="group.id"
+              class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+            >
+              <div class="flex items-center space-x-3">
+                <div 
+                  class="w-4 h-4 rounded-full"
+                  :style="{ backgroundColor: group.color }"
+                ></div>
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900">{{ group.name }}</h3>
+                  <p class="text-sm text-gray-500">{{ group.item_count }} 个条目</p>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button
+                  @click="openGroupForm(group)"
+                  class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  title="编辑分组"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                  </svg>
+                </button>
+                <button
+                  @click="deleteGroup(group)"
+                  class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  title="删除分组"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分组表单模态框 -->
+    <div 
+      v-if="showGroupForm"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      @click="closeGroupForm"
+    >
+      <div 
+        class="bg-white rounded-lg shadow-xl w-[400px] max-w-[90vw]"
+        @click.stop
+      >
+        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+          <h2 class="text-lg font-semibold text-gray-900">
+            {{ editingGroup ? '编辑分组' : '新建分组' }}
+          </h2>
+          <button
+            @click="closeGroupForm"
+            class="text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="p-4 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">分组名称</label>
+            <input
+              v-model="groupForm.name"
+              type="text"
+              placeholder="请输入分组名称"
+              class="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              @keydown.enter="saveGroup"
+            />
+          </div>
+          
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">分组颜色</label>
+            <div class="flex items-center space-x-3">
+              <input
+                v-model="groupForm.color"
+                type="color"
+                class="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+              />
+              <div class="flex space-x-2">
+                <button
+                  v-for="color in ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316']"
+                  :key="color"
+                  @click="groupForm.color = color"
+                  class="w-6 h-6 rounded-full border-2 transition-all"
+                  :style="{ backgroundColor: color }"
+                  :class="groupForm.color === color ? 'border-gray-800 scale-110' : 'border-gray-300'"
+                ></button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flex justify-end space-x-2 p-3 border-t border-gray-200">
+          <button
+            @click="closeGroupForm"
+            class="px-3 py-1.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+          >
+            取消
+          </button>
+          <button
+            @click="saveGroup"
+            class="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+          >
+            {{ editingGroup ? '更新' : '创建' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分组选择器模态框 -->
+    <div 
+      v-if="showGroupSelector"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      @click="closeGroupSelector"
+    >
+      <div 
+        class="bg-white rounded-lg shadow-xl w-[350px] max-w-[90vw]"
+        @click.stop
+      >
+        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+          <h2 class="text-lg font-semibold text-gray-900">选择分组</h2>
+          <button
+            @click="closeGroupSelector"
+            class="text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div class="p-4 max-h-[60vh] overflow-y-auto">
+          <!-- 移出分组选项 -->
+          <button
+            @click="addItemToGroup()"
+            class="w-full mb-3 p-3 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
+          >
+            <div class="w-4 h-4 border-2 border-gray-400 rounded-full"></div>
+            <span class="text-gray-700">移出分组</span>
+          </button>
+          
+          <!-- 分组列表 -->
+          <div v-if="groups.length === 0" class="text-center py-6 text-gray-500">
+            <p>暂无分组</p>
+            <button
+              @click="closeGroupSelector(); showGroupManager = true"
+              class="mt-2 text-blue-600 hover:text-blue-700 text-sm"
+            >
+              去创建分组
+            </button>
+          </div>
+          
+          <div v-else class="space-y-2">
+            <button
+              v-for="group in groups"
+              :key="group.id"
+              @click="addItemToGroup(group.id)"
+              class="w-full p-3 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
+            >
+              <div 
+                class="w-4 h-4 rounded-full"
+                :style="{ backgroundColor: group.color }"
+              ></div>
+              <div>
+                <div class="text-sm font-medium text-gray-900">{{ group.name }}</div>
+                <div class="text-sm text-gray-500">{{ group.item_count }} 个条目</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings Modal -->
     <Settings 
       v-model:show="showSettings" 
@@ -2783,6 +3238,12 @@ const checkDataConsistency = () => {
         class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
       >
         备注
+      </button>
+      <button
+        @click="handleContextMenuAction('group')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+      >
+        分组
       </button>
       <button
         @click="handleContextMenuAction('copy')"
@@ -2847,6 +3308,17 @@ const checkDataConsistency = () => {
     <Toast 
       :messages="toastMessages" 
       @remove="removeToast" 
+    />
+    
+    <!-- 确认对话框 -->
+    <ConfirmDialog
+      v-model:show="showConfirmDialog"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :cancel-text="confirmDialog.cancelText"
+      :type="confirmDialog.type"
+      @confirm="handleConfirmDialogConfirm"
     />
   </div>
 </template>

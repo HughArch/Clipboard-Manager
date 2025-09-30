@@ -25,7 +25,12 @@ fn main() {
                 "open_log_folder",
                 "delete_all_logs",
                 "update_item_note",
-                "get_item_note"
+                "get_item_note",
+                "create_group",
+                "get_groups",
+                "update_group",
+                "delete_group",
+                "add_item_to_group"
             ]))
     ).unwrap();
 }

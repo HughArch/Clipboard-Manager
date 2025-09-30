@@ -179,6 +179,11 @@
     "clipboard:allow-is-monitor-running",
     "clipboard:allow-available-types",
     "clipboard:allow-clear",
-    "clipboard:monitor-all"
+    "clipboard:monitor-all",
+    "allow-create-group",
+    "allow-get-groups",
+    "allow-update-group",
+    "allow-delete-group",
+    "allow-add-item-to-group"
   ]
 } 
