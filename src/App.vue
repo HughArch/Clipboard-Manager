@@ -269,10 +269,19 @@ const filteredHistory = computed(() => {
     ? clipboardHistory.value 
     : clipboardHistory.value.filter(item => item.isFavorite === true)
   
-  // 应用搜索过滤
-  const result = items.filter(item => 
-    item.content?.toLowerCase().includes(query) || false
-  )
+  // 应用搜索过滤 - 只搜索文本类型的内容
+  const result = items.filter(item => {
+    // 如果没有搜索查询，返回所有项目
+    if (!query) return true
+    
+    // 只对文本类型的内容进行搜索
+    if (item.type === 'text') {
+      return item.content?.toLowerCase().includes(query) || false
+    }
+    
+    // 非文本类型（如图片）不参与搜索，直接排除
+    return false
+  })
   
   return result
 })
@@ -673,11 +682,11 @@ const searchFromDatabase = async () => {
     const query = searchQuery.value.toLowerCase()
     const isFavoritesTab = selectedTabIndex.value === 1
     
-    // 构建SQL查询
+    // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
       FROM clipboard_history 
-      WHERE LOWER(content) LIKE ?
+      WHERE type = 'text' AND LOWER(content) LIKE ?
     `
     
     const params = [`%${query}%`]
