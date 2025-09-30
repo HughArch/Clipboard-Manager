@@ -33,7 +33,9 @@ class ThumbnailCache {
     } else if (this.cache.size >= this.maxSize) {
       // 删除最久未使用的项
       const firstKey = this.cache.keys().next().value
-      this.cache.delete(firstKey)
+      if (firstKey) {
+        this.cache.delete(firstKey)
+      }
     }
     this.cache.set(key, value)
   }

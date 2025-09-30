@@ -7,7 +7,7 @@ import Toast from './components/Toast.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
 import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
-import { useImageCache } from './composables/useImageCache'
+// import { useImageCache } from './composables/useImageCache' // 暂时注释掉未使用的导入
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -33,7 +33,7 @@ import {
 const { toastMessages, removeToast, showSuccess, showError, showWarning, showInfo } = useToast()
 
 // 图片缓存系统
-const imageCache = useImageCache()
+// const imageCache = useImageCache() // 暂时注释掉未使用的变量
 
 // 定义设置类型
 interface AppSettings {
@@ -1125,14 +1125,14 @@ const moveItemToFront = async (itemId: number) => {
 const generatingThumbnails = ref(new Set<string>())
 
 // 可视区域计算
-const calculateVisibleItems = (scrollTop: number, containerHeight: number, itemHeight: number) => {
-  const startIndex = Math.floor(scrollTop / itemHeight)
-  const endIndex = Math.min(
-    startIndex + Math.ceil(containerHeight / itemHeight) + 5, // 额外渲柕 5 个项目
-    filteredHistory.value.length - 1
-  )
-  return { startIndex: Math.max(0, startIndex - 2), endIndex } // 预渲柕 2 个项目
-}
+// const calculateVisibleItems = (scrollTop: number, containerHeight: number, itemHeight: number) => {
+//   const startIndex = Math.floor(scrollTop / itemHeight)
+//   const endIndex = Math.min(
+//     startIndex + Math.ceil(containerHeight / itemHeight) + 5, // 额外渲柕 5 个项目
+//     filteredHistory.value.length - 1
+//   )
+//   return { startIndex: Math.max(0, startIndex - 2), endIndex } // 预渲柕 2 个项目
+// }
 
 // 仅为新复制的图片生成缩略图
 const generateThumbnailForNewItem = async (item: any) => {
@@ -1196,27 +1196,27 @@ const generateThumbnailForNewItem = async (item: any) => {
 }
 
 // 检查项目是否在可视区域内
-const isItemVisible = (itemIndex: number, scrollContainer?: HTMLElement): boolean => {
-  if (!scrollContainer) return true
-  
-  const itemHeight = 80 // 估算的项目高度
-  const itemTop = itemIndex * itemHeight
-  const itemBottom = itemTop + itemHeight
-  
-  const containerTop = scrollContainer.scrollTop
-  const containerBottom = containerTop + scrollContainer.clientHeight
-  
-  // 添加一些缓冲区域
-  const buffer = 200
-  return itemBottom >= (containerTop - buffer) && itemTop <= (containerBottom + buffer)
-}
+// const isItemVisible = (itemIndex: number, scrollContainer?: HTMLElement): boolean => {
+//   if (!scrollContainer) return true
+//   
+//   const itemHeight = 80 // 估算的项目高度
+//   const itemTop = itemIndex * itemHeight
+//   const itemBottom = itemTop + itemHeight
+//   
+//   const containerTop = scrollContainer.scrollTop
+//   const containerBottom = containerTop + scrollContainer.clientHeight
+//   
+//   // 添加一些缓冲区域
+//   const buffer = 200
+//   return itemBottom >= (containerTop - buffer) && itemTop <= (containerBottom + buffer)
+// }
 
 // 统计缩略图调用次数
 let thumbnailCallCount = 0
 let lastThumbnailLogTime = 0
 
 // 获取缩略图（同步，用于模板）
-const getThumbnailSync = (item: any, itemIndex?: number): string | undefined => {
+const getThumbnailSync = (item: any): string | undefined => {
   if (item.type !== 'image') {
     return undefined
   }
