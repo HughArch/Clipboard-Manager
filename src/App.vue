@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
-import { Tab, TabList, TabGroup, TabPanels, TabPanel } from '@headlessui/vue'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
 import { useToast } from './composables/useToast'
@@ -500,7 +499,7 @@ const copyToClipboard = async (item: any) => {
   }
 }
 
-const handleKeyDown = (e: KeyboardEvent) => {
+const handleKeyDown = async (e: KeyboardEvent) => {
   // 防止 Alt 键触发系统菜单
   if (e.altKey) {
     e.preventDefault()
@@ -517,19 +516,13 @@ const handleKeyDown = (e: KeyboardEvent) => {
   // 处理标签页切换（左右箭头键）
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    // 程序化点击 All 标签
-    const allTab = document.querySelector('[role="tablist"] button:first-child') as HTMLButtonElement
-    if (allTab) {
-      allTab.click()
-    }
+    // 切换到 All 标签
+    await switchTab(0)
     return
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    // 程序化点击 Favorites 标签
-    const favoritesTab = document.querySelector('[role="tablist"] button:last-child') as HTMLButtonElement
-    if (favoritesTab) {
-      favoritesTab.click()
-    }
+    // 切换到 Favorites 标签
+    await switchTab(1)
     return
   }
 
@@ -587,7 +580,10 @@ const handleDoubleClick = (item: any) => {
   copyToClipboard(item)
 }
 
-const handleTabChange = async (index: number) => {
+// 处理按钮切换
+const switchTab = async (index: number) => {
+  if (selectedTabIndex.value === index) return // 如果已经是当前tab，不需要切换
+  
   selectedTabIndex.value = index
   // 重置搜索和选中状态
   searchQuery.value = ''
@@ -607,6 +603,11 @@ const handleTabChange = async (index: number) => {
   
   // 切换标签页后自动聚焦搜索框
   focusSearchInput()
+}
+
+// 保留原有的handleTabChange函数以兼容现有代码
+const handleTabChange = async (index: number) => {
+  await switchTab(index)
 }
 
 // 监听选中项变化，当选中图片时加载完整图片
@@ -1470,49 +1471,47 @@ const resetDatabase = async () => {
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
       <div class="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
-        <!-- Tabs -->
-        <TabGroup v-model="selectedTabIndex" as="div" class="flex flex-col h-full" @change="handleTabChange">
+        <!-- Navigation Buttons -->
+        <div class="flex flex-col h-full">
           <div class="flex-shrink-0 bg-gradient-to-r from-gray-50 to-gray-100 px-3 py-1 border-b border-gray-200">
-            <TabList class="flex items-center justify-center space-x-0.5 bg-gray-100 p-0.5 rounded-lg shadow-inner max-w-[200px] mx-auto">
-              <!-- All 标签页 -->
-              <Tab v-slot="{ selected }" as="template">
-                <button
-                  class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
-                  :class="[
-                    selected
-                      ? 'text-white bg-gradient-to-r from-blue-500 to-blue-600 shadow-md shadow-blue-500/20'
-                      : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
-                  ]"
-                >
-                  <span class="flex items-center justify-center space-x-1.5">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                    </svg>
-                    <span>All</span>
-                  </span>
-                </button>
-              </Tab>
-              <!-- Favorites 标签页 -->
-              <Tab v-slot="{ selected }" as="template">
-                <button
-                  class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
-                  :class="[
-                    selected
-                      ? 'text-white bg-gradient-to-r from-amber-500 to-yellow-500 shadow-md shadow-amber-500/20'
-                      : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
-                  ]"
-                >
-                  <span class="flex items-center justify-center space-x-1.5">
-                    <StarIcon class="w-3.5 h-3.5" />
-                    <span>Favorites</span>
-                  </span>
-                </button>
-              </Tab>
-            </TabList>
+            <div class="flex items-center justify-center space-x-0.5 bg-gray-100 p-0.5 rounded-lg shadow-inner max-w-[200px] mx-auto">
+              <!-- All 按钮 -->
+              <button
+                @click="switchTab(0)"
+                class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
+                :class="[
+                  selectedTabIndex === 0
+                    ? 'text-white bg-gradient-to-r from-blue-500 to-blue-600 shadow-md shadow-blue-500/20'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
+                ]"
+              >
+                <span class="flex items-center justify-center space-x-1.5">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+                  </svg>
+                  <span>All</span>
+                </span>
+              </button>
+              <!-- Favorites 按钮 -->
+              <button
+                @click="switchTab(1)"
+                class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
+                :class="[
+                  selectedTabIndex === 1
+                    ? 'text-white bg-gradient-to-r from-amber-500 to-yellow-500 shadow-md shadow-amber-500/20'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
+                ]"
+              >
+                <span class="flex items-center justify-center space-x-1.5">
+                  <StarIcon class="w-3.5 h-3.5" />
+                  <span>Favorites</span>
+                </span>
+              </button>
+            </div>
           </div>
 
-          <TabPanels class="flex-1 min-h-0">
-            <TabPanel class="h-full flex flex-col min-h-0">
+          <div class="flex-1 min-h-0">
+            <div v-show="selectedTabIndex === 0" class="h-full flex flex-col min-h-0">
               <!-- Search -->
               <div class="p-3 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
@@ -1622,9 +1621,9 @@ const resetDatabase = async () => {
                   </div>
                 </div>
               </div>
-            </TabPanel>
+            </div>
 
-            <TabPanel class="h-full flex flex-col min-h-0">
+            <div v-show="selectedTabIndex === 1" class="h-full flex flex-col min-h-0">
               <!-- Search -->
               <div class="p-3 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
@@ -1735,9 +1734,9 @@ const resetDatabase = async () => {
                   </div>
                 </div>
               </div>
-            </TabPanel>
-          </TabPanels>
-        </TabGroup>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Right Content -->
@@ -1969,14 +1968,14 @@ img[alt$="sourceAppName"] {
   flex-shrink: 0;
 }
 
-/* 现代化标签页样式 */
-.modern-tab-container {
+/* 按钮切换样式 */
+.nav-button-container {
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   border-bottom: 1px solid #e2e8f0;
   box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.1);
 }
 
-.modern-tab-list {
+.nav-button-list {
   background: rgba(226, 232, 240, 0.6);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(226, 232, 240, 0.8);
@@ -1986,142 +1985,61 @@ img[alt$="sourceAppName"] {
     inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
 }
 
-.modern-tab-button {
+.nav-button {
   position: relative;
   overflow: hidden;
+  transition: all 0.2s ease-out;
 }
 
-.modern-tab-button::before {
+.nav-button:hover::before {
   content: '';
   position: absolute;
   top: 0;
-  left: -100%;
+  left: 0;
   width: 100%;
   height: 100%;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
-  transition: left 0.6s;
+  animation: shimmer 0.6s ease-out;
 }
 
-.modern-tab-button:hover::before {
-  left: 100%;
-}
-
-/* 选中状态的简洁效果 */
-.tab-selected-all {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-  box-shadow: 
-    0 4px 6px -1px rgba(59, 130, 246, 0.3),
-    0 2px 4px -1px rgba(59, 130, 246, 0.2),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-}
-
-.tab-selected-favorites {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-  box-shadow: 
-    0 4px 6px -1px rgba(245, 158, 11, 0.3),
-    0 2px 4px -1px rgba(245, 158, 11, 0.2),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 /* 按钮文字和图标样式 */
-.tab-content {
+.nav-button-content {
   position: relative;
   z-index: 10;
   font-weight: 600;
   letter-spacing: 0.025em;
 }
 
-/* 悬停状态简洁 */
-.modern-tab-button:not(.tab-selected-all):not(.tab-selected-favorites):hover {
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow: 
-    0 2px 4px -1px rgba(0, 0, 0, 0.1),
-    0 1px 2px -1px rgba(0, 0, 0, 0.06);
-}
-
-/* 焦点状态 */
-.modern-tab-button:focus {
-  outline: none;
-  ring: 2px;
-  ring-color: #3b82f6;
-  ring-offset: 2px;
-}
-
-
-
 /* 响应式优化 */
 @media (max-width: 640px) {
-  .modern-tab-list {
+  .nav-button-list {
     max-width: 180px;
   }
   
-  .modern-tab-button {
+  .nav-button {
     min-width: 70px;
     padding: 0.375rem 0.75rem;
     font-size: 0.875rem;
   }
 }
 
-/* 紧凑型标签页样式 */
-.compact-tab-container {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  padding: 0.5rem 0.75rem;
-}
-
-.compact-tab-list {
-  background: rgba(226, 232, 240, 0.7);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(226, 232, 240, 0.6);
-  border-radius: 0.5rem;
-  padding: 0.125rem;
-  box-shadow: 
-    0 2px 4px -1px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-}
-
-.compact-tab-button {
-  padding: 0.375rem 1rem;
-  min-width: 80px;
-  font-weight: 500;
-  border-radius: 0.375rem;
-}
-
-/* 选中状态的简洁效果 */
-.compact-selected {
-  box-shadow: 
-    0 2px 4px -1px rgba(59, 130, 246, 0.25),
-    0 1px 2px -1px rgba(59, 130, 246, 0.15);
-}
-
-/* 图标和文字间距优化 */
-.compact-tab-content {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.375rem;
-}
-
-.compact-tab-icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  flex-shrink: 0;
-}
-
-/* 高分辨率屏幕优化 */
-@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx) {
-  .modern-tab-list {
-    border-width: 0.5px;
-  }
-}
-
-/* 暗色模式适配预留 */
+/* 暗色模式适配 */
 @media (prefers-color-scheme: dark) {
-  .modern-tab-container {
+  .nav-button-container {
     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
     border-bottom-color: #334155;
   }
   
-  .modern-tab-list {
+  .nav-button-list {
     background: rgba(51, 65, 85, 0.6);
     border-color: rgba(51, 65, 85, 0.8);
   }
