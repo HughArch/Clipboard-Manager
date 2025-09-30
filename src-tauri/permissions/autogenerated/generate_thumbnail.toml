@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-generate-thumbnail"
+description = "Enables the generate_thumbnail command without any pre-configured scope."
+commands.allow = ["generate_thumbnail"]
+
+[[permission]]
+identifier = "deny-generate-thumbnail"
+description = "Denies the generate_thumbnail command without any pre-configured scope."
+commands.deny = ["generate_thumbnail"]

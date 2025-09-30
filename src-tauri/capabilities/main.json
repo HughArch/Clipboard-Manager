@@ -126,6 +126,11 @@
       "commands": ["write_frontend_log"]
     },
     {
+      "identifier": "allow-generate-thumbnail",
+      "description": "Allows generating image thumbnails for performance optimization",
+      "commands": ["generate_thumbnail"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

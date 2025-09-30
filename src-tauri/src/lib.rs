@@ -49,12 +49,18 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
             is_favorite INTEGER NOT NULL DEFAULT 0,
             image_path TEXT,
             source_app_name TEXT,
-            source_app_icon TEXT
+            source_app_icon TEXT,
+            thumbnail_data TEXT
         )"
     )
     .execute(&pool)
     .await
     .map_err(|e| format!("无法创建数据库表: {}", e))?;
+    
+    // 进行数据库迁移 - 添加缩略图字段（如果不存在）
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN thumbnail_data TEXT")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
     
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
@@ -218,6 +224,7 @@ pub fn run() {
             commands::smart_paste_to_app,
             commands::reset_database,
             commands::load_image_file,
+            commands::generate_thumbnail,
             commands::cleanup_history,
             commands::load_settings,
             commands::set_auto_start,

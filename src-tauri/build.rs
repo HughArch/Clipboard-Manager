@@ -20,6 +20,8 @@ fn main() {
                 "stop_clipboard_watcher",
                 "ensure_database_compatibility",
                 "get_active_window_info",
+                "generate_thumbnail",
+                "write_frontend_log",
                 "open_log_folder",
                 "delete_all_logs"
             ]))

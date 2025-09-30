@@ -11,6 +11,7 @@ use chrono;
 use tokio;
 use tokio::sync::Mutex;
 use sqlx::{self, Row};
+use image::{ImageFormat, imageops::FilterType};
 // enigo 导入将在具体使用处声明
 
 
@@ -1298,6 +1299,52 @@ pub async fn load_image_file(image_path: String) -> Result<String, String> {
     let data_url = format!("data:image/png;base64,{}", b64);
     
     Ok(data_url)
+}
+
+#[tauri::command]
+pub async fn generate_thumbnail(base64_data: String, width: Option<u32>, height: Option<u32>) -> Result<String, String> {
+    let width = width.unwrap_or(200);
+    let height = height.unwrap_or(150);
+    
+    // 解析base64数据
+    let base64_start = base64_data.find("base64,").ok_or("无效的base64格式")?;
+    let base64_str = &base64_data[base64_start + 7..]; // "base64,".len() = 7
+    
+    // 解码base64
+    let image_bytes = general_purpose::STANDARD
+        .decode(base64_str)
+        .map_err(|e| format!("base64解码失败: {}", e))?;
+    
+    // 加载图片
+    let img = image::load_from_memory(&image_bytes)
+        .map_err(|e| format!("图片加载失败: {}", e))?;
+    
+    // 计算等比例缩放尺寸
+    let (img_width, img_height) = (img.width(), img.height());
+    let aspect_ratio = img_width as f64 / img_height as f64;
+    let target_aspect_ratio = width as f64 / height as f64;
+    
+    let (target_width, target_height) = if aspect_ratio > target_aspect_ratio {
+        // 图片更宽，以宽度为准
+        (width, (width as f64 / aspect_ratio) as u32)
+    } else {
+        // 图片更高，以高度为准
+        ((height as f64 * aspect_ratio) as u32, height)
+    };
+    
+    // 生成缩略图
+    let thumbnail = img.resize(target_width, target_height, FilterType::Lanczos3);
+    
+    // 转换为JPEG格式以减小文件大小
+    let mut jpeg_buffer = Vec::new();
+    thumbnail.write_to(&mut std::io::Cursor::new(&mut jpeg_buffer), ImageFormat::Jpeg)
+        .map_err(|e| format!("JPEG编码失败: {}", e))?;
+    
+    // 转换为base64
+    let b64 = general_purpose::STANDARD.encode(&jpeg_buffer);
+    let thumbnail_data_url = format!("data:image/jpeg;base64,{}", b64);
+    
+    Ok(thumbnail_data_url)
 }
 
 // ===== 日志相关命令 =====

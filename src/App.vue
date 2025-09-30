@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, triggerRef } from 'vue'
 import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
 import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
+import { useImageCache } from './composables/useImageCache'
 import { invoke } from '@tauri-apps/api/core'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
@@ -29,6 +30,9 @@ import {
 
 // Toast 消息系统
 const { toastMessages, removeToast, showSuccess, showError, showWarning, showInfo } = useToast()
+
+// 图片缓存系统
+const imageCache = useImageCache()
 
 // 定义设置类型
 interface AppSettings {
@@ -84,13 +88,14 @@ const handleShowToast = (toast: { type: 'success' | 'error' | 'warning' | 'info'
   }
 }
 
-// Mock data
-const clipboardHistory = ref<any[]>([])
+// Mock data - 使用 shallowRef 优化大量数据的性能
+const clipboardHistory = shallowRef<any[]>([])
 const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const selectedTabIndex = ref(0)
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
+const thumbnailCache = shallowRef(new Map<string, string>()) // 缩略图缓存 - 使用 shallowRef 优化性能
 let db: Awaited<ReturnType<any>> | null = null
 const isSearching = ref(false) // 添加搜索状态标识
 const isLoadingMore = ref(false) // 添加加载更多状态
@@ -439,6 +444,119 @@ const moveItemToFront = async (itemId: number) => {
   }
 }
 
+// 生成状态记录，防止重复生成
+const generatingThumbnails = ref(new Set<string>())
+
+// 可视区域计算
+const calculateVisibleItems = (scrollTop: number, containerHeight: number, itemHeight: number) => {
+  const startIndex = Math.floor(scrollTop / itemHeight)
+  const endIndex = Math.min(
+    startIndex + Math.ceil(containerHeight / itemHeight) + 5, // 额外渲柕 5 个项目
+    filteredHistory.value.length - 1
+  )
+  return { startIndex: Math.max(0, startIndex - 2), endIndex } // 预渲柕 2 个项目
+}
+
+// 仅为新复制的图片生成缩略图
+const generateThumbnailForNewItem = async (item: any) => {
+  if (item.type !== 'image') {
+    return
+  }
+  
+  const itemKey = item.id.toString()
+  
+  // 检查是否已经在缓存中或正在生成
+  if (thumbnailCache.value.has(itemKey) || generatingThumbnails.value.has(itemKey)) {
+    logger.debug('缩略图已存在或正在生成，跳过', { itemId: item.id })
+    return
+  }
+  
+  // 标记为正在生成
+  generatingThumbnails.value.add(itemKey)
+  
+  try {
+    let originalImage = item.content
+    
+    // 如果有imagePath（旧格式），优先使用
+    if (item.imagePath) {
+      originalImage = await invoke('load_image_file', { imagePath: item.imagePath }) as string
+    }
+    
+    logger.debug('开始为新图片生成缩略图', { itemId: item.id, hasOriginalImage: !!originalImage })
+    
+    // 生成缩略图
+    const thumbnail = await invoke('generate_thumbnail', { 
+      base64Data: originalImage,
+      width: 200,
+      height: 150
+    }) as string
+    
+    // 存入缓存
+    thumbnailCache.value.set(itemKey, thumbnail)
+    triggerRef(thumbnailCache) // 手动触发缓存更新
+    logger.debug('新图片缩略图生成成功', { itemId: item.id })
+  } catch (error) {
+    logger.warn('生成缩略图失败', { error: String(error), itemId: item.id })
+    // 失败时使用原图作为后备
+    thumbnailCache.value.set(itemKey, item.content || '')
+    triggerRef(thumbnailCache) // 手动触发缓存更新
+  } finally {
+    // 移除生成状态标记
+    generatingThumbnails.value.delete(itemKey)
+  }
+}
+
+// 检查项目是否在可视区域内
+const isItemVisible = (itemIndex: number, scrollContainer?: HTMLElement): boolean => {
+  if (!scrollContainer) return true
+  
+  const itemHeight = 80 // 估算的项目高度
+  const itemTop = itemIndex * itemHeight
+  const itemBottom = itemTop + itemHeight
+  
+  const containerTop = scrollContainer.scrollTop
+  const containerBottom = containerTop + scrollContainer.clientHeight
+  
+  // 添加一些缓冲区域
+  const buffer = 200
+  return itemBottom >= (containerTop - buffer) && itemTop <= (containerBottom + buffer)
+}
+
+// 统计缩略图调用次数
+let thumbnailCallCount = 0
+let lastThumbnailLogTime = 0
+
+// 获取缩略图（同步，用于模板）
+const getThumbnailSync = (item: any, itemIndex?: number): string | undefined => {
+  if (item.type !== 'image') {
+    return undefined
+  }
+  
+  thumbnailCallCount++
+  const now = Date.now()
+  
+  // 每秒最多记录一次日志，避免日志洪水
+  if (now - lastThumbnailLogTime > 1000) {
+    logger.debug('缩略图调用统计', { 
+      callCount: thumbnailCallCount,
+      cacheSize: thumbnailCache.value.size,
+      recentItemId: item.id
+    })
+    lastThumbnailLogTime = now
+    thumbnailCallCount = 0
+  }
+  
+  const itemKey = item.id.toString()
+  
+  // 如果缓存中有，直接返回
+  if (thumbnailCache.value.has(itemKey)) {
+    return thumbnailCache.value.get(itemKey)!
+  }
+
+  // 对于历史数据，不生成缩略图，返回 undefined 以显示占位符
+  return undefined
+}
+
 // 复制内容到系统剪贴板并智能粘贴到目标应用
 const copyToClipboard = async (item: any) => {
   if (!item) return
@@ -613,6 +731,14 @@ const handleDoubleClick = (item: any) => {
 const switchTab = async (index: number) => {
   if (selectedTabIndex.value === index) return // 如果已经是当前tab，不需要切换
   
+  const switchStart = performance.now()
+  const tabNames = ['全部', '文本', '图片', '收藏']
+  logger.info('开始切换标签页', { 
+    from: `${selectedTabIndex.value}(${tabNames[selectedTabIndex.value]})`,
+    to: `${index}(${tabNames[index]})`,
+    timestamp: new Date().toISOString()
+  })
+  
   selectedTabIndex.value = index
   // 重置搜索和选中状态
   searchQuery.value = ''
@@ -624,16 +750,62 @@ const switchTab = async (index: number) => {
   
   // 如果在搜索模式，先退出搜索模式
   if (isInSearchMode) {
+    logger.info('退出搜索模式')
     await exitSearchMode()
   } else {
     // 重新加载对应标签页的数据
+    logger.info('开始加载标签页数据')
     await loadRecentHistory()
   }
+  
+  const switchTime = performance.now() - switchStart
+  logger.info('标签页切换完成', { 
+    totalTime: `${switchTime.toFixed(2)}ms`,
+    newTab: `${index}(${tabNames[index]})`
+  })
   
   // 切换标签页后自动聚焦搜索框
   focusSearchInput()
 }
 
+
+// 按需加载图片内容
+const loadImageContent = async (item: any): Promise<string | null> => {
+  if (item.type !== 'image') return null
+  
+  try {
+    // 如果已经有内容且不是空字符串，直接返回
+    if (item.content && item.content.trim() !== '') {
+      return item.content
+    }
+    
+    // 从数据库加载完整内容
+    logger.info('按需加载图片内容', { itemId: item.id })
+    const loadStart = performance.now()
+    
+    const rows = await db!.select(
+      'SELECT content FROM clipboard_history WHERE id = ?',
+      [item.id]
+    )
+    
+    const loadTime = performance.now() - loadStart
+    
+    if (rows.length > 0) {
+      const content = rows[0].content
+      logger.info('图片内容加载完成', { 
+        itemId: item.id, 
+        loadTime: `${loadTime.toFixed(2)}ms`,
+        contentSize: content ? `${(content.length / 1024).toFixed(1)}KB` : '0KB'
+      })
+      return content
+    }
+    
+    return null
+  } catch (error) {
+    logger.error('加载图片内容失败', { itemId: item.id, error: String(error) })
+    return null
+  }
+}
 
 // 监听选中项变化，当选中图片时加载完整图片
 watch(selectedItem, async (newItem) => {
@@ -644,35 +816,33 @@ watch(selectedItem, async (newItem) => {
   
   if (newItem && newItem.type === 'image') {
     try {
-      // 使用新插件：图片数据直接存储在content字段中
+      let imageContent: string | null = null
+      
+      // 优先尝试从 imagePath 加载（兼容旧数据）
       if (newItem.imagePath) {
-        // 如果有文件路径，尝试从文件加载（兼容旧数据）
-        const fullImage = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
-        
-        // 检查图片大小，如果过大则不在内存中保存
-        if (fullImage.length > MAX_IMAGE_PREVIEW_SIZE) {
-          fullImageContent.value = newItem.content
-        } else {
-          fullImageContent.value = fullImage
-        }
+        logger.info('从文件路径加载图片', { imagePath: newItem.imagePath })
+        imageContent = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
       } else {
-        // 新插件模式：直接使用content中的base64数据
-        if (newItem.content && typeof newItem.content === 'string') {
-          // 检查图片大小
-          if (newItem.content.length > MAX_IMAGE_PREVIEW_SIZE) {
-            // 即使过大也显示，因为这是唯一的数据源
-            fullImageContent.value = newItem.content
-          } else {
-            fullImageContent.value = newItem.content
-          }
-        } else {
-          fullImageContent.value = null
+        // 使用按需加载函数
+        imageContent = await loadImageContent(newItem)
+      }
+      
+      if (imageContent) {
+        // 检查图片大小
+        if (imageContent.length > MAX_IMAGE_PREVIEW_SIZE) {
+          logger.warn('图片过大，但仍然显示', { 
+            itemId: newItem.id,
+            size: `${(imageContent.length / 1024 / 1024).toFixed(1)}MB`
+          })
         }
+        fullImageContent.value = imageContent
+      } else {
+        logger.warn('无法加载图片内容', { itemId: newItem.id })
+        fullImageContent.value = null
       }
     } catch (error) {
-      logger.warn('加载图片失败', { error: String(error) })
-      // 如果加载失败，尝试使用content作为后备
-      fullImageContent.value = (newItem.content && typeof newItem.content === 'string') ? newItem.content : null
+      logger.error('加载图片失败', { itemId: newItem.id, error: String(error) })
+      fullImageContent.value = null
     }
   } else {
     fullImageContent.value = null
@@ -921,40 +1091,67 @@ const handleScroll = (event: Event) => {
 const loadRecentHistory = async () => {
   if (!db) return
   
+  const startTime = performance.now()
+  logger.info('开始加载历史记录', { 
+    selectedTab: selectedTabIndex.value,
+    timestamp: new Date().toISOString()
+  })
+  
   try {
     const isTextTab = selectedTabIndex.value === 1
     const isImagesTab = selectedTabIndex.value === 2
     const isFavoritesTab = selectedTabIndex.value === 3
     
-    let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
-      FROM clipboard_history
-    `
+    let sql: string
     
-    if (isTextTab) {
-      sql += ' WHERE type = \'text\''
-    } else if (isImagesTab) {
-      sql += ' WHERE type = \'image\''
-    } else if (isFavoritesTab) {
-      sql += ' WHERE is_favorite = 1'
+    // 对于图片标签页，不加载完整的 content 字段以提高性能
+    if (isImagesTab) {
+      sql = `
+        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+        FROM clipboard_history
+        WHERE type = 'image'
+        ORDER BY timestamp DESC LIMIT ?
+      `
+      logger.info('使用优化的图片查询（不加载 content 字段）')
+    } else {
+      sql = `
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+        FROM clipboard_history
+      `
+      
+      if (isTextTab) {
+        sql += ' WHERE type = \'text\''
+      } else if (isFavoritesTab) {
+        sql += ' WHERE is_favorite = 1'
+      }
+      
+      sql += ' ORDER BY timestamp DESC LIMIT ?'
     }
     
-    sql += ' ORDER BY timestamp DESC LIMIT ?'
-    
+    const dbQueryStart = performance.now()
     const rows = await db.select(sql, [MAX_MEMORY_ITEMS])
+    const dbQueryTime = performance.now() - dbQueryStart
+    logger.info('数据库查询完成', { 
+      queryTime: `${dbQueryTime.toFixed(2)}ms`,
+      rowCount: rows.length,
+      tabType: isTextTab ? 'text' : isImagesTab ? 'image' : isFavoritesTab ? 'favorites' : 'all'
+    })
     
     // 确保去重
+    const processStart = performance.now()
     const seenIds = new Set()
     const deduplicatedHistory = rows
       .map((row: any) => ({
         id: row.id,
-        content: row.content,
+        content: row.content, // 对于图片标签页，这里是空字符串
         type: row.type,
         timestamp: row.timestamp,
         isFavorite: row.is_favorite === 1,
         imagePath: row.image_path ?? null,
         sourceAppName: row.source_app_name ?? 'Unknown',
-        sourceAppIcon: row.source_app_icon ?? null
+        sourceAppIcon: row.source_app_icon ?? null,
+        // 标记是否需要懒加载内容
+        needsContentLoad: isImagesTab && row.type === 'image'
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
@@ -964,14 +1161,38 @@ const loadRecentHistory = async () => {
         return true
       })
     
+    const processTime = performance.now() - processStart
+    logger.info('数据处理完成', { 
+      processTime: `${processTime.toFixed(2)}ms`,
+      originalCount: rows.length,
+      deduplicatedCount: deduplicatedHistory.length
+    })
+    
+    const updateStart = performance.now()
+    // 使用 shallowRef 时需要手动触发更新
     clipboardHistory.value = deduplicatedHistory
+    triggerRef(clipboardHistory)
     
     // 重置分页状态和选中状态
     currentOffset.value = clipboardHistory.value.length
     hasMoreData.value = true
     selectedItem.value = null
     
-    logger.debug('加载了最近的记录', { totalCount: clipboardHistory.value.length })
+    const updateTime = performance.now() - updateStart
+    const totalTime = performance.now() - startTime
+    
+    logger.info('历史记录加载完成', { 
+      totalTime: `${totalTime.toFixed(2)}ms`,
+      updateTime: `${updateTime.toFixed(2)}ms`,
+      totalCount: clipboardHistory.value.length,
+      breakdown: {
+        dbQuery: `${dbQueryTime.toFixed(2)}ms`,
+        dataProcess: `${processTime.toFixed(2)}ms`,
+        vueUpdate: `${updateTime.toFixed(2)}ms`
+      }
+    })
+    
+    // 历史数据不生成缩略图，只有新复制的图片才生成
   } catch (error) {
     logger.error('加载历史记录失败', { error: String(error) })
   }
@@ -1182,6 +1403,9 @@ onMounted(async () => {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
             
+            // 为新复制的图片生成缩略图
+            generateThumbnailForNewItem(newItem)
+            
             // 如果在搜索模式下，也需要添加到原始数据
             if (isInSearchMode) {
               const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
@@ -1370,6 +1594,21 @@ watch(selectedTabIndex, () => {
   fullImageContent.value = null
 })
 
+// 监听 clipboardHistory 变化，记录 DOM 更新时间
+watch(clipboardHistory, async (newHistory, oldHistory) => {
+  if (newHistory.length !== oldHistory?.length) {
+    const updateStart = performance.now()
+    await nextTick() // 等待 DOM 更新完成
+    const updateTime = performance.now() - updateStart
+    
+    logger.info('DOM更新完成', {
+      domUpdateTime: `${updateTime.toFixed(2)}ms`,
+      itemCount: newHistory.length,
+      oldCount: oldHistory?.length || 0
+    })
+  }
+}, { deep: false }) // 不深度监听，只监听数组本身的变化
+
 
 
 // 数据一致性检查函数（调试用）
@@ -1527,29 +1766,29 @@ const resetDatabase = async () => {
           <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
             <div class="flex items-center justify-center space-x-2 max-w-[260px] mx-auto">
               <!-- 全部按钮 -->
-              <button
+                <button
                 @click="switchTab(0)"
                 class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
-                :class="[
+                  :class="[
                   selectedTabIndex === 0
                     ? 'text-white bg-blue-500'
                     : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                 ]"
               >
                 全部
-              </button>
+                </button>
               <!-- 文本按钮 -->
-              <button
+                <button
                 @click="switchTab(1)"
                 class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
-                :class="[
+                  :class="[
                   selectedTabIndex === 1
                     ? 'text-white bg-blue-500'
                     : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                 ]"
               >
                 文本
-              </button>
+                </button>
               <!-- 图片按钮 -->
               <button
                 @click="switchTab(2)"
@@ -1648,9 +1887,27 @@ const resetDatabase = async () => {
                             {{ formatTime(item.timestamp) }}
                           </span>
                         </div>
-                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                          {{ item.type === 'text' ? item.content : 'Image content' }}
-                        </p>
+                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          {{ item.content }}
+                        </div>
+                        <div v-else class="mt-1">
+                          <img 
+                            v-if="getThumbnailSync(item)"
+                            :src="getThumbnailSync(item)"
+                            alt="Image thumbnail"
+                            class="w-16 h-12 object-cover rounded border"
+                            loading="lazy"
+                            @error="($event.target as HTMLImageElement).style.display = 'none'"
+                          />
+                          <div 
+                            v-else
+                            class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                          >
+                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <button
@@ -1865,20 +2122,35 @@ const resetDatabase = async () => {
                               {{ item.type }}
                             </span>
                             <span class="text-xs text-gray-400">
-                              · {{ item.sourceAppName }}
-                            </span>
-                          </div>
-                          <span class="text-xs text-gray-400">
-                            {{ formatTime(item.timestamp) }}
+                            · {{ item.sourceAppName }}
                           </span>
                         </div>
-                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                          Image content
-                        </p>
+                        <span class="text-xs text-gray-400">
+                          {{ formatTime(item.timestamp) }}
+                        </span>
+                      </div>
+                      <div class="mt-1">
+                        <img 
+                          v-if="getThumbnailSync(item)"
+                          :src="getThumbnailSync(item)"
+                          alt="Image thumbnail"
+                          class="w-16 h-12 object-cover rounded border"
+                          loading="lazy"
+                          @error="($event.target as HTMLImageElement).style.display = 'none'"
+                        />
+                        <div 
+                          v-else
+                          class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                        >
+                          <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                          </svg>
+                        </div>
                       </div>
                     </div>
-                    <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                  </div>
+                  <button
+                    class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                       :class="{ 'opacity-100': item.isFavorite }"
                       @click.stop="toggleFavorite(item)"
                     >
@@ -1986,9 +2258,27 @@ const resetDatabase = async () => {
                             {{ formatTime(item.timestamp) }}
                           </span>
                         </div>
-                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                          {{ item.type === 'text' ? item.content : 'Image content' }}
-                        </p>
+                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          {{ item.content }}
+                        </div>
+                        <div v-else class="mt-1">
+                          <img 
+                            v-if="getThumbnailSync(item)"
+                            :src="getThumbnailSync(item)"
+                            alt="Image thumbnail"
+                            class="w-16 h-12 object-cover rounded border"
+                            loading="lazy"
+                            @error="($event.target as HTMLImageElement).style.display = 'none'"
+                          />
+                          <div 
+                            v-else
+                            class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                          >
+                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                            </svg>
+                          </div>
+                        </div>
                       </div>
                     </div>
                     <button
