@@ -101,6 +101,8 @@ const isSearching = ref(false) // 添加搜索状态标识
 const isLoadingMore = ref(false) // 添加加载更多状态
 const hasMoreData = ref(true) // 是否还有更多数据
 const currentOffset = ref(0) // 当前加载的偏移量
+const allDataLoaded = ref(false) // 是否已加载全部数据到内存
+const allHistoryCache = shallowRef<any[]>([]) // 缓存全部数据
 
 // 前一个活动应用程序信息（用于智能粘贴）
 const previousActiveApp = ref<SourceAppInfo | null>(null)
@@ -328,6 +330,16 @@ const toggleFavorite = async (item: any) => {
         return historyItem
       })
       
+      // 更新全部数据缓存中的收藏状态
+      if (allDataLoaded.value) {
+        const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
+        if (cacheIndex !== -1) {
+          allHistoryCache.value[cacheIndex] = { ...allHistoryCache.value[cacheIndex], isFavorite: newFavoriteStatus }
+          triggerRef(allHistoryCache)
+          logger.debug('更新全部数据缓存中的收藏状态', { itemId: item.id, newStatus: newFavoriteStatus })
+        }
+      }
+      
       // 如果在收藏夹标签页取消收藏
       if (selectedTabIndex.value === 3 && !newFavoriteStatus) {
         // 如果当前选中的是被取消收藏的项，清除选中状态
@@ -355,6 +367,16 @@ const deleteItem = async (item: any) => {
     if (index !== -1) {
       clipboardHistory.value.splice(index, 1)
       triggerRef(clipboardHistory) // 触发 shallowRef 更新
+    }
+    
+    // 从全部数据缓存中移除
+    if (allDataLoaded.value) {
+      const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
+      if (cacheIndex !== -1) {
+        allHistoryCache.value.splice(cacheIndex, 1)
+        triggerRef(allHistoryCache)
+        logger.debug('从全部数据缓存中移除条目', { itemId: item.id })
+      }
     }
     
     // 如果在搜索模式下，也从原始数据中移除
@@ -782,6 +804,61 @@ const handleDoubleClick = (item: any) => {
 }
 
 // 处理按钮切换
+// 智能加载标签页数据：优先使用内存缓存
+const loadTabData = async (tabIndex: number) => {
+  const isTextTab = tabIndex === 1
+  const isImagesTab = tabIndex === 2
+  const isFavoritesTab = tabIndex === 3
+  const isAllTab = tabIndex === 0
+  
+  // 如果是“全部”标签页，或者还没有加载过全部数据，则从数据库加载
+  if (isAllTab || !allDataLoaded.value) {
+    logger.info('从数据库加载数据', { 
+      reason: isAllTab ? '全部标签页' : '未加载过全部数据',
+      tabIndex 
+    })
+    await loadRecentHistory()
+    
+    // 如果是“全部”标签页，缓存数据
+    if (isAllTab) {
+      allHistoryCache.value = [...clipboardHistory.value]
+      allDataLoaded.value = true
+      logger.info('已缓存全部数据', { count: allHistoryCache.value.length })
+    }
+  } else {
+    // 使用内存中的数据进行过滤
+    logger.info('使用内存数据进行过滤', { 
+      tabIndex,
+      cacheSize: allHistoryCache.value.length 
+    })
+    
+    let filteredData: any[] = []
+    
+    if (isTextTab) {
+      filteredData = allHistoryCache.value.filter(item => item.type === 'text')
+    } else if (isImagesTab) {
+      filteredData = allHistoryCache.value.filter(item => item.type === 'image')
+    } else if (isFavoritesTab) {
+      filteredData = allHistoryCache.value.filter(item => item.isFavorite === true)
+    }
+    
+    // 直接设置过滤后的数据
+    clipboardHistory.value = filteredData
+    triggerRef(clipboardHistory)
+    
+    // 设置分页状态
+    currentOffset.value = filteredData.length
+    hasMoreData.value = false // 内存过滤不需要分页
+    selectedItem.value = null
+    
+    logger.info('内存过滤完成', { 
+      tabType: isTextTab ? 'text' : isImagesTab ? 'image' : 'favorites',
+      filteredCount: filteredData.length,
+      totalCount: allHistoryCache.value.length
+    })
+  }
+}
+
 const switchTab = async (index: number) => {
   if (selectedTabIndex.value === index) return // 如果已经是当前tab，不需要切换
   
@@ -807,9 +884,9 @@ const switchTab = async (index: number) => {
     logger.info('退出搜索模式')
     await exitSearchMode()
   } else {
-    // 重新加载对应标签页的数据
+    // 智能加载数据：优先使用内存中的数据
     logger.info('开始加载标签页数据')
-    await loadRecentHistory()
+    await loadTabData(index)
   }
   
   const switchTime = performance.now() - switchStart
@@ -1283,6 +1360,13 @@ const loadRecentHistory = async () => {
     hasMoreData.value = deduplicatedHistory.length >= MAX_MEMORY_ITEMS // 只有加载了满的数据才可能有更多
     selectedItem.value = null
     
+    // 如果加载的是“全部”数据，更新缓存
+    if (selectedTabIndex.value === 0) {
+      allHistoryCache.value = [...deduplicatedHistory]
+      allDataLoaded.value = true
+      logger.debug('更新全部数据缓存', { count: allHistoryCache.value.length })
+    }
+    
     const updateTime = performance.now() - updateStart
     const totalTime = performance.now() - startTime
     
@@ -1405,6 +1489,12 @@ onMounted(async () => {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
             
+            // 新数据加入，需要失效缓存
+            if (allDataLoaded.value) {
+              allHistoryCache.value.unshift(newItem)
+              logger.debug('更新全部数据缓存，添加新条目', { itemId: newItem.id })
+            }
+            
             // 如果在搜索模式下，也需要添加到原始数据
             if (isInSearchMode) {
               const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
@@ -1507,6 +1597,12 @@ onMounted(async () => {
           if (existingIndex === -1) {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
+            
+            // 新数据加入，需要失效缓存
+            if (allDataLoaded.value) {
+              allHistoryCache.value.unshift(newItem)
+              logger.debug('更新全部数据缓存，添加新图片', { itemId: newItem.id })
+            }
             
             // 为新复制的图片生成缩略图
             generateThumbnailForNewItem(newItem)
