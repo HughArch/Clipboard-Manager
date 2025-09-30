@@ -101,6 +101,34 @@ const searchPlaceholders = ['Search clipboard history...', 'Search text...', 'Se
 
 // 计算有条目的分组
 const availableGroups = computed(() => groups.value.filter(g => g.item_count > 0))
+
+// 当前标签页信息
+const currentTabInfo = computed(() => {
+  const tabNames = ['全部', '文本', '图片', '收藏', '分组']
+  const tabIndex = selectedTabIndex.value
+  
+  let displayName = tabNames[tabIndex] || '未知'
+  let emptyMessage = '暂无条目'
+  
+  if (tabIndex === 4 && selectedGroupId.value) {
+    const group = groups.value.find(g => g.id === selectedGroupId.value)
+    displayName = group ? `分组: ${group.name}` : '未知分组'
+    emptyMessage = '该分组暂无条目'
+  } else if (tabIndex === 1) {
+    emptyMessage = '暂无文本条目'
+  } else if (tabIndex === 2) {
+    emptyMessage = '暂无图片条目'  
+  } else if (tabIndex === 3) {
+    emptyMessage = '暂无收藏条目'
+  }
+  
+  return {
+    name: displayName,
+    emptyMessage,
+    isGroupMode: tabIndex === 4,
+    showGroupHeader: tabIndex === 4 && selectedGroupId.value
+  }
+})
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
 const thumbnailCache = shallowRef(new Map<string, string>()) // 缩略图缓存 - 使用 shallowRef 优化性能
 let db: Awaited<ReturnType<any>> | null = null
@@ -2472,9 +2500,9 @@ const checkDataConsistency = () => {
               />
               <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
                 <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
-              </div>
-            </div>
-          </div>
+      </div>
+      </div>
+    </div>
 
           <!-- Navigation Buttons (moved below search) -->
           <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
@@ -2504,7 +2532,7 @@ const checkDataConsistency = () => {
                 文本
                 </button>
               <!-- 图片按钮 -->
-              <button
+          <button 
                 @click="switchTab(2)"
                 class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
                 :class="[
@@ -2514,9 +2542,9 @@ const checkDataConsistency = () => {
                 ]"
               >
                 图片
-              </button>
+          </button>
               <!-- 收藏按钮 -->
-              <button
+          <button 
                 @click="switchTab(3)"
                 class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
                 :class="[
@@ -2526,7 +2554,7 @@ const checkDataConsistency = () => {
                 ]"
               >
                 收藏
-              </button>
+          </button>
               
               <!-- 分组按钮 -->
               <div class="relative">
@@ -2551,7 +2579,7 @@ const checkDataConsistency = () => {
                     viewBox="0 0 24 24"
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                  </svg>
+                    </svg>
                   <span v-else class="text-xs text-gray-400">({{ availableGroups.length }})</span>
                 </button>
                 
@@ -2561,7 +2589,7 @@ const checkDataConsistency = () => {
                   class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md z-50 py-0.5 min-w-[120px]"
                   @click.stop
                 >
-                  <button
+                <button
                     v-for="group in availableGroups"
                     :key="group.id"
                     @click="switchToGroup(group.id)"
@@ -2573,15 +2601,29 @@ const checkDataConsistency = () => {
                     ></div>
                     <span class="truncate">{{ group.name }}</span>
                     <span class="text-gray-400 text-xs ml-auto">({{ group.item_count }})</span>
-                  </button>
+                </button>
+          </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          </div>
 
           <div class="flex-1 min-h-0">
-            <div v-show="selectedTabIndex === 0" class="h-full flex flex-col min-h-0">
-              <!-- History List -->
+            <div class="h-full flex flex-col min-h-0">
+              <!-- 分组头部信息 (仅在分组模式下显示) -->
+              <div v-if="currentTabInfo.showGroupHeader" class="px-3 py-2 bg-blue-50 border-b border-blue-100">
+                <div class="flex items-center space-x-2">
+                  <div 
+                    class="w-3 h-3 rounded-full"
+                    :style="{ backgroundColor: groups.find(g => g.id === selectedGroupId)?.color || '#3B82F6' }"
+                  ></div>
+                  <span class="text-sm font-medium text-blue-700">
+                    {{ groups.find(g => g.id === selectedGroupId)?.name || '未知分组' }}
+                  </span>
+                  <span class="text-xs text-blue-500">({{ clipboardHistory.length }} 个条目)</span>
+                </div>
+              </div>
+              
+              <!-- 统一的列表内容 -->
               <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
                   v-for="item in filteredHistory"
@@ -2632,16 +2674,16 @@ const checkDataConsistency = () => {
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                            <span class="text-xs text-gray-400">
-                              {{ formatTime(item.timestamp) }}
-                            </span>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
+                          </span>
                             <!-- 备注指示器 -->
                             <div 
                               v-if="item.note"
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
                               :title="item.note"
                             ></div>
-                          </div>
+                        </div>
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
                           {{ item.content }}
                       </div>
@@ -2694,7 +2736,7 @@ const checkDataConsistency = () => {
                     <MagnifyingGlassIcon class="w-6 h-6 text-gray-400" />
                   </div>
                   <p class="text-gray-500 text-xs text-center">
-                    {{ searchQuery ? 'No items match your search' : 'No clipboard history yet' }}
+                    {{ searchQuery ? 'No items match your search' : currentTabInfo.emptyMessage }}
                   </p>
                 </div>
                 
@@ -2714,7 +2756,7 @@ const checkDataConsistency = () => {
               </div>
             </div>
 
-            <div v-show="selectedTabIndex === 1" class="h-full flex flex-col min-h-0">
+            <div v-show="false" class="h-full flex flex-col min-h-0">
               <!-- Text List -->
               <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
@@ -2799,10 +2841,10 @@ const checkDataConsistency = () => {
                         <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
                         <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
                       </button>
-                    </div>
                   </div>
                 </div>
-                
+              </div>
+
                 <!-- Empty state for text -->
                 <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
                   <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
@@ -2831,7 +2873,7 @@ const checkDataConsistency = () => {
               </div>
             </div>
 
-            <div v-show="selectedTabIndex === 2" class="h-full flex flex-col min-h-0">
+            <div v-show="false" class="h-full flex flex-col min-h-0">
               <!-- Images List -->
               <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
@@ -2963,7 +3005,7 @@ const checkDataConsistency = () => {
               </div>
             </div>
 
-            <div v-show="selectedTabIndex === 3" class="h-full flex flex-col min-h-0">
+            <div v-show="false" class="h-full flex flex-col min-h-0">
               <!-- Favorites List -->
               <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
                 <div
@@ -3015,16 +3057,16 @@ const checkDataConsistency = () => {
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                            <span class="text-xs text-gray-400">
-                              {{ formatTime(item.timestamp) }}
-                            </span>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
+                          </span>
                             <!-- 备注指示器 -->
                             <div 
                               v-if="item.note"
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
                               :title="item.note"
                             ></div>
-                          </div>
+                        </div>
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
                           {{ item.content }}
                       </div>
@@ -3099,7 +3141,7 @@ const checkDataConsistency = () => {
             </div>
             
             <!-- Group List -->
-            <div v-show="selectedTabIndex === 4" class="h-full flex flex-col min-h-0">
+            <div v-show="false" class="h-full flex flex-col min-h-0">
               <div class="flex-1 overflow-y-auto min-h-0">
                 <div v-if="selectedGroupId && groups.find(g => g.id === selectedGroupId)" class="px-3 py-2 bg-blue-50 border-b border-blue-100">
                   <div class="flex items-center space-x-2">
@@ -3244,8 +3286,8 @@ const checkDataConsistency = () => {
             </div>
             <div class="flex items-center space-x-2">
               <span class="text-xs text-gray-500" v-if="selectedItem" data-tauri-drag-region>
-                {{ formatTime(selectedItem.timestamp) }}
-              </span>
+              {{ formatTime(selectedItem.timestamp) }}
+            </span>
               <button 
                 class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200"
                 @click="showGroupManager = !showGroupManager"
