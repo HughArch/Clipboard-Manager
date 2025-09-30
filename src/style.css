@@ -9,6 +9,62 @@
   body {
     @apply bg-gray-50 text-gray-900;
   }
+  
+  /* 禁用浏览器原生右键菜单和文本选中 */
+  * {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-context-menu: none;
+    cursor: default !important; /* 强制使用默认箭头指针 */
+  }
+  
+  /* 允许输入框和文本区域选中文本 */
+  input, textarea, [contenteditable="true"] {
+    -webkit-user-select: text;
+    -moz-user-select: text;
+    -ms-user-select: text;
+    user-select: text;
+    cursor: text !important; /* 输入框使用文本指针 */
+  }
+  
+  /* 为可交互元素恢复正确的指针样式 */
+  button, [role="button"], a, [href] {
+    cursor: pointer !important; /* 按钮和链接使用手指 */
+  }
+  
+  /* 滚动条区域 */
+  ::-webkit-scrollbar {
+    cursor: default !important;
+  }
+  
+  /* 可拖拽区域 */
+  [data-tauri-drag-region] {
+    cursor: default !important;
+  }
+  
+  /* 预览栏文本允许选中和复制 */
+  .preview-content {
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+    user-select: text !important;
+    cursor: text !important;
+  }
+  
+  /* 预览栏容器区域 */
+  .preview-container {
+    cursor: default !important;
+  }
+  
+  /* 预览栏中的所有元素都允许选中 */
+  .preview-container * {
+    -webkit-user-select: text !important;
+    -moz-user-select: text !important;
+    -ms-user-select: text !important;
+    user-select: text !important;
+  }
 }
 
 @layer components {

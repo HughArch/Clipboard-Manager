@@ -859,6 +859,13 @@ const loadTabData = async (tabIndex: number) => {
   }
 }
 
+// 禁用浏览器原生右键菜单
+const handleContextMenu = (e: MouseEvent) => {
+  e.preventDefault()
+  e.stopPropagation()
+  return false
+}
+
 const switchTab = async (index: number) => {
   if (selectedTabIndex.value === index) return // 如果已经是当前tab，不需要切换
   
@@ -1631,6 +1638,10 @@ onMounted(async () => {
 
     window.addEventListener('keydown', handleKeyDown)
     
+    // 禁用浏览器原生右键菜单
+    document.addEventListener('contextmenu', handleContextMenu)
+    logger.debug('已禁用浏览器原生右键菜单')
+    
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
     
@@ -1714,6 +1725,9 @@ onUnmounted(() => {
   
   // 清理键盘事件监听器
   window.removeEventListener('keydown', handleKeyDown)
+  
+  // 清理右键菜单事件监听器
+  document.removeEventListener('contextmenu', handleContextMenu)
   
   // 清理Tauri窗口焦点事件监听器
   if (unlistenFocus.value) {
@@ -2593,10 +2607,10 @@ const resetDatabase = async () => {
         
         <div class="flex-1 p-4 overflow-y-auto min-h-0">
           <div v-if="selectedItem" class="h-full">
-            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 min-h-full">
+            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 min-h-full preview-container">
               <template v-if="selectedItem.type === 'text'">
-                <div class="prose prose-sm max-w-none">
-                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal">{{ selectedItem.content }}</pre>
+                <div class="prose prose-sm max-w-none preview-content">
+                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal preview-content">{{ selectedItem.content }}</pre>
                 </div>
               </template>
               <template v-else>
