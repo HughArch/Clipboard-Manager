@@ -3563,7 +3563,7 @@ const checkDataConsistency = () => {
         class="bg-white rounded-lg shadow-xl w-[350px] max-w-[90vw]"
         @click.stop
       >
-        <div class="flex items-center justify-between p-4 border-b border-gray-200">
+        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <h2 class="text-lg font-semibold text-gray-900">选择分组</h2>
           <button
             @click="closeGroupSelector"
@@ -3592,15 +3592,15 @@ const checkDataConsistency = () => {
               v-for="group in groups"
               :key="group.id"
               @click="addItemToGroup(group.id)"
-              class="w-full p-3 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
+              class="w-full p-2 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
             >
               <div 
                 class="w-4 h-4 rounded-full"
                 :style="{ backgroundColor: group.color }"
               ></div>
-              <div>
-                <div class="text-sm font-medium text-gray-900">{{ group.name }}</div>
-                <div class="text-sm text-gray-500">{{ group.item_count }} 个条目</div>
+              <div class="flex items-center justify-between flex-1">
+                <span class="text-sm font-medium text-gray-900">{{ group.name }}</span>
+                <span class="text-sm text-gray-500">{{ group.item_count }} 个条目</span>
               </div>
             </button>
           </div>
