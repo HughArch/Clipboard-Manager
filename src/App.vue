@@ -264,23 +264,39 @@ const scrollToSelectedItem = async (itemId: number) => {
 const filteredHistory = computed(() => {
   const query = searchQuery.value.toLowerCase()
   
-  // 根据标签页筛选：All显示所有，Favorites只显示收藏的
-  const items = selectedTabIndex.value === 0 
-    ? clipboardHistory.value 
-    : clipboardHistory.value.filter(item => item.isFavorite === true)
+  // 根据标签页筛选：0=All显示所有，1=Text只显示文本，2=Images只显示图片，3=Favorites只显示收藏的
+  let items: any[] = []
   
-  // 应用搜索过滤 - 只搜索文本类型的内容
+  if (selectedTabIndex.value === 0) {
+    // 全部标签页：显示所有内容
+    items = clipboardHistory.value
+  } else if (selectedTabIndex.value === 1) {
+    // 文本标签页：只显示文本类型的内容
+    items = clipboardHistory.value.filter(item => item.type === 'text')
+  } else if (selectedTabIndex.value === 2) {
+    // 图片标签页：只显示图片类型的内容
+    items = clipboardHistory.value.filter(item => item.type === 'image')
+  } else if (selectedTabIndex.value === 3) {
+    // 收藏标签页：只显示收藏的内容
+    items = clipboardHistory.value.filter(item => item.isFavorite === true)
+  }
+  
+  // 应用搜索过滤
   const result = items.filter(item => {
     // 如果没有搜索查询，返回所有项目
     if (!query) return true
     
-    // 只对文本类型的内容进行搜索
-    if (item.type === 'text') {
-      return item.content?.toLowerCase().includes(query) || false
+    // 根据当前标签页决定搜索逻辑
+    if (selectedTabIndex.value === 2) {
+      // 图片标签页：图片内容不支持文本搜索，返回false（搜索时不显示任何图片）
+      return false
+    } else {
+      // 全部、文本和收藏标签页：只搜索文本类型的内容
+      if (item.type === 'text') {
+        return item.content?.toLowerCase().includes(query) || false
+      }
+      return false
     }
-    
-    // 非文本类型（如图片）不参与搜索，直接排除
-    return false
   })
   
   return result
@@ -308,7 +324,7 @@ const toggleFavorite = async (item: any) => {
       })
       
       // 如果在收藏夹标签页取消收藏
-      if (selectedTabIndex.value === 1 && !newFavoriteStatus) {
+      if (selectedTabIndex.value === 3 && !newFavoriteStatus) {
         // 如果当前选中的是被取消收藏的项，清除选中状态
         if (selectedItem.value?.id === item.id) {
           selectedItem.value = null
@@ -525,13 +541,17 @@ const handleKeyDown = async (e: KeyboardEvent) => {
   // 处理标签页切换（左右箭头键）
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
-    // 切换到 All 标签
-    await switchTab(0)
+    // 向左切换标签页
+    const currentTab = selectedTabIndex.value
+    const newTab = currentTab > 0 ? currentTab - 1 : 3 // 循环切换：0 -> 3, 1 -> 0, 2 -> 1, 3 -> 2
+    await switchTab(newTab)
     return
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
-    // 切换到 Favorites 标签
-    await switchTab(1)
+    // 向右切换标签页
+    const currentTab = selectedTabIndex.value
+    const newTab = currentTab < 3 ? currentTab + 1 : 0 // 循环切换：0 -> 1, 1 -> 2, 2 -> 3, 3 -> 0
+    await switchTab(newTab)
     return
   }
 
@@ -680,7 +700,17 @@ const searchFromDatabase = async () => {
     }
     
     const query = searchQuery.value.toLowerCase()
-    const isFavoritesTab = selectedTabIndex.value === 1
+    const isTextTab = selectedTabIndex.value === 1
+    const isImagesTab = selectedTabIndex.value === 2
+    const isFavoritesTab = selectedTabIndex.value === 3
+    
+    // 图片标签页不支持搜索，直接返回空结果
+    if (isImagesTab) {
+      clipboardHistory.value = []
+      selectedItem.value = null
+      logger.debug('图片标签页不支持搜索')
+      return
+    }
     
     // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
@@ -691,10 +721,14 @@ const searchFromDatabase = async () => {
     
     const params = [`%${query}%`]
     
-    // 如果是收藏标签页，只搜索收藏的项目
-    if (isFavoritesTab) {
+    // 根据不同标签页添加额外条件
+    if (isTextTab) {
+      // 文本标签页：已经通过 type = 'text' 过滤了
+    } else if (isFavoritesTab) {
+      // 收藏标签页：只搜索收藏的文本项目
       sql += ' AND is_favorite = 1'
     }
+    // 全部标签页：搜索所有文本内容（无额外条件）
     
     sql += ' ORDER BY timestamp DESC LIMIT 500' // 限制最多返回500条结果
     
@@ -816,14 +850,20 @@ const loadMoreHistory = async () => {
   isLoadingMore.value = true
   
   try {
-    const isFavoritesTab = selectedTabIndex.value === 1
+    const isTextTab = selectedTabIndex.value === 1
+    const isImagesTab = selectedTabIndex.value === 2
+    const isFavoritesTab = selectedTabIndex.value === 3
     
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
       FROM clipboard_history
     `
     
-    if (isFavoritesTab) {
+    if (isTextTab) {
+      sql += ' WHERE type = \'text\''
+    } else if (isImagesTab) {
+      sql += ' WHERE type = \'image\''
+    } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
     }
     
@@ -882,14 +922,20 @@ const loadRecentHistory = async () => {
   if (!db) return
   
   try {
-    const isFavoritesTab = selectedTabIndex.value === 1
+    const isTextTab = selectedTabIndex.value === 1
+    const isImagesTab = selectedTabIndex.value === 2
+    const isFavoritesTab = selectedTabIndex.value === 3
     
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
       FROM clipboard_history
     `
     
-    if (isFavoritesTab) {
+    if (isTextTab) {
+      sql += ' WHERE type = \'text\''
+    } else if (isImagesTab) {
+      sql += ' WHERE type = \'image\''
+    } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
     }
     
@@ -1479,7 +1525,7 @@ const resetDatabase = async () => {
         <!-- Navigation Buttons -->
         <div class="flex flex-col h-full">
           <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
-            <div class="flex items-center justify-center space-x-2 max-w-[140px] mx-auto">
+            <div class="flex items-center justify-center space-x-2 max-w-[260px] mx-auto">
               <!-- 全部按钮 -->
               <button
                 @click="switchTab(0)"
@@ -1492,12 +1538,36 @@ const resetDatabase = async () => {
               >
                 全部
               </button>
-              <!-- 收藏按钮 -->
+              <!-- 文本按钮 -->
               <button
                 @click="switchTab(1)"
                 class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
                 :class="[
                   selectedTabIndex === 1
+                    ? 'text-white bg-blue-500'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                ]"
+              >
+                文本
+              </button>
+              <!-- 图片按钮 -->
+              <button
+                @click="switchTab(2)"
+                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                :class="[
+                  selectedTabIndex === 2
+                    ? 'text-white bg-blue-500'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                ]"
+              >
+                图片
+              </button>
+              <!-- 收藏按钮 -->
+              <button
+                @click="switchTab(3)"
+                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                :class="[
+                  selectedTabIndex === 3
                     ? 'text-white bg-blue-500'
                     : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                 ]"
@@ -1621,6 +1691,232 @@ const resetDatabase = async () => {
             </div>
 
             <div v-show="selectedTabIndex === 1" class="h-full flex flex-col min-h-0">
+              <!-- Search -->
+              <div class="p-3 border-b border-gray-100 flex-shrink-0">
+                <div class="relative">
+                  <input
+                    v-model="searchQuery"
+                    type="text"
+                    placeholder="Search text..."
+                    class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-xs"
+                    ref="searchInputRef"
+                  />
+                  <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                    <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Text List -->
+              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
+                <div
+                  v-for="item in filteredHistory"
+                  :key="item.id"
+                  :data-item-id="item.id"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  :class="{ 
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                  }"
+                  @click="selectedItem = item"
+                  @dblclick="handleDoubleClick(item)"
+                >
+                  <div class="flex items-start justify-between">
+                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                      <!-- 源应用图标 -->
+                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
+                        <img 
+                          v-if="item.sourceAppIcon" 
+                          :src="item.sourceAppIcon" 
+                          :alt="item.sourceAppName"
+                          class="w-6 h-6 rounded object-contain"
+                        />
+                        <div 
+                          v-else 
+                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          :title="item.sourceAppName"
+                        >
+                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                          </svg>
+                        </div>
+                      </div>
+                      
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center space-x-1">
+                            <div 
+                              class="w-1.5 h-1.5 rounded-full bg-green-400"
+                            ></div>
+                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              {{ item.type }}
+                            </span>
+                            <span class="text-xs text-gray-400">
+                              · {{ item.sourceAppName }}
+                            </span>
+                          </div>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
+                          </span>
+                        </div>
+                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          {{ item.type === 'text' ? item.content : 'Text content' }}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': item.isFavorite }"
+                      @click.stop="toggleFavorite(item)"
+                    >
+                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Empty state for text -->
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
+                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                  </div>
+                  <p class="text-gray-500 text-xs text-center">
+                    {{ searchQuery ? 'No text matches your search' : 'No text content yet' }}
+                  </p>
+                </div>
+                
+                <!-- 加载更多提示 -->
+                <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
+                  <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span class="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                    No more items
+                  </div>
+                  <div v-else class="text-xs text-gray-400">
+                    Scroll to load more
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-show="selectedTabIndex === 2" class="h-full flex flex-col min-h-0">
+              <!-- Search -->
+              <div class="p-3 border-b border-gray-100 flex-shrink-0">
+                <div class="relative">
+                  <input
+                    v-model="searchQuery"
+                    type="text"
+                    placeholder="Search images..."
+                    class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-xs"
+                    ref="searchInputRef"
+                  />
+                  <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                    <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Images List -->
+              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
+                <div
+                  v-for="item in filteredHistory"
+                  :key="item.id"
+                  :data-item-id="item.id"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  :class="{ 
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                  }"
+                  @click="selectedItem = item"
+                  @dblclick="handleDoubleClick(item)"
+                >
+                  <div class="flex items-start justify-between">
+                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                      <!-- 源应用图标 -->
+                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
+                        <img 
+                          v-if="item.sourceAppIcon" 
+                          :src="item.sourceAppIcon" 
+                          :alt="item.sourceAppName"
+                          class="w-6 h-6 rounded object-contain"
+                        />
+                        <div 
+                          v-else 
+                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          :title="item.sourceAppName"
+                        >
+                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                          </svg>
+                        </div>
+                      </div>
+                      
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center space-x-1">
+                            <div 
+                              class="w-1.5 h-1.5 rounded-full bg-purple-400"
+                            ></div>
+                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                              {{ item.type }}
+                            </span>
+                            <span class="text-xs text-gray-400">
+                              · {{ item.sourceAppName }}
+                            </span>
+                          </div>
+                          <span class="text-xs text-gray-400">
+                            {{ formatTime(item.timestamp) }}
+                          </span>
+                        </div>
+                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                          Image content
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': item.isFavorite }"
+                      @click.stop="toggleFavorite(item)"
+                    >
+                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Empty state for images -->
+                <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
+                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                  </div>
+                  <p class="text-gray-500 text-xs text-center">
+                    {{ searchQuery ? 'No images match your search' : 'No images yet' }}
+                  </p>
+                </div>
+                
+                <!-- 加载更多提示 -->
+                <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
+                  <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span class="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                    No more items
+                  </div>
+                  <div v-else class="text-xs text-gray-400">
+                    Scroll to load more
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div v-show="selectedTabIndex === 3" class="h-full flex flex-col min-h-0">
               <!-- Search -->
               <div class="p-3 border-b border-gray-100 flex-shrink-0">
                 <div class="relative">
