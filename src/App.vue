@@ -772,12 +772,20 @@ const copyToClipboard = async (item: any) => {
   }
 }
 
+// 跨平台快捷键检测工具函数
+const isMac = () => navigator.platform.toLowerCase().includes('mac')
+const getModifierKey = () => isMac() ? 'Cmd' : 'Ctrl'
+const isModifierPressed = (e: KeyboardEvent) => isMac() ? e.metaKey : e.ctrlKey
+
 const handleKeyDown = async (e: KeyboardEvent) => {
-  // 处理 Ctrl+F 搜索快捷键，聚焦到搜索框
-  if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+  // 处理搜索快捷键，聚焦到搜索框（跨平台支持）
+  // Windows/Linux: Ctrl+F, macOS: Cmd+F
+  const isSearchShortcut = (e.key === 'f' || e.key === 'F') && isModifierPressed(e)
+  
+  if (isSearchShortcut) {
     e.preventDefault()
     e.stopPropagation()
-    logger.debug('Ctrl+F 快捷键被触发，聚焦搜索框')
+    logger.debug(`${getModifierKey()}+F 快捷键被触发，聚焦搜索框`)
     await focusSearchInput()
     return
   }

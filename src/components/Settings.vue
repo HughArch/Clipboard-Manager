@@ -94,6 +94,10 @@ const stopRecording = () => {
   }
 }
 
+// 跨平台快捷键检测工具函数
+const isMac = () => navigator.platform.toLowerCase().includes('mac')
+const getDefaultModifierKey = () => isMac() ? 'Cmd' : 'Ctrl'
+
 const generateHotkeyString = (keys: string[]): string => {
   const modifiers: string[] = []
   let mainKey = ''
@@ -113,7 +117,9 @@ const generateHotkeyString = (keys: string[]): string => {
         break
       case 'meta':
       case 'cmd':
-        if (!modifiers.includes('Meta')) modifiers.push('Meta')
+        // 在 macOS 上，Meta 键应该显示为 Cmd；在其他系统上，可能是 Windows 键，但通常在快捷键中用 Ctrl 代替
+        const metaKeyName = isMac() ? 'Cmd' : 'Ctrl'
+        if (!modifiers.includes(metaKeyName)) modifiers.push(metaKeyName)
         break
       default:
         // 主键，取最后一个非修饰键
@@ -131,7 +137,8 @@ const generateHotkeyString = (keys: string[]): string => {
   
   // 如果没有修饰键但有主键，添加默认修饰键
   if (mainKey && modifiers.length === 0) {
-    modifiers.push('Ctrl', 'Shift')
+    const defaultModifier = getDefaultModifierKey()
+    modifiers.push(defaultModifier, 'Shift')
   }
   
   // 组合成快捷键字符串
@@ -139,7 +146,8 @@ const generateHotkeyString = (keys: string[]): string => {
     return [...modifiers, mainKey].join('+')
   }
   
-  return 'Ctrl+Shift+V' // 默认值
+  // 默认值也应该是跨平台的
+  return `${getDefaultModifierKey()}+Shift+V`
 }
 
 const handleKeyDown = (event: KeyboardEvent) => {
@@ -148,11 +156,15 @@ const handleKeyDown = (event: KeyboardEvent) => {
   event.preventDefault()
   event.stopPropagation()
   
-  // 记录按下的键
+  // 记录按下的键 - 跨平台支持
   if (event.ctrlKey) recordingKeys.value.add('Ctrl')
   if (event.altKey) recordingKeys.value.add('Alt')
   if (event.shiftKey) recordingKeys.value.add('Shift')
-  if (event.metaKey) recordingKeys.value.add('Meta')
+  if (event.metaKey) {
+    // 在 macOS 上 metaKey 是 Cmd 键，在其他系统上是 Windows 键
+    // 为了快捷键的兼容性，我们将其记录为 Meta，后续在 generateHotkeyString 中处理
+    recordingKeys.value.add('Meta')
+  }
   
   // 记录主键
   if (event.key && event.key.length === 1) {
@@ -323,7 +335,7 @@ const handleSubmit = async () => {
                 ref="hotkeyInputRef"
                 v-model="settings.hotkey"
                 type="text"
-                  :placeholder="isRecording ? 'Press keys...' : 'e.g. Ctrl+Shift+V'"
+                  :placeholder="isRecording ? 'Press keys...' : `e.g. ${getDefaultModifierKey()}+Shift+V`"
                 :readonly="isRecording"
                   class="w-full border rounded-md px-2 py-1.5 pr-14 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
                 :class="{
