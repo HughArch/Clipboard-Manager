@@ -756,7 +756,7 @@ const switchTab = async (index: number) => {
   searchQuery.value = ''
   selectedItem.value = null
   
-  // 重置分页状态
+  // 重置分页状态（将在 loadRecentHistory 中设置正确的值）
   currentOffset.value = 0
   hasMoreData.value = true
   
@@ -1061,31 +1061,39 @@ const loadMoreHistory = async () => {
       return
     }
     
-    const newItems = rows.map((row: any) => {
-      const item = {
-        id: row.id,
-        content: row.content,
-        type: row.type,
-        timestamp: row.timestamp,
-        isFavorite: row.is_favorite === 1,
-        imagePath: row.image_path ?? null,
-        sourceAppName: row.source_app_name ?? 'Unknown',
-        sourceAppIcon: row.source_app_icon ?? null
-      }
-      
-      // 如果是图片且有缩略图数据，恢复到缓存中
-      if (row.type === 'image' && row.thumbnail_data) {
-        const itemKey = row.id.toString()
-        thumbnailCache.value.set(itemKey, row.thumbnail_data)
-        logger.debug('从数据库恢复缩略图（加载更多）', { itemId: row.id })
-      }
-      
-      return item
-    })
+    // 获取已有的ID集合以防止重复
+    const existingIds = new Set(clipboardHistory.value.map(item => item.id))
+    
+    const newItems = rows
+      .filter((row: any) => !existingIds.has(row.id)) // 过滤掉已存在的记录
+      .map((row: any) => {
+        const item = {
+          id: row.id,
+          content: row.content,
+          type: row.type,
+          timestamp: row.timestamp,
+          isFavorite: row.is_favorite === 1,
+          imagePath: row.image_path ?? null,
+          sourceAppName: row.source_app_name ?? 'Unknown',
+          sourceAppIcon: row.source_app_icon ?? null
+        }
+        
+        // 如果是图片且有缩略图数据，恢复到缓存中
+        if (row.type === 'image' && row.thumbnail_data) {
+          const itemKey = row.id.toString()
+          thumbnailCache.value.set(itemKey, row.thumbnail_data)
+          logger.debug('从数据库恢复缩略图（加载更多）', { itemId: row.id })
+        }
+        
+        return item
+      })
     
     // 追加新记录到历史列表
-    clipboardHistory.value.push(...newItems)
-    currentOffset.value += rows.length
+    if (newItems.length > 0) {
+      clipboardHistory.value.push(...newItems)
+      triggerRef(clipboardHistory) // 触发 shallowRef 更新
+    }
+    currentOffset.value += rows.length // 使用原始查询的数据量来更新偏移量
     
     // 如果恢复了缩略图，触发缓存更新
     const thumbnailsRestored = newItems.filter((item: any) => item.type === 'image' && thumbnailCache.value.has(item.id.toString())).length
@@ -1094,8 +1102,11 @@ const loadMoreHistory = async () => {
     }
     
     logger.debug('加载了更多记录', { 
-      loadedCount: rows.length, 
+      queriedCount: rows.length,
+      newItemsCount: newItems.length,
+      duplicatesFiltered: rows.length - newItems.length,
       totalCount: clipboardHistory.value.length,
+      currentOffset: currentOffset.value,
       thumbnailsRestored 
     })
     
@@ -1226,8 +1237,8 @@ const loadRecentHistory = async () => {
     triggerRef(clipboardHistory)
     
     // 重置分页状态和选中状态
-    currentOffset.value = clipboardHistory.value.length
-    hasMoreData.value = true
+    currentOffset.value = deduplicatedHistory.length
+    hasMoreData.value = deduplicatedHistory.length >= MAX_MEMORY_ITEMS // 只有加载了满的数据才可能有更多
     selectedItem.value = null
     
     const updateTime = performance.now() - updateStart
