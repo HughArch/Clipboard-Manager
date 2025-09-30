@@ -233,8 +233,62 @@ const resetToDefault = async () => {
 // 自动聚焦搜索框
 const focusSearchInput = async () => {
   await nextTick()
-  if (searchInputRef.value) {
-    searchInputRef.value.focus()
+  
+  // 尝试多种方式找到可见的搜索框
+  let searchInput: HTMLInputElement | null = null
+  
+  // 方法1：使用 ref 引用
+  if (searchInputRef.value && searchInputRef.value.offsetParent !== null) {
+    searchInput = searchInputRef.value
+    logger.debug('使用 ref 引用找到搜索框')
+  }
+  
+  // 方法2：直接查找当前可见的搜索框
+  if (!searchInput) {
+    const allInputs = document.querySelectorAll('input[placeholder*="Search"]') as NodeListOf<HTMLInputElement>
+    for (const input of allInputs) {
+      // 检查输入框是否可见
+      if (input.offsetParent !== null) {
+        searchInput = input
+        logger.debug('通过查询选择器找到搜索框')
+        break
+      }
+    }
+  }
+  
+  if (searchInput) {
+    try {
+      searchInput.focus()
+      // 选中搜索框中的所有文本（如果有的话）
+      if (searchInput.value) {
+        searchInput.select()
+      }
+      
+      // 验证是否真的获得了焦点
+      const hasFocus = document.activeElement === searchInput
+      logger.debug('搜索框聚焦结果', { 
+        hasValue: !!searchInput.value,
+        hasFocus,
+        activeElement: document.activeElement?.tagName,
+        placeholder: searchInput.placeholder
+      })
+      
+      if (!hasFocus) {
+        // 如果没有获得焦点，再试一次
+        setTimeout(() => {
+          searchInput?.focus()
+          logger.debug('重试聚焦搜索框')
+        }, 100)
+      }
+    } catch (error) {
+      logger.error('聚焦搜索框失败', { error: String(error) })
+    }
+  } else {
+    logger.warn('未找到可见的搜索框', {
+      refExists: !!searchInputRef.value,
+      refVisible: searchInputRef.value?.offsetParent !== null,
+      selectedTab: selectedTabIndex.value
+    })
   }
 }
 
@@ -719,6 +773,15 @@ const copyToClipboard = async (item: any) => {
 }
 
 const handleKeyDown = async (e: KeyboardEvent) => {
+  // 处理 Ctrl+F 搜索快捷键，聚焦到搜索框
+  if (e.ctrlKey && (e.key === 'f' || e.key === 'F')) {
+    e.preventDefault()
+    e.stopPropagation()
+    logger.debug('Ctrl+F 快捷键被触发，聚焦搜索框')
+    await focusSearchInput()
+    return
+  }
+  
   // 防止 Alt 键触发系统菜单
   if (e.altKey) {
     e.preventDefault()
