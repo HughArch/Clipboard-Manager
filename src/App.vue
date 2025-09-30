@@ -95,7 +95,12 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const selectedTabIndex = ref(0)
-const searchPlaceholders = ['Search clipboard history...', 'Search text...', 'Search images...', 'Search favorites...']
+const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
+const showGroupDropdown = ref(false) // 是否显示分组下拉菜单
+const searchPlaceholders = ['Search clipboard history...', 'Search text...', 'Search images...', 'Search favorites...', 'Search group...']
+
+// 计算有条目的分组
+const availableGroups = computed(() => groups.value.filter(g => g.item_count > 0))
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
 const thumbnailCache = shallowRef(new Map<string, string>()) // 缩略图缓存 - 使用 shallowRef 优化性能
 let db: Awaited<ReturnType<any>> | null = null
@@ -369,7 +374,7 @@ const scrollToSelectedItem = async (itemId: number) => {
 const filteredHistory = computed(() => {
   const query = searchQuery.value.toLowerCase()
   
-  // 根据标签页筛选：0=All显示所有，1=Text只显示文本，2=Images只显示图片，3=Favorites只显示收藏的
+  // 根据标签页筛选：0=All显示所有，1=Text只显示文本，2=Images只显示图片，3=Favorites只显示收藏的，4=分组
   let items: any[] = []
   
   if (selectedTabIndex.value === 0) {
@@ -384,6 +389,9 @@ const filteredHistory = computed(() => {
   } else if (selectedTabIndex.value === 3) {
     // 收藏标签页：只显示收藏的内容
     items = clipboardHistory.value.filter(item => item.isFavorite === true)
+  } else if (selectedTabIndex.value === 4) {
+    // 分组标签页：显示当前分组的内容
+    items = clipboardHistory.value
   }
   
   // 应用搜索过滤
@@ -396,7 +404,7 @@ const filteredHistory = computed(() => {
       // 图片标签页：图片内容不支持文本搜索，返回false（搜索时不显示任何图片）
       return false
     } else {
-      // 全部、文本和收藏标签页：只搜索文本类型的内容
+      // 全部、文本、收藏和分组标签页：只搜索文本类型的内容
       if (item.type === 'text') {
         return item.content?.toLowerCase().includes(query) || false
       }
@@ -769,6 +777,116 @@ const handleConfirmDialogConfirm = () => {
   confirmDialog.value.onConfirm()
 }
 
+// 分组过滤相关函数
+const switchToGroup = async (groupId: number) => {
+  const group = groups.value.find(g => g.id === groupId)
+  if (!group) return
+  
+  const switchStart = performance.now()
+  const fromTab = selectedGroupId.value 
+    ? `分组(${groups.value.find(g => g.id === selectedGroupId.value)?.name || '未知'})`
+    : `${selectedTabIndex.value}(${['全部', '文本', '图片', '收藏'][selectedTabIndex.value]})`
+    
+  logger.info('开始切换到分组', { 
+    from: fromTab,
+    to: `分组(${group.name})`,
+    groupId: groupId,
+    timestamp: new Date().toISOString()
+  })
+  
+  selectedTabIndex.value = 4 // 设置为分组模式的虚拟索引
+  selectedGroupId.value = groupId
+  showGroupDropdown.value = false
+  
+  // 重置搜索和选中状态
+  searchQuery.value = ''
+  selectedItem.value = null
+  
+  // 重置分页状态
+  currentOffset.value = 0
+  hasMoreData.value = true
+  
+  // 如果在搜索模式，先退出搜索模式
+  if (isInSearchMode) {
+    logger.info('退出搜索模式')
+    await exitSearchMode()
+  } else {
+    // 从全部数据缓存中过滤分组数据
+    await loadGroupData(groupId)
+  }
+  
+  const switchTime = performance.now() - switchStart
+  logger.info('分组切换完成', { 
+    totalTime: `${switchTime.toFixed(2)}ms`,
+    newGroup: `分组(${group.name})`
+  })
+  
+  // 切换后自动聚焦搜索框
+  focusSearchInput()
+}
+
+const loadGroupData = async (groupId: number) => {
+  logger.info('开始加载分组数据', { groupId })
+  
+  if (allDataLoaded.value && allHistoryCache.value.length > 0) {
+    // 从内存缓存中过滤
+    logger.info('使用内存数据进行分组过滤', { 
+      groupId, 
+      cacheSize: allHistoryCache.value.length 
+    })
+    
+    const groupItems = allHistoryCache.value.filter(item => item.groupId === groupId)
+    clipboardHistory.value = groupItems
+    triggerRef(clipboardHistory)
+    
+    logger.info('内存分组过滤完成', { 
+      groupId, 
+      filteredCount: groupItems.length, 
+      totalCount: allHistoryCache.value.length 
+    })
+  } else {
+    // 从数据库查询
+    logger.info('从数据库加载分组数据', { groupId })
+    try {
+      const rows = await db!.select(
+        `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+         FROM clipboard_history 
+         WHERE group_id = ? 
+         ORDER BY timestamp DESC 
+         LIMIT ?`,
+        [groupId, 300]
+      )
+      
+      const processStart = performance.now()
+      const groupItems = rows.map((row: any) => ({
+        id: row.id,
+        content: row.content,
+        type: row.type,
+        timestamp: row.timestamp,
+        isFavorite: row.is_favorite === 1,
+        imagePath: row.image_path ?? null,
+        sourceAppName: row.source_app_name ?? 'Unknown',
+        sourceAppIcon: row.source_app_icon ?? null,
+        note: row.note ?? null,
+        groupId: row.group_id ?? null
+      }))
+      
+      clipboardHistory.value = groupItems
+      triggerRef(clipboardHistory)
+      
+      const processTime = performance.now() - processStart
+      logger.info('数据库分组查询完成', { 
+        groupId, 
+        queryTime: `${processTime.toFixed(2)}ms`, 
+        rowCount: groupItems.length 
+      })
+    } catch (error) {
+      logger.error('加载分组数据失败', { groupId, error: String(error) })
+      showError('加载分组数据失败: ' + String(error))
+    }
+  }
+}
+
 // 右键菜单管理功能
 const showItemContextMenu = (event: MouseEvent, item: any) => {
   event.preventDefault()
@@ -788,6 +906,14 @@ const hideContextMenu = () => {
   showContextMenu.value = false
   contextMenuItem.value = null
   logger.debug('隐藏右键菜单')
+}
+
+// 隐藏分组下拉菜单
+const hideGroupDropdown = (event?: Event) => {
+  if (event && (event.target as Element).closest('.relative')) {
+    return // 如果点击的是分组按钮或下拉菜单内部，不隐藏
+  }
+  showGroupDropdown.value = false
 }
 
 const handleContextMenuAction = (action: string) => {
@@ -891,7 +1017,7 @@ const moveItemToFront = async (itemId: number) => {
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       const dbResult = await db.select(
-        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note FROM clipboard_history WHERE id = ?',
+        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id FROM clipboard_history WHERE id = ?',
         [itemId]
       )
       
@@ -906,7 +1032,8 @@ const moveItemToFront = async (itemId: number) => {
           imagePath: row.image_path ?? null,
           sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
-          note: row.note ?? null
+          note: row.note ?? null,
+          groupId: row.group_id ?? null
         }
         
         // 添加到内存列表的开头
@@ -1297,17 +1424,21 @@ const preventDefaultContextMenu = (e: MouseEvent) => {
 }
 
 const switchTab = async (index: number) => {
-  if (selectedTabIndex.value === index) return // 如果已经是当前tab，不需要切换
+  if (selectedTabIndex.value === index && selectedGroupId.value === null) return // 如果已经是当前tab且不是分组模式，不需要切换
   
   const switchStart = performance.now()
   const tabNames = ['全部', '文本', '图片', '收藏']
+  const fromTab = selectedGroupId.value 
+    ? `分组(${groups.value.find(g => g.id === selectedGroupId.value)?.name || '未知'})`
+    : `${selectedTabIndex.value}(${tabNames[selectedTabIndex.value]})`
   logger.info('开始切换标签页', { 
-    from: `${selectedTabIndex.value}(${tabNames[selectedTabIndex.value]})`,
+    from: fromTab,
     to: `${index}(${tabNames[index]})`,
     timestamp: new Date().toISOString()
   })
   
   selectedTabIndex.value = index
+  selectedGroupId.value = null // 切换普通标签时清除分组选择
   // 重置搜索和选中状态
   searchQuery.value = ''
   selectedItem.value = null
@@ -1452,7 +1583,7 @@ const searchFromDatabase = async () => {
     
     // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id 
       FROM clipboard_history 
       WHERE type = 'text' AND LOWER(content) LIKE ?
     `
@@ -1484,7 +1615,8 @@ const searchFromDatabase = async () => {
         imagePath: row.image_path ?? null,
         sourceAppName: row.source_app_name ?? 'Unknown',
         sourceAppIcon: row.source_app_icon ?? null,
-        note: row.note ?? null
+        note: row.note ?? null,
+        groupId: row.group_id ?? null
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
@@ -1594,7 +1726,7 @@ const loadMoreHistory = async () => {
     const isFavoritesTab = selectedTabIndex.value === 3
     
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
       FROM clipboard_history
     `
     
@@ -1633,7 +1765,8 @@ const loadMoreHistory = async () => {
       imagePath: row.image_path ?? null,
       sourceAppName: row.source_app_name ?? 'Unknown',
       sourceAppIcon: row.source_app_icon ?? null,
-      note: row.note ?? null
+      note: row.note ?? null,
+      groupId: row.group_id ?? null
         }
         
         // 如果是图片且有缩略图数据，恢复到缓存中
@@ -1711,7 +1844,7 @@ const loadRecentHistory = async () => {
     // 对于图片标签页，不加载完整的 content 字段以提高性能，但加载缩略图数据
     if (isImagesTab) {
       sql = `
-        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
+        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
         FROM clipboard_history
         WHERE type = 'image'
         ORDER BY timestamp DESC LIMIT ?
@@ -1719,7 +1852,7 @@ const loadRecentHistory = async () => {
       logger.info('使用优化的图片查询（不加载 content 字段，但加载缩略图）')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
       FROM clipboard_history
     `
     
@@ -1756,6 +1889,7 @@ const loadRecentHistory = async () => {
         sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
           note: row.note ?? null,
+          groupId: row.group_id ?? null,
           // 标记是否需要懒加载内容
           needsContentLoad: isImagesTab && row.type === 'image'
         }
@@ -2081,6 +2215,9 @@ onMounted(async () => {
     // 点击外部隐藏右键菜单
     document.addEventListener('click', hideContextMenu)
     
+    // 点击外部隐藏分组下拉菜单
+    document.addEventListener('click', hideGroupDropdown)
+    
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
     
@@ -2168,6 +2305,9 @@ onUnmounted(() => {
   // 清理右键菜单事件监听器
   document.removeEventListener('contextmenu', preventDefaultContextMenu)
   document.removeEventListener('click', hideContextMenu)
+  
+  // 清理分组下拉菜单事件监听器
+  document.removeEventListener('click', hideGroupDropdown)
   
   // 清理Tauri窗口焦点事件监听器
   if (unlistenFocus.value) {
@@ -2318,7 +2458,7 @@ const checkDataConsistency = () => {
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
-      <div class="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
+      <div class="w-96 lg:w-[28rem] bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
         <div class="flex flex-col h-full">
           <!-- Search Bar (moved to top) -->
           <div class="p-2 border-b border-gray-100 flex-shrink-0">
@@ -2338,7 +2478,7 @@ const checkDataConsistency = () => {
 
           <!-- Navigation Buttons (moved below search) -->
           <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
-            <div class="flex items-center justify-center space-x-2 max-w-[260px] mx-auto">
+            <div class="flex items-center justify-center space-x-2 max-w-[320px] mx-auto">
               <!-- 全部按钮 -->
                 <button
                 @click="switchTab(0)"
@@ -2387,6 +2527,55 @@ const checkDataConsistency = () => {
               >
                 收藏
               </button>
+              
+              <!-- 分组按钮 -->
+              <div class="relative">
+                <button
+                  @click="availableGroups.length > 0 ? (showGroupDropdown = !showGroupDropdown) : null"
+                  class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px] flex items-center space-x-1"
+                  :class="[
+                    selectedTabIndex === 4 
+                      ? 'text-white bg-blue-500' 
+                      : availableGroups.length > 0 
+                        ? 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                        : 'text-gray-400 cursor-not-allowed'
+                  ]"
+                >
+                  <span>分组</span>
+                  <svg 
+                    v-if="availableGroups.length > 0"
+                    class="w-3 h-3 transition-transform duration-200" 
+                    :class="{ 'rotate-180': showGroupDropdown }"
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                  </svg>
+                  <span v-else class="text-xs text-gray-400">({{ availableGroups.length }})</span>
+                </button>
+                
+                <!-- 分组下拉菜单 -->
+                <div 
+                  v-if="showGroupDropdown && availableGroups.length > 0"
+                  class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md z-50 py-0.5 min-w-[120px]"
+                  @click.stop
+                >
+                  <button
+                    v-for="group in availableGroups"
+                    :key="group.id"
+                    @click="switchToGroup(group.id)"
+                    class="w-full px-2 py-1 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors flex items-center space-x-2"
+                  >
+                    <div 
+                      class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      :style="{ backgroundColor: group.color }"
+                    ></div>
+                    <span class="truncate">{{ group.name }}</span>
+                    <span class="text-gray-400 text-xs ml-auto">({{ group.item_count }})</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -2905,6 +3094,133 @@ const checkDataConsistency = () => {
                   <div v-else class="text-xs text-gray-400">
                     Scroll to load more
                   </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Group List -->
+            <div v-show="selectedTabIndex === 4" class="h-full flex flex-col min-h-0">
+              <div class="flex-1 overflow-y-auto min-h-0">
+                <div v-if="selectedGroupId && groups.find(g => g.id === selectedGroupId)" class="px-3 py-2 bg-blue-50 border-b border-blue-100">
+                  <div class="flex items-center space-x-2">
+                    <div 
+                      class="w-3 h-3 rounded-full"
+                      :style="{ backgroundColor: groups.find(g => g.id === selectedGroupId)?.color || '#3B82F6' }"
+                    ></div>
+                    <span class="text-sm font-medium text-blue-700">
+                      {{ groups.find(g => g.id === selectedGroupId)?.name || '未知分组' }}
+                    </span>
+                    <span class="text-xs text-blue-500">({{ clipboardHistory.length }} 个条目)</span>
+                  </div>
+                </div>
+                
+                <div
+                  v-for="item in filteredHistory"
+                  :key="item.id"
+                  :data-item-id="item.id"
+                  :title="item.note || ''"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  :class="{ 
+                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                  }"
+                  @click="selectedItem = item"
+                  @contextmenu="showItemContextMenu($event, item)"
+                >
+                  <div class="flex items-start justify-between">
+                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                      <!-- 源应用图标 -->
+                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
+                        <img 
+                          v-if="item.sourceAppIcon" 
+                          :src="item.sourceAppIcon" 
+                          :alt="item.sourceAppName"
+                          class="w-full h-full object-contain"
+                        />
+                        <div v-else class="w-full h-full bg-gray-100 rounded flex items-center justify-center">
+                          <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                          </svg>
+                        </div>
+                      </div>
+                      
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between mb-1">
+                          <div class="flex items-center space-x-1">
+                            <div 
+                              class="w-2 h-2 rounded-full"
+                              :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
+                            ></div>
+                            <span class="text-xs text-gray-400">{{ item.sourceAppName }}</span>
+                            <span v-if="item.note" class="text-xs text-orange-500" title="有备注">📝</span>
+                          </div>
+                          <span class="text-xs text-gray-400 flex-shrink-0">{{ formatTime(item.timestamp) }}</span>
+                        </div>
+                        
+                        <div class="content-preview">
+                          <template v-if="item.type === 'text'">
+                            <p class="text-sm text-gray-900 line-clamp-2 break-words">{{ item.content }}</p>
+                          </template>
+                          <template v-else>
+                            <div class="flex items-center space-x-2">
+                              <div class="w-12 h-12 border border-gray-200 rounded overflow-hidden bg-gray-50 flex-shrink-0">
+                                <img 
+                                  v-if="getThumbnailSync(item)"
+                                  :src="getThumbnailSync(item)"
+                                  alt="Thumbnail"
+                                  class="w-full h-full object-cover"
+                                />
+                                <div v-else class="w-full h-full flex items-center justify-center">
+                                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                  </svg>
+                                </div>
+                              </div>
+                              <p class="text-sm text-gray-500">图片</p>
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
+                      <!-- 删除按钮 -->
+                      <button
+                        @click.stop="deleteItem(item)"
+                        class="p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                        title="删除"
+                      >
+                        <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 收藏按钮 -->
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': item.isFavorite }"
+                      @click.stop="toggleFavorite(item)"
+                        title="收藏"
+                    >
+                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                    </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Loading states -->
+                <div v-if="isLoadingMore" class="p-4 text-center">
+                  <div class="flex items-center justify-center space-x-2">
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span class="text-xs text-gray-500">Loading more...</span>
+                  </div>
+                </div>
+                
+                <div v-if="clipboardHistory.length === 0 && !isLoadingMore" class="p-8 text-center text-gray-400">
+                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+                    </svg>
+                  </div>
+                  <p class="text-sm">该分组暂无条目</p>
                 </div>
               </div>
             </div>
