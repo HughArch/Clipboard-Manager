@@ -764,6 +764,48 @@ const closeGroupSelector = () => {
   selectedItemForGroup.value = null
 }
 
+// 从分组中移除条目
+const removeItemFromGroup = async (item: any) => {
+  try {
+    const currentGroup = groups.value.find(g => g.id === selectedGroupId.value)
+    const groupName = currentGroup?.name || '未知分组'
+    
+    logger.debug('开始移除条目分组', { itemId: item.id, currentGroupId: selectedGroupId.value })
+    
+    // 调用后端API移除分组
+    await invoke('add_item_to_group', {
+      itemId: item.id,
+      groupId: null // 设置为null表示移除分组
+    })
+    
+    // 重新加载分组列表以更新条目数量
+    await loadGroups()
+    
+    // 更新缓存中的条目
+    updateItemInCache({ ...item, groupId: null })
+    
+    // 由于当前在分组模式下，移除分组后该条目将不再显示
+    // 需要从当前显示的列表中移除
+    const index = clipboardHistory.value.findIndex(i => i.id === item.id)
+    if (index !== -1) {
+      clipboardHistory.value.splice(index, 1)
+      triggerRef(clipboardHistory)
+    }
+    
+    // 如果移除的是当前选中的条目，清空选中状态
+    if (selectedItem.value?.id === item.id) {
+      selectedItem.value = null
+    }
+    
+    logger.info('条目分组移除成功', { itemId: item.id, groupName })
+    showSuccess(`已从"${groupName}"中移除`)
+    
+  } catch (error) {
+    logger.error('移除条目分组失败', { itemId: item.id, error: String(error) })
+    showError('移除分组失败: ' + String(error))
+  }
+}
+
 // 更新缓存中的条目数据
 const updateItemInCache = (updatedItem: any) => {
   // 更新主列表
@@ -956,6 +998,9 @@ const handleContextMenuAction = (action: string) => {
       break
     case 'group':
       openGroupSelector(item)
+      break
+    case 'remove-group':
+      removeItemFromGroup(item)
       break
     case 'favorite':
       toggleFavorite(item)
@@ -3531,15 +3576,6 @@ const checkDataConsistency = () => {
         </div>
         
         <div class="p-4 max-h-[60vh] overflow-y-auto">
-          <!-- 移出分组选项 -->
-          <button
-            @click="addItemToGroup()"
-            class="w-full mb-3 p-3 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
-          >
-            <div class="w-4 h-4 border-2 border-gray-400 rounded-full"></div>
-            <span class="text-gray-700">移出分组</span>
-          </button>
-          
           <!-- 分组列表 -->
           <div v-if="groups.length === 0" class="text-center py-6 text-gray-500">
             <p>暂无分组</p>
@@ -3602,6 +3638,14 @@ const checkDataConsistency = () => {
         class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
       >
         分组
+      </button>
+      <!-- 移除分组选项（仅在分组模式下显示） -->
+      <button
+        v-if="currentTabInfo.isGroupMode"
+        @click="handleContextMenuAction('remove-group')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+      >
+        移除分组
       </button>
       <button
         @click="handleContextMenuAction('copy')"
