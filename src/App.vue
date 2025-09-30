@@ -2172,13 +2172,13 @@ const resetDatabase = async () => {
           >
             Cleanup
           </button> -->
-          <button 
+          <!-- <button 
             class="px-3 py-2 text-sm font-medium text-red-600 hover:text-red-900 hover:bg-red-100 rounded-lg transition-colors duration-200"
             @click="resetDatabase"
             title="重置数据库"
           >
             Reset DB
-          </button>
+          </button> -->
           <button 
             class="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors duration-200"
             @click="showSettings = !showSettings"
