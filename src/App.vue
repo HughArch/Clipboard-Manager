@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, triggerRef } from 'vue'
-import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon } from '@heroicons/vue/24/outline'
+import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
@@ -338,6 +338,48 @@ const toggleFavorite = async (item: any) => {
     }
   } catch (error) {
     logger.error('切换收藏状态失败', { itemId: item.id, error: String(error) })
+  }
+}
+
+// 删除条目功能
+const deleteItem = async (item: any) => {
+  try {
+    // 从数据库删除
+    await db!.execute(
+      'DELETE FROM clipboard_history WHERE id = ?',
+      [item.id]
+    )
+    
+    // 从内存中移除
+    const index = clipboardHistory.value.findIndex(i => i.id === item.id)
+    if (index !== -1) {
+      clipboardHistory.value.splice(index, 1)
+      triggerRef(clipboardHistory) // 触发 shallowRef 更新
+    }
+    
+    // 如果在搜索模式下，也从原始数据中移除
+    if (isInSearchMode) {
+      const originalIndex = originalClipboardHistory.findIndex(i => i.id === item.id)
+      if (originalIndex !== -1) {
+        originalClipboardHistory.splice(originalIndex, 1)
+      }
+    }
+    
+    // 清理缩略图缓存
+    const itemKey = item.id.toString()
+    if (thumbnailCache.value.has(itemKey)) {
+      thumbnailCache.value.delete(itemKey)
+      triggerRef(thumbnailCache)
+    }
+    
+    // 如果当前选中的项是被删除的项，清除选中状态
+    if (selectedItem.value?.id === item.id) {
+      selectedItem.value = null
+    }
+    
+    logger.info('条目删除成功', { itemId: item.id, type: item.type })
+  } catch (error) {
+    logger.error('删除条目失败', { itemId: item.id, error: String(error) })
   }
 }
 
@@ -1973,14 +2015,26 @@ const resetDatabase = async () => {
                         </div>
                       </div>
                     </div>
-                    <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
-                      :class="{ 'opacity-100': item.isFavorite }"
-                      @click.stop="toggleFavorite(item)"
-                    >
-                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
-                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
-                    </button>
+                    <div class="flex items-center space-x-1">
+                      <!-- 删除按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        @click.stop="deleteItem(item)"
+                        title="删除"
+                      >
+                        <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 收藏按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100': item.isFavorite }"
+                        @click.stop="toggleFavorite(item)"
+                        title="收藏"
+                      >
+                        <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                        <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 
@@ -2084,14 +2138,26 @@ const resetDatabase = async () => {
                         </p>
                       </div>
                     </div>
-                    <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
-                      :class="{ 'opacity-100': item.isFavorite }"
-                      @click.stop="toggleFavorite(item)"
-                    >
-                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
-                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
-                    </button>
+                    <div class="flex items-center space-x-1">
+                      <!-- 删除按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        @click.stop="deleteItem(item)"
+                        title="删除"
+                      >
+                        <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 收藏按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100': item.isFavorite }"
+                        @click.stop="toggleFavorite(item)"
+                        title="收藏"
+                      >
+                        <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                        <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 
@@ -2212,14 +2278,26 @@ const resetDatabase = async () => {
                       </div>
                     </div>
                   </div>
-                  <button
-                    class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
-                      :class="{ 'opacity-100': item.isFavorite }"
-                      @click.stop="toggleFavorite(item)"
+                  <div class="flex items-center space-x-1">
+                    <!-- 删除按钮 -->
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      @click.stop="deleteItem(item)"
+                      title="删除"
                     >
-                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
-                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                      <TrashIcon class="w-3.5 h-3.5" />
                     </button>
+                    <!-- 收藏按钮 -->
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100': item.isFavorite }"
+                        @click.stop="toggleFavorite(item)"
+                        title="收藏"
+                      >
+                        <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                        <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                      </button>
+                  </div>
                   </div>
                 </div>
                 
@@ -2344,12 +2422,24 @@ const resetDatabase = async () => {
                         </div>
                       </div>
                     </div>
-                    <button
-                      class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
-                      @click.stop="toggleFavorite(item)"
-                    >
-                      <StarIconSolid class="w-3.5 h-3.5" />
-                    </button>
+                    <div class="flex items-center space-x-1">
+                      <!-- 删除按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                        @click.stop="deleteItem(item)"
+                        title="删除"
+                      >
+                        <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 收藏按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
+                        @click.stop="toggleFavorite(item)"
+                        title="取消收藏"
+                      >
+                        <StarIconSolid class="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
                 
