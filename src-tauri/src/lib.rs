@@ -66,9 +66,40 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
         .execute(&pool)
         .await
-        .map_err(|e| format!("无法创建索引: {}", e))?;
+        .map_err(|e| format!("无法创建 content 索引: {}", e))?;
+    
+    // 为 type 字段创建索引以提高查询性能
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_type ON clipboard_history(type)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建 type 索引: {}", e))?;
+    
+    // 为 timestamp 字段创建索引以提高排序性能
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_timestamp ON clipboard_history(timestamp DESC)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建 timestamp 索引: {}", e))?;
+    
+    // 为 is_favorite 字段创建索引以提高收藏查询性能
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_favorite ON clipboard_history(is_favorite)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建 is_favorite 索引: {}", e))?;
+    
+    // 创建复合索引以优化常用查询组合
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_type_timestamp ON clipboard_history(type, timestamp DESC)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建复合索引: {}", e))?;
+    
+    // 为收藏查询创建复合索引
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_favorite_timestamp ON clipboard_history(is_favorite, timestamp DESC)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建收藏复合索引: {}", e))?;
     
     tracing::info!("数据库初始化完成");
+    tracing::info!("已创建数据库索引: type, timestamp, is_favorite, 以及复合索引");
     Ok(pool)
 }
 
