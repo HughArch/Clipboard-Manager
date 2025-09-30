@@ -605,10 +605,6 @@ const switchTab = async (index: number) => {
   focusSearchInput()
 }
 
-// 保留原有的handleTabChange函数以兼容现有代码
-const handleTabChange = async (index: number) => {
-  await switchTab(index)
-}
 
 // 监听选中项变化，当选中图片时加载完整图片
 watch(selectedItem, async (newItem) => {
@@ -1473,39 +1469,31 @@ const resetDatabase = async () => {
       <div class="w-80 lg:w-96 bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
         <!-- Navigation Buttons -->
         <div class="flex flex-col h-full">
-          <div class="flex-shrink-0 bg-gradient-to-r from-gray-50 to-gray-100 px-3 py-1 border-b border-gray-200">
-            <div class="flex items-center justify-center space-x-0.5 bg-gray-100 p-0.5 rounded-lg shadow-inner max-w-[200px] mx-auto">
-              <!-- All 按钮 -->
+          <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
+            <div class="flex items-center justify-center space-x-2 max-w-[140px] mx-auto">
+              <!-- 全部按钮 -->
               <button
                 @click="switchTab(0)"
-                class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
+                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
                 :class="[
                   selectedTabIndex === 0
-                    ? 'text-white bg-gradient-to-r from-blue-500 to-blue-600 shadow-md shadow-blue-500/20'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
+                    ? 'text-white bg-blue-500'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                 ]"
               >
-                <span class="flex items-center justify-center space-x-1.5">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                  </svg>
-                  <span>All</span>
-                </span>
+                全部
               </button>
-              <!-- Favorites 按钮 -->
+              <!-- 收藏按钮 -->
               <button
                 @click="switchTab(1)"
-                class="relative px-4 py-1.5 text-sm font-medium rounded-md transition-all duration-200 ease-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 focus:ring-offset-gray-100 min-w-[80px]"
+                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
                 :class="[
                   selectedTabIndex === 1
-                    ? 'text-white bg-gradient-to-r from-amber-500 to-yellow-500 shadow-md shadow-amber-500/20'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-white/70 hover:shadow-sm'
+                    ? 'text-white bg-blue-500'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
                 ]"
               >
-                <span class="flex items-center justify-center space-x-1.5">
-                  <StarIcon class="w-3.5 h-3.5" />
-                  <span>Favorites</span>
-                </span>
+                收藏
               </button>
             </div>
           </div>
@@ -1968,80 +1956,23 @@ img[alt$="sourceAppName"] {
   flex-shrink: 0;
 }
 
-/* 按钮切换样式 */
-.nav-button-container {
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border-bottom: 1px solid #e2e8f0;
-  box-shadow: inset 0 -1px 0 0 rgba(255, 255, 255, 0.1);
+/* 极简按钮样式 */
+.clean-nav-button {
+  transition: all 0.1s ease;
+  font-weight: 400;
+  border: none;
 }
 
-.nav-button-list {
-  background: rgba(226, 232, 240, 0.6);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 
-    0 4px 6px -1px rgba(0, 0, 0, 0.1),
-    0 2px 4px -1px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
-}
-
-.nav-button {
-  position: relative;
-  overflow: hidden;
-  transition: all 0.2s ease-out;
-}
-
-.nav-button:hover::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
-  animation: shimmer 0.6s ease-out;
-}
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-/* 按钮文字和图标样式 */
-.nav-button-content {
-  position: relative;
-  z-index: 10;
-  font-weight: 600;
-  letter-spacing: 0.025em;
+.clean-nav-button:hover {
+  transition: all 0.1s ease;
 }
 
 /* 响应式优化 */
 @media (max-width: 640px) {
-  .nav-button-list {
-    max-width: 180px;
-  }
-  
-  .nav-button {
-    min-width: 70px;
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-  }
-}
-
-/* 暗色模式适配 */
-@media (prefers-color-scheme: dark) {
-  .nav-button-container {
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    border-bottom-color: #334155;
-  }
-  
-  .nav-button-list {
-    background: rgba(51, 65, 85, 0.6);
-    border-color: rgba(51, 65, 85, 0.8);
+  .clean-nav-button {
+    min-width: 45px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
   }
 }
 </style>
