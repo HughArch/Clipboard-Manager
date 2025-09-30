@@ -415,7 +415,7 @@ const moveItemToFront = async (itemId: number) => {
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       const dbResult = await db.select(
-        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon FROM clipboard_history WHERE id = ?',
+        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data FROM clipboard_history WHERE id = ?',
         [itemId]
       )
       
@@ -494,6 +494,18 @@ const generateThumbnailForNewItem = async (item: any) => {
     // 存入缓存
     thumbnailCache.value.set(itemKey, thumbnail)
     triggerRef(thumbnailCache) // 手动触发缓存更新
+    
+    // 将缩略图保存到数据库
+    try {
+      await db!.execute(
+        'UPDATE clipboard_history SET thumbnail_data = ? WHERE id = ?',
+        [thumbnail, item.id]
+      )
+      logger.debug('缩略图已保存到数据库', { itemId: item.id })
+    } catch (dbError) {
+      logger.warn('保存缩略图到数据库失败', { itemId: item.id, error: String(dbError) })
+    }
+    
     logger.debug('新图片缩略图生成成功', { itemId: item.id })
   } catch (error) {
     logger.warn('生成缩略图失败', { error: String(error), itemId: item.id })
@@ -822,13 +834,13 @@ watch(selectedItem, async (newItem) => {
       if (newItem.imagePath) {
         logger.info('从文件路径加载图片', { imagePath: newItem.imagePath })
         imageContent = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
-      } else {
+        } else {
         // 使用按需加载函数
         imageContent = await loadImageContent(newItem)
-      }
+        }
       
       if (imageContent) {
-        // 检查图片大小
+          // 检查图片大小
         if (imageContent.length > MAX_IMAGE_PREVIEW_SIZE) {
           logger.warn('图片过大，但仍然显示', { 
             itemId: newItem.id,
@@ -836,9 +848,9 @@ watch(selectedItem, async (newItem) => {
           })
         }
         fullImageContent.value = imageContent
-      } else {
+        } else {
         logger.warn('无法加载图片内容', { itemId: newItem.id })
-        fullImageContent.value = null
+          fullImageContent.value = null
       }
     } catch (error) {
       logger.error('加载图片失败', { itemId: newItem.id, error: String(error) })
@@ -1025,7 +1037,7 @@ const loadMoreHistory = async () => {
     const isFavoritesTab = selectedTabIndex.value === 3
     
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
       FROM clipboard_history
     `
     
@@ -1033,6 +1045,8 @@ const loadMoreHistory = async () => {
       sql += ' WHERE type = \'text\''
     } else if (isImagesTab) {
       sql += ' WHERE type = \'image\''
+      // 对于图片标签页，不加载完整的 content 字段
+      sql = sql.replace('content', '\'\' as content')
     } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
     }
@@ -1047,22 +1061,43 @@ const loadMoreHistory = async () => {
       return
     }
     
-    const newItems = rows.map((row: any) => ({
-      id: row.id,
-      content: row.content,
-      type: row.type,
-      timestamp: row.timestamp,
-      isFavorite: row.is_favorite === 1,
-      imagePath: row.image_path ?? null,
-      sourceAppName: row.source_app_name ?? 'Unknown',
-      sourceAppIcon: row.source_app_icon ?? null
-    }))
+    const newItems = rows.map((row: any) => {
+      const item = {
+        id: row.id,
+        content: row.content,
+        type: row.type,
+        timestamp: row.timestamp,
+        isFavorite: row.is_favorite === 1,
+        imagePath: row.image_path ?? null,
+        sourceAppName: row.source_app_name ?? 'Unknown',
+        sourceAppIcon: row.source_app_icon ?? null
+      }
+      
+      // 如果是图片且有缩略图数据，恢复到缓存中
+      if (row.type === 'image' && row.thumbnail_data) {
+        const itemKey = row.id.toString()
+        thumbnailCache.value.set(itemKey, row.thumbnail_data)
+        logger.debug('从数据库恢复缩略图（加载更多）', { itemId: row.id })
+      }
+      
+      return item
+    })
     
     // 追加新记录到历史列表
     clipboardHistory.value.push(...newItems)
     currentOffset.value += rows.length
     
-    logger.debug('加载了更多记录', { loadedCount: rows.length, totalCount: clipboardHistory.value.length })
+    // 如果恢复了缩略图，触发缓存更新
+    const thumbnailsRestored = newItems.filter((item: any) => item.type === 'image' && thumbnailCache.value.has(item.id.toString())).length
+    if (thumbnailsRestored > 0) {
+      triggerRef(thumbnailCache)
+    }
+    
+    logger.debug('加载了更多记录', { 
+      loadedCount: rows.length, 
+      totalCount: clipboardHistory.value.length,
+      thumbnailsRestored 
+    })
     
     // 如果返回的记录数少于请求的数量，说明没有更多数据了
     if (rows.length < 50) {
@@ -1104,28 +1139,28 @@ const loadRecentHistory = async () => {
     
     let sql: string
     
-    // 对于图片标签页，不加载完整的 content 字段以提高性能
+    // 对于图片标签页，不加载完整的 content 字段以提高性能，但加载缩略图数据
     if (isImagesTab) {
       sql = `
-        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
         FROM clipboard_history
         WHERE type = 'image'
         ORDER BY timestamp DESC LIMIT ?
       `
-      logger.info('使用优化的图片查询（不加载 content 字段）')
+      logger.info('使用优化的图片查询（不加载 content 字段，但加载缩略图）')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
-        FROM clipboard_history
-      `
-      
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
+      FROM clipboard_history
+    `
+    
       if (isTextTab) {
         sql += ' WHERE type = \'text\''
       } else if (isFavoritesTab) {
-        sql += ' WHERE is_favorite = 1'
-      }
-      
-      sql += ' ORDER BY timestamp DESC LIMIT ?'
+      sql += ' WHERE is_favorite = 1'
+    }
+    
+    sql += ' ORDER BY timestamp DESC LIMIT ?'
     }
     
     const dbQueryStart = performance.now()
@@ -1141,18 +1176,29 @@ const loadRecentHistory = async () => {
     const processStart = performance.now()
     const seenIds = new Set()
     const deduplicatedHistory = rows
-      .map((row: any) => ({
+      .map((row: any) => {
+        const item = {
         id: row.id,
-        content: row.content, // 对于图片标签页，这里是空字符串
+          content: row.content, // 对于图片标签页，这里是空字符串
         type: row.type,
         timestamp: row.timestamp,
         isFavorite: row.is_favorite === 1,
         imagePath: row.image_path ?? null,
         sourceAppName: row.source_app_name ?? 'Unknown',
-        sourceAppIcon: row.source_app_icon ?? null,
-        // 标记是否需要懒加载内容
-        needsContentLoad: isImagesTab && row.type === 'image'
-      }))
+          sourceAppIcon: row.source_app_icon ?? null,
+          // 标记是否需要懒加载内容
+          needsContentLoad: isImagesTab && row.type === 'image'
+        }
+        
+        // 如果是图片且有缩略图数据，恢复到缓存中
+        if (row.type === 'image' && row.thumbnail_data) {
+          const itemKey = row.id.toString()
+          thumbnailCache.value.set(itemKey, row.thumbnail_data)
+          logger.debug('从数据库恢复缩略图', { itemId: row.id })
+        }
+        
+        return item
+      })
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
           return false
@@ -1165,8 +1211,14 @@ const loadRecentHistory = async () => {
     logger.info('数据处理完成', { 
       processTime: `${processTime.toFixed(2)}ms`,
       originalCount: rows.length,
-      deduplicatedCount: deduplicatedHistory.length
+      deduplicatedCount: deduplicatedHistory.length,
+      thumbnailsRestored: thumbnailCache.value.size
     })
+    
+    // 如果恢复了缩略图，触发缓存更新
+    if (thumbnailCache.value.size > 0) {
+      triggerRef(thumbnailCache)
+    }
     
     const updateStart = performance.now()
     // 使用 shallowRef 时需要手动触发更新
