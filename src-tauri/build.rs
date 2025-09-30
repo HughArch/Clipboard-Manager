@@ -23,7 +23,9 @@ fn main() {
                 "generate_thumbnail",
                 "write_frontend_log",
                 "open_log_folder",
-                "delete_all_logs"
+                "delete_all_logs",
+                "update_item_note",
+                "get_item_note"
             ]))
     ).unwrap();
 }

@@ -62,6 +62,11 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
     
+    // 进行数据库迁移 - 添加备注字段（如果不存在）
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN note TEXT")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
+    
     // 创建索引
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_content ON clipboard_history(content)")
         .execute(&pool)
@@ -266,7 +271,10 @@ pub fn run() {
             // 日志相关命令  
             commands::open_log_folder,
             commands::delete_all_logs,
-            commands::write_frontend_log
+            commands::write_frontend_log,
+            // 备注管理命令
+            commands::update_item_note,
+            commands::get_item_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

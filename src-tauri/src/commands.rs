@@ -1610,3 +1610,81 @@ pub async fn delete_all_logs() -> Result<(), String> {
     Ok(())
 }
 
+// 备注管理 API
+
+#[tauri::command]
+pub async fn update_item_note(app: AppHandle, item_id: i64, note: String) -> Result<(), String> {
+    tracing::info!("更新条目备注: ID={}, note='{}'", item_id, note);
+    
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        // 更新数据库中的备注
+        let result = sqlx::query("UPDATE clipboard_history SET note = ? WHERE id = ?")
+            .bind(&note)
+            .bind(item_id)
+            .execute(pool)
+            .await;
+            
+            match result {
+                Ok(query_result) => {
+                    if query_result.rows_affected() > 0 {
+                        tracing::info!("✅ 备注更新成功: ID={}", item_id);
+                        Ok(())
+                    } else {
+                        let error_msg = format!("未找到ID为{}的条目", item_id);
+                        tracing::warn!("❌ 备注更新失败: {}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("数据库更新失败: {}", e);
+                    tracing::error!("❌ 备注更新失败: {}", error_msg);
+                    Err(error_msg)
+                }
+            }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 备注更新失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
+pub async fn get_item_note(app: AppHandle, item_id: i64) -> Result<Option<String>, String> {
+    tracing::debug!("获取条目备注: ID={}", item_id);
+    
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        // 从数据库获取备注
+        let result = sqlx::query_as::<_, (Option<String>,)>("SELECT note FROM clipboard_history WHERE id = ?")
+            .bind(item_id)
+            .fetch_optional(pool)
+            .await;
+            
+            match result {
+                Ok(Some((note,))) => {
+                    tracing::debug!("✅ 获取备注成功: ID={}, note={:?}", item_id, note);
+                    Ok(note)
+                }
+                Ok(None) => {
+                    let error_msg = format!("未找到ID为{}的条目", item_id);
+                    tracing::warn!("❌ 获取备注失败: {}", error_msg);
+                    Err(error_msg)
+                }
+                Err(e) => {
+                    let error_msg = format!("数据库查询失败: {}", e);
+                    tracing::error!("❌ 获取备注失败: {}", error_msg);
+                    Err(error_msg)
+                }
+            }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 获取备注失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+

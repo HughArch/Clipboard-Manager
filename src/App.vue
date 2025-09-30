@@ -102,6 +102,19 @@ const isLoadingMore = ref(false) // 添加加载更多状态
 const hasMoreData = ref(true) // 是否还有更多数据
 const currentOffset = ref(0) // 当前加载的偏移量
 const allDataLoaded = ref(false) // 是否已加载全部数据到内存
+
+// 备注管理相关状态
+const showNoteDialog = ref(false) // 是否显示备注编辑对话框
+const editingNoteItem = ref<any>(null) // 正在编辑备注的条目
+const noteText = ref('') // 备注文本
+
+// 右键菜单相关状态
+const showContextMenu = ref(false) // 是否显示右键菜单
+const contextMenuPosition = ref({ x: 0, y: 0 }) // 右键菜单位置
+const contextMenuItem = ref<any>(null) // 右键菜单对应的条目
+
+// 备注输入框引用
+const noteInputRef = ref<HTMLInputElement | null>(null)
 const allHistoryCache = shallowRef<any[]>([]) // 缓存全部数据
 
 // 前一个活动应用程序信息（用于智能粘贴）
@@ -459,6 +472,131 @@ const deleteItem = async (item: any) => {
   }
 }
 
+// 备注管理功能
+const openNoteDialog = (item: any) => {
+  editingNoteItem.value = item
+  noteText.value = item.note || '' // 如果已有备注，显示现有备注
+  showNoteDialog.value = true
+  
+  // 等待DOM更新后聚焦到输入框
+  nextTick(() => {
+    if (noteInputRef.value) {
+      noteInputRef.value.focus()
+      noteInputRef.value.select() // 如果有现有内容，全选
+    }
+  })
+  
+  logger.debug('打开备注编辑对话框', { itemId: item.id, hasExistingNote: !!item.note })
+}
+
+const closeNoteDialog = () => {
+  showNoteDialog.value = false
+  editingNoteItem.value = null
+  noteText.value = ''
+  logger.debug('关闭备注编辑对话框')
+}
+
+const saveNote = async () => {
+  if (!editingNoteItem.value) return
+  
+  try {
+    const trimmedNote = noteText.value.trim()
+    
+    // 调用后端API更新备注
+    await invoke('update_item_note', { 
+      itemId: editingNoteItem.value.id, 
+      note: trimmedNote 
+    })
+    
+    // 更新内存中的数据
+    const updateItemNote = (item: any) => {
+      if (item.id === editingNoteItem.value.id) {
+        item.note = trimmedNote
+      }
+    }
+    
+    // 更新主列表
+    clipboardHistory.value.forEach(updateItemNote)
+    triggerRef(clipboardHistory)
+    
+    // 更新全部数据缓存
+    if (allDataLoaded.value) {
+      allHistoryCache.value.forEach(updateItemNote)
+      triggerRef(allHistoryCache)
+    }
+    
+    // 更新搜索结果（如果在搜索模式）
+    if (isInSearchMode) {
+      originalClipboardHistory.forEach(updateItemNote)
+    }
+    
+    // 更新当前选中项
+    if (selectedItem.value?.id === editingNoteItem.value.id) {
+      selectedItem.value.note = trimmedNote
+    }
+    
+    logger.info('备注保存成功', { 
+      itemId: editingNoteItem.value.id, 
+      noteLength: trimmedNote.length,
+      hasNote: trimmedNote.length > 0
+    })
+    
+    closeNoteDialog()
+    showSuccess('备注保存成功')
+  } catch (error) {
+    logger.error('保存备注失败', { 
+      itemId: editingNoteItem.value?.id, 
+      error: String(error) 
+    })
+    showError('保存备注失败: ' + String(error))
+  }
+}
+
+// 右键菜单管理功能
+const showItemContextMenu = (event: MouseEvent, item: any) => {
+  event.preventDefault()
+  event.stopPropagation()
+  
+  contextMenuItem.value = item
+  contextMenuPosition.value = {
+    x: event.clientX,
+    y: event.clientY
+  }
+  showContextMenu.value = true
+  
+  logger.debug('显示条目右键菜单', { itemId: item.id, x: event.clientX, y: event.clientY })
+}
+
+const hideContextMenu = () => {
+  showContextMenu.value = false
+  contextMenuItem.value = null
+  logger.debug('隐藏右键菜单')
+}
+
+const handleContextMenuAction = (action: string) => {
+  if (!contextMenuItem.value) return
+  
+  const item = contextMenuItem.value
+  logger.debug('执行右键菜单操作', { action, itemId: item.id })
+  
+  switch (action) {
+    case 'note':
+      openNoteDialog(item)
+      break
+    case 'favorite':
+      toggleFavorite(item)
+      break
+    case 'delete':
+      deleteItem(item)
+      break
+    case 'copy':
+      copyToClipboard(item)
+      break
+  }
+  
+  hideContextMenu()
+}
+
 // 检查是否是重复内容，如果是则返回已有条目的ID
 const checkDuplicateContent = async (content: string, contentType: 'text' | 'image'): Promise<number | null> => {
   try {
@@ -533,7 +671,7 @@ const moveItemToFront = async (itemId: number) => {
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       const dbResult = await db.select(
-        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data FROM clipboard_history WHERE id = ?',
+        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note FROM clipboard_history WHERE id = ?',
         [itemId]
       )
       
@@ -547,7 +685,8 @@ const moveItemToFront = async (itemId: number) => {
           isFavorite: row.is_favorite === 1,
           imagePath: row.image_path ?? null,
           sourceAppName: row.source_app_name ?? 'Unknown',
-          sourceAppIcon: row.source_app_icon ?? null
+          sourceAppIcon: row.source_app_icon ?? null,
+          note: row.note ?? null
         }
         
         // 添加到内存列表的开头
@@ -930,8 +1069,8 @@ const loadTabData = async (tabIndex: number) => {
   }
 }
 
-// 禁用浏览器原生右键菜单
-const handleContextMenu = (e: MouseEvent) => {
+// 禁用浏览器原生右键菜单（只对非条目区域生效）
+const preventDefaultContextMenu = (e: MouseEvent) => {
   e.preventDefault()
   e.stopPropagation()
   return false
@@ -1093,7 +1232,7 @@ const searchFromDatabase = async () => {
     
     // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note 
       FROM clipboard_history 
       WHERE type = 'text' AND LOWER(content) LIKE ?
     `
@@ -1124,7 +1263,8 @@ const searchFromDatabase = async () => {
         isFavorite: row.is_favorite === 1,
         imagePath: row.image_path ?? null,
         sourceAppName: row.source_app_name ?? 'Unknown',
-        sourceAppIcon: row.source_app_icon ?? null
+        sourceAppIcon: row.source_app_icon ?? null,
+        note: row.note ?? null
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
@@ -1234,7 +1374,7 @@ const loadMoreHistory = async () => {
     const isFavoritesTab = selectedTabIndex.value === 3
     
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
       FROM clipboard_history
     `
     
@@ -1265,14 +1405,15 @@ const loadMoreHistory = async () => {
       .filter((row: any) => !existingIds.has(row.id)) // 过滤掉已存在的记录
       .map((row: any) => {
         const item = {
-          id: row.id,
-          content: row.content,
-          type: row.type,
-          timestamp: row.timestamp,
-          isFavorite: row.is_favorite === 1,
-          imagePath: row.image_path ?? null,
-          sourceAppName: row.source_app_name ?? 'Unknown',
-          sourceAppIcon: row.source_app_icon ?? null
+      id: row.id,
+      content: row.content,
+      type: row.type,
+      timestamp: row.timestamp,
+      isFavorite: row.is_favorite === 1,
+      imagePath: row.image_path ?? null,
+      sourceAppName: row.source_app_name ?? 'Unknown',
+      sourceAppIcon: row.source_app_icon ?? null,
+      note: row.note ?? null
         }
         
         // 如果是图片且有缩略图数据，恢复到缓存中
@@ -1287,7 +1428,7 @@ const loadMoreHistory = async () => {
     
     // 追加新记录到历史列表
     if (newItems.length > 0) {
-      clipboardHistory.value.push(...newItems)
+    clipboardHistory.value.push(...newItems)
       triggerRef(clipboardHistory) // 触发 shallowRef 更新
     }
     currentOffset.value += rows.length // 使用原始查询的数据量来更新偏移量
@@ -1350,7 +1491,7 @@ const loadRecentHistory = async () => {
     // 对于图片标签页，不加载完整的 content 字段以提高性能，但加载缩略图数据
     if (isImagesTab) {
       sql = `
-        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
+        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
         FROM clipboard_history
         WHERE type = 'image'
         ORDER BY timestamp DESC LIMIT ?
@@ -1358,7 +1499,7 @@ const loadRecentHistory = async () => {
       logger.info('使用优化的图片查询（不加载 content 字段，但加载缩略图）')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note 
       FROM clipboard_history
     `
     
@@ -1394,6 +1535,7 @@ const loadRecentHistory = async () => {
         imagePath: row.image_path ?? null,
         sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
+          note: row.note ?? null,
           // 标记是否需要懒加载内容
           needsContentLoad: isImagesTab && row.type === 'image'
         }
@@ -1710,8 +1852,11 @@ onMounted(async () => {
     window.addEventListener('keydown', handleKeyDown)
     
     // 禁用浏览器原生右键菜单
-    document.addEventListener('contextmenu', handleContextMenu)
+    document.addEventListener('contextmenu', preventDefaultContextMenu)
     logger.debug('已禁用浏览器原生右键菜单')
+    
+    // 点击外部隐藏右键菜单
+    document.addEventListener('click', hideContextMenu)
     
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
@@ -1798,7 +1943,8 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
   
   // 清理右键菜单事件监听器
-  document.removeEventListener('contextmenu', handleContextMenu)
+  document.removeEventListener('contextmenu', preventDefaultContextMenu)
+  document.removeEventListener('click', hideContextMenu)
   
   // 清理Tauri窗口焦点事件监听器
   if (unlistenFocus.value) {
@@ -2126,6 +2272,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
+                  :title="item.note || ''"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
@@ -2133,6 +2280,7 @@ const resetDatabase = async () => {
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
+                  @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
@@ -2169,13 +2317,19 @@ const resetDatabase = async () => {
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                          <span class="text-xs text-gray-400">
-                            {{ formatTime(item.timestamp) }}
-                          </span>
-                        </div>
+                            <span class="text-xs text-gray-400">
+                              {{ formatTime(item.timestamp) }}
+                            </span>
+                            <!-- 备注指示器 -->
+                            <div 
+                              v-if="item.note"
+                              class="w-1.5 h-1.5 bg-blue-400 rounded-full"
+                              :title="item.note"
+                            ></div>
+                          </div>
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
                           {{ item.content }}
-                        </div>
+                      </div>
                         <div v-else class="mt-1">
                           <img 
                             v-if="getThumbnailSync(item)"
@@ -2192,7 +2346,7 @@ const resetDatabase = async () => {
                             <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
-                          </div>
+                    </div>
                         </div>
                       </div>
                     </div>
@@ -2206,15 +2360,15 @@ const resetDatabase = async () => {
                         <TrashIcon class="w-3.5 h-3.5" />
                       </button>
                       <!-- 收藏按钮 -->
-                      <button
-                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
-                        :class="{ 'opacity-100': item.isFavorite }"
-                        @click.stop="toggleFavorite(item)"
+                    <button
+                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100': item.isFavorite }"
+                      @click.stop="toggleFavorite(item)"
                         title="收藏"
-                      >
-                        <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
-                        <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
-                      </button>
+                    >
+                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
+                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                    </button>
                     </div>
                   </div>
                 </div>
@@ -2268,6 +2422,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
+                  :title="item.note || ''"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
@@ -2275,6 +2430,7 @@ const resetDatabase = async () => {
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
+                  @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
@@ -2310,10 +2466,16 @@ const resetDatabase = async () => {
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                          <span class="text-xs text-gray-400">
-                            {{ formatTime(item.timestamp) }}
-                          </span>
-                        </div>
+                            <span class="text-xs text-gray-400">
+                              {{ formatTime(item.timestamp) }}
+                            </span>
+                            <!-- 备注指示器 -->
+                            <div 
+                              v-if="item.note"
+                              class="w-1.5 h-1.5 bg-blue-400 rounded-full"
+                              :title="item.note"
+                            ></div>
+                          </div>
                         <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
                           {{ item.type === 'text' ? item.content : 'Text content' }}
                         </p>
@@ -2393,6 +2555,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
+                  :title="item.note || ''"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
@@ -2400,6 +2563,7 @@ const resetDatabase = async () => {
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
+                  @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
@@ -2435,10 +2599,16 @@ const resetDatabase = async () => {
                             · {{ item.sourceAppName }}
                           </span>
                         </div>
-                        <span class="text-xs text-gray-400">
-                          {{ formatTime(item.timestamp) }}
-                        </span>
-                      </div>
+                            <span class="text-xs text-gray-400">
+                              {{ formatTime(item.timestamp) }}
+                            </span>
+                            <!-- 备注指示器 -->
+                            <div 
+                              v-if="item.note"
+                              class="w-1.5 h-1.5 bg-blue-400 rounded-full"
+                              :title="item.note"
+                            ></div>
+                          </div>
                       <div class="mt-1">
                         <img 
                           v-if="getThumbnailSync(item)"
@@ -2533,6 +2703,7 @@ const resetDatabase = async () => {
                   v-for="item in filteredHistory"
                   :key="item.id"
                   :data-item-id="item.id"
+                  :title="item.note || ''"
                   class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
                   :class="{ 
                     'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
@@ -2540,6 +2711,7 @@ const resetDatabase = async () => {
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
+                  @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
@@ -2576,13 +2748,19 @@ const resetDatabase = async () => {
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                          <span class="text-xs text-gray-400">
-                            {{ formatTime(item.timestamp) }}
-                          </span>
-                        </div>
+                            <span class="text-xs text-gray-400">
+                              {{ formatTime(item.timestamp) }}
+                            </span>
+                            <!-- 备注指示器 -->
+                            <div 
+                              v-if="item.note"
+                              class="w-1.5 h-1.5 bg-blue-400 rounded-full"
+                              :title="item.note"
+                            ></div>
+                          </div>
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
                           {{ item.content }}
-                        </div>
+                      </div>
                         <div v-else class="mt-1">
                           <img 
                             v-if="getThumbnailSync(item)"
@@ -2599,7 +2777,7 @@ const resetDatabase = async () => {
                             <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
-                          </div>
+                    </div>
                         </div>
                       </div>
                     </div>
@@ -2613,13 +2791,13 @@ const resetDatabase = async () => {
                         <TrashIcon class="w-3.5 h-3.5" />
                       </button>
                       <!-- 收藏按钮 -->
-                      <button
-                        class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
-                        @click.stop="toggleFavorite(item)"
+                    <button
+                      class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
+                      @click.stop="toggleFavorite(item)"
                         title="取消收藏"
-                      >
-                        <StarIconSolid class="w-3.5 h-3.5" />
-                      </button>
+                    >
+                      <StarIconSolid class="w-3.5 h-3.5" />
+                    </button>
                     </div>
                   </div>
                 </div>
@@ -2722,6 +2900,83 @@ const resetDatabase = async () => {
       @save-settings="handleSaveSettings"
       @show-toast="handleShowToast"
     />
+    
+    <!-- 右键菜单 -->
+    <div 
+      v-if="showContextMenu"
+      :style="{ 
+        position: 'fixed', 
+        left: contextMenuPosition.x + 'px', 
+        top: contextMenuPosition.y + 'px',
+        zIndex: 9999
+      }"
+      class="bg-white rounded shadow-md border border-gray-200 py-0 w-20 text-xs"
+      @click.stop
+    >
+      <button
+        @click="handleContextMenuAction('note')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+      >
+        备注
+      </button>
+      <button
+        @click="handleContextMenuAction('copy')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+      >
+        复制
+      </button>
+      <button
+        @click="handleContextMenuAction('favorite')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+      >
+        收藏
+      </button>
+      <button
+        @click="handleContextMenuAction('delete')"
+        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs transition-colors duration-100"
+      >
+        删除
+      </button>
+    </div>
+
+    <!-- 备注编辑对话框 -->
+    <div 
+      v-if="showNoteDialog"
+      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      @click="closeNoteDialog"
+    >
+      <div 
+        class="bg-white rounded shadow-lg p-4 w-80 max-w-[90vw]"
+        @click.stop
+      >
+        <h3 class="text-sm font-medium text-gray-900 mb-3">
+          {{ editingNoteItem?.note ? '编辑备注' : '添加备注' }}
+        </h3>
+        <input
+          v-model="noteText"
+          type="text"
+          placeholder="请输入备注内容..."
+          class="w-full p-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+          @keydown.esc="closeNoteDialog"
+          @keydown.enter="saveNote"
+          ref="noteInputRef"
+        />
+        <div class="flex justify-end space-x-2 mt-3">
+          <button
+            @click="closeNoteDialog"
+            class="px-3 py-1.5 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors duration-100"
+          >
+            取消
+          </button>
+          <button
+            @click="saveNote"
+            class="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors duration-100"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
     
     <!-- Toast notifications -->
     <Toast 

@@ -131,6 +131,16 @@
       "commands": ["generate_thumbnail"]
     },
     {
+      "identifier": "allow-update-item-note",
+      "description": "Allows updating notes for clipboard history items",
+      "commands": ["update_item_note"]
+    },
+    {
+      "identifier": "allow-get-item-note",
+      "description": "Allows getting notes for clipboard history items",
+      "commands": ["get_item_note"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },
