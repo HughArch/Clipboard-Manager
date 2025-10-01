@@ -97,7 +97,7 @@ const showSettings = ref(false)
 const selectedTabIndex = ref(0)
 const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
 const showGroupDropdown = ref(false) // 是否显示分组下拉菜单
-const searchPlaceholders = ['Search clipboard history...', 'Search text...', 'Search images...', 'Search favorites...', 'Search group...']
+const searchPlaceholders = ['搜索剪贴板历史...', '搜索文本...', '搜索图片...', '搜索收藏...', '搜索分组...']
 
 // 计算有条目的分组
 const availableGroups = computed(() => groups.value.filter(g => g.item_count > 0))
@@ -2527,39 +2527,39 @@ const checkDataConsistency = () => {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-gray-50 rounded-lg shadow-2xl border border-gray-200 overflow-hidden">
+  <div class="h-screen flex flex-col bg-base-200 rounded-lg shadow-2xl border border-base-300 overflow-hidden">
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->
-      <div class="w-96 lg:w-[28rem] bg-white border-r border-gray-200 flex flex-col min-h-0 shadow-sm">
+      <div class="w-96 lg:w-[28rem] bg-base-100 border-r border-base-300 flex flex-col min-h-0 shadow-sm">
         <div class="flex flex-col h-full">
           <!-- Search Bar (moved to top) -->
-          <div class="p-2 border-b border-gray-100 flex-shrink-0">
+          <div class="p-2 border-b border-base-200 flex-shrink-0">
             <div class="relative">
               <input
                 v-model="searchQuery"
                 type="text"
                 :placeholder="searchPlaceholders[selectedTabIndex]"
-                class="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 text-xs"
+                class="input input-sm w-full pl-8 text-xs border-0 bg-base-200 focus:bg-base-100 focus:outline-none"
                 ref="searchInputRef"
               />
               <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
-                <MagnifyingGlassIcon class="h-3.5 w-3.5 text-gray-400" />
+                <MagnifyingGlassIcon class="h-3.5 w-3.5 text-base-content/50" />
       </div>
       </div>
     </div>
 
           <!-- Navigation Buttons (moved below search) -->
-          <div class="flex-shrink-0 bg-white px-4 py-1 border-b border-gray-200">
+          <div class="flex-shrink-0 bg-base-100 px-4 py-1 border-b border-base-200">
             <div class="flex items-center justify-center space-x-2 max-w-[320px] mx-auto">
               <!-- 全部按钮 -->
                 <button
                 @click="switchTab(0)"
-                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                class="btn btn-xs"
                   :class="[
                   selectedTabIndex === 0
-                    ? 'text-white bg-blue-500'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'btn-primary'
+                    : 'btn-ghost'
                 ]"
               >
                 全部
@@ -2567,11 +2567,11 @@ const checkDataConsistency = () => {
               <!-- 文本按钮 -->
                 <button
                 @click="switchTab(1)"
-                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                class="btn btn-xs"
                   :class="[
                   selectedTabIndex === 1
-                    ? 'text-white bg-blue-500'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'btn-primary'
+                    : 'btn-ghost'
                 ]"
               >
                 文本
@@ -2579,11 +2579,11 @@ const checkDataConsistency = () => {
               <!-- 图片按钮 -->
           <button 
                 @click="switchTab(2)"
-                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                class="btn btn-xs"
                 :class="[
                   selectedTabIndex === 2
-                    ? 'text-white bg-blue-500'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'btn-primary'
+                    : 'btn-ghost'
                 ]"
               >
                 图片
@@ -2591,63 +2591,64 @@ const checkDataConsistency = () => {
               <!-- 收藏按钮 -->
           <button 
                 @click="switchTab(3)"
-                class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px]"
+                class="btn btn-xs"
                 :class="[
                   selectedTabIndex === 3
-                    ? 'text-white bg-blue-500'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                    ? 'btn-primary'
+                    : 'btn-ghost'
                 ]"
               >
                 收藏
           </button>
               
               <!-- 分组按钮 -->
-              <div class="relative">
+              <div class="dropdown dropdown-bottom">
                 <button
-                  @click="availableGroups.length > 0 ? (showGroupDropdown = !showGroupDropdown) : null"
-                  class="clean-nav-button px-3 py-1 text-xs rounded focus:outline-none min-w-[50px] flex items-center space-x-1"
+                  tabindex="0"
+                  role="button"
+                  class="btn btn-xs gap-1 min-w-fit whitespace-nowrap"
                   :class="[
                     selectedTabIndex === 4 
-                      ? 'text-white bg-blue-500' 
+                      ? 'btn-primary' 
                       : availableGroups.length > 0 
-                        ? 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-                        : 'text-gray-400 cursor-not-allowed'
+                        ? 'btn-ghost'
+                        : 'btn-disabled'
                   ]"
+                  :disabled="availableGroups.length === 0"
                 >
                   <span>分组</span>
                   <svg 
                     v-if="availableGroups.length > 0"
-                    class="w-3 h-3 transition-transform duration-200" 
-                    :class="{ 'rotate-180': showGroupDropdown }"
+                    class="w-3 h-3" 
                     fill="none" 
                     stroke="currentColor" 
                     viewBox="0 0 24 24"
                   >
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                     </svg>
-                  <span v-else class="text-xs text-gray-400">({{ availableGroups.length }})</span>
+                  <span v-else class="text-xs opacity-50">({{ availableGroups.length }})</span>
                 </button>
                 
                 <!-- 分组下拉菜单 -->
-                <div 
-                  v-if="showGroupDropdown && availableGroups.length > 0"
-                  class="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-md z-50 py-0.5 min-w-[120px]"
-                  @click.stop
+                <ul 
+                  v-if="availableGroups.length > 0"
+                  tabindex="0"
+                  class="dropdown-content menu bg-base-100 rounded-box z-50 w-52 p-2 shadow"
                 >
-                <button
-                    v-for="group in availableGroups"
-                    :key="group.id"
-                    @click="switchToGroup(group.id)"
-                    class="w-full px-2 py-1 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors flex items-center space-x-2"
-                  >
-                    <div 
-                      class="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                      :style="{ backgroundColor: group.color }"
-                    ></div>
-                    <span class="truncate">{{ group.name }}</span>
-                    <span class="text-gray-400 text-xs ml-auto">({{ group.item_count }})</span>
-                </button>
-          </div>
+                <li v-for="group in availableGroups" :key="group.id">
+                    <button
+                      @click="switchToGroup(group.id)"
+                      class="flex items-center space-x-2 text-xs"
+                    >
+                      <div 
+                        class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                        :style="{ backgroundColor: group.color }"
+                      ></div>
+                      <span class="truncate">{{ group.name }}</span>
+                      <span class="opacity-50 text-xs ml-auto">({{ group.item_count }})</span>
+                    </button>
+                  </li>
+          </ul>
                   </div>
                 </div>
               </div>
@@ -2655,16 +2656,16 @@ const checkDataConsistency = () => {
           <div class="flex-1 min-h-0">
             <div class="h-full flex flex-col min-h-0">
               <!-- 分组头部信息 (仅在分组模式下显示) -->
-              <div v-if="currentTabInfo.showGroupHeader" class="px-3 py-2 bg-blue-50 border-b border-blue-100">
+              <div v-if="currentTabInfo.showGroupHeader" class="px-3 py-2 bg-primary/10 border-b border-primary/20">
                 <div class="flex items-center space-x-2">
                   <div 
                     class="w-3 h-3 rounded-full"
                     :style="{ backgroundColor: groups.find(g => g.id === selectedGroupId)?.color || '#3B82F6' }"
                   ></div>
-                  <span class="text-sm font-medium text-blue-700">
+                  <span class="text-sm font-medium text-primary">
                     {{ groups.find(g => g.id === selectedGroupId)?.name || '未知分组' }}
                   </span>
-                  <span class="text-xs text-blue-500">({{ clipboardHistory.length }} 个条目)</span>
+                  <span class="text-xs text-primary/70">({{ clipboardHistory.length }} 个条目)</span>
                 </div>
               </div>
               
@@ -2675,64 +2676,63 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="card bg-base-100 border border-base-200 hover:bg-primary/5 cursor-pointer transition-all duration-200 mb-0.5 mx-3 relative group"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                    'bg-primary/10 border-primary/20': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick(item)"
                   @contextmenu="showItemContextMenu($event, item)"
                 >
-                  <div class="flex items-start justify-between">
-                    <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
+                  <div class="card-body" :class="item.type === 'image' ? 'p-1.5' : 'p-0.5'">
+                    <div class="flex items-start space-x-1.5 flex-1 min-w-0 mr-1.5">
                       <!-- 源应用图标 -->
-                      <div class="flex-shrink-0 w-6 h-6 mt-0.5">
-                        <img 
-                          v-if="item.sourceAppIcon" 
-                          :src="item.sourceAppIcon" 
-                          :alt="item.sourceAppName"
-                          class="w-6 h-6 rounded object-contain"
-                        />
-                        <div 
-                          v-else 
-                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
-                          :title="item.sourceAppName"
-                        >
-                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
-                          </svg>
+                      <div class="avatar">
+                        <div class="w-4 h-4 rounded">
+                          <img 
+                            v-if="item.sourceAppIcon" 
+                            :src="item.sourceAppIcon" 
+                            :alt="item.sourceAppName"
+                            class="w-4 h-4 rounded object-contain"
+                          />
+                          <div 
+                            v-else 
+                            class="w-4 h-4 rounded bg-base-300 flex items-center justify-center"
+                            :title="item.sourceAppName"
+                          >
+                            <svg class="w-2 h-2 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                            </svg>
+                          </div>
                         </div>
                       </div>
                       
                       <div class="flex-1 min-w-0">
-                        <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center justify-between mb-0.5">
                           <div class="flex items-center space-x-1">
-                            <div 
-                              class="w-1.5 h-1.5 rounded-full"
-                              :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
-                            ></div>
-                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            <div class="badge badge-xs" :class="item.type === 'text' ? 'badge-success' : 'badge-secondary'">
                               {{ item.type }}
-                            </span>
-                            <span class="text-xs text-gray-400">
+                            </div>
+                            <span class="text-xs opacity-60">
                               · {{ item.sourceAppName }}
                             </span>
-                          </div>
-                          <span class="text-xs text-gray-400">
-                            {{ formatTime(item.timestamp) }}
-                          </span>
+                            <span class="text-xs opacity-60">
+                              · {{ formatTime(item.timestamp) }}
+                            </span>
                             <!-- 备注指示器 -->
                             <div 
                               v-if="item.note"
-                              class="w-1.5 h-1.5 bg-blue-400 rounded-full"
-                              :title="item.note"
+                              class="w-1.5 h-1.5 bg-blue-500 rounded-full"
                             ></div>
+                          </div>
+                          <div class="flex items-center space-x-1">
+                          </div>
                         </div>
-                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 leading-tight" :class="item.content.length > 50 ? 'line-clamp-2' : 'line-clamp-1'">
                           {{ item.content }}
                       </div>
-                        <div v-else class="mt-1">
+                        <div v-else class="mt-0.5">
                           <img 
                             v-if="getThumbnailSync(item)"
                             :src="getThumbnailSync(item)"
@@ -2745,31 +2745,37 @@ const checkDataConsistency = () => {
                             v-else
                             class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
                           >
-                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
                     </div>
                         </div>
                       </div>
                     </div>
-                    <div class="flex items-center space-x-1">
+                    <div class="card-actions justify-end absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1">
                       <!-- 删除按钮 -->
                       <button
-                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        class="w-4 h-4 bg-red-50 hover:bg-red-500 hover:text-white border border-red-200 text-red-600 rounded flex items-center justify-center"
                         @click.stop="deleteItem(item)"
                         title="删除"
                       >
-                        <TrashIcon class="w-3.5 h-3.5" />
+                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
                       </button>
                       <!-- 收藏按钮 -->
                     <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
-                      :class="{ 'opacity-100': item.isFavorite }"
+                      class="w-4 h-4 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
+                      :class="item.isFavorite ? 'bg-yellow-100 text-yellow-600 border-yellow-300' : 'bg-gray-50 text-gray-600 border-gray-200'"
                       @click.stop="toggleFavorite(item)"
                         title="收藏"
                     >
-                      <StarIcon v-if="!item.isFavorite" class="w-3.5 h-3.5" />
-                      <StarIconSolid v-else class="w-3.5 h-3.5 text-yellow-500" />
+                      <svg v-if="!item.isFavorite" class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                      </svg>
+                      <svg v-else class="w-2.5 h-2.5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+                      </svg>
                     </button>
                     </div>
                   </div>
@@ -2859,11 +2865,10 @@ const checkDataConsistency = () => {
                             <div 
                               v-if="item.note"
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
-                              :title="item.note"
                             ></div>
                           </div>
                         <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
-                          {{ item.type === 'text' ? item.content : 'Text content' }}
+                          {{ item.type === 'text' ? item.content : '文本内容' }}
                         </p>
                       </div>
                     </div>
@@ -2976,7 +2981,6 @@ const checkDataConsistency = () => {
                             <div 
                               v-if="item.note"
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
-                              :title="item.note"
                             ></div>
                           </div>
                       <div class="mt-1">
@@ -3109,7 +3113,6 @@ const checkDataConsistency = () => {
                             <div 
                               v-if="item.note"
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
-                              :title="item.note"
                             ></div>
                         </div>
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
@@ -3326,7 +3329,7 @@ const checkDataConsistency = () => {
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
               <h2 class="text-base font-semibold text-gray-900">
-                {{ selectedItem?.type === 'text' ? 'Text Content' : selectedItem?.type === 'image' ? 'Image Preview' : 'Select an Item' }}
+                {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : '请先选择' }}
               </h2>
             </div>
             <div class="flex items-center space-x-2">

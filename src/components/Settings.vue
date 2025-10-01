@@ -266,7 +266,7 @@ const handleSubmit = async () => {
     }
     
     // 所有操作成功
-    emit('show-toast', { type: 'success', title: 'Settings Saved', message: 'All settings updated successfully!', duration: 3000 })
+    emit('show-toast', { type: 'success', title: '保存设置', message: '所有设置已成功保存！', duration: 3000 })
     emit('save-settings', settings.value)
     emit('update:show', false)
     
@@ -274,8 +274,8 @@ const handleSubmit = async () => {
     console.error('Failed to save settings:', error)
     emit('show-toast', {
       type: 'error',
-      title: 'Save Failed',
-      message: 'Settings could not be saved. Try again.',
+      title: '保存失败',
+      message: '设置无法保存，请重试。',
       duration: 5000
     })
   }
@@ -283,53 +283,56 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9998] p-3">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300 max-h-[90vh] overflow-y-auto">
+  <div v-if="show" class="modal modal-open">
+    <div class="modal-box w-full max-w-md">
       <!-- Header -->
-      <div class="px-4 py-3 border-b border-gray-200">
-        <div class="flex items-center space-x-2">
-          <div class="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-            </svg>
-          </div>
-          <h2 class="text-lg font-semibold text-gray-900">Settings</h2>
+      <div class="flex items-center space-x-2 mb-4">
+        <div class="w-6 h-6 bg-gradient-to-br from-primary to-secondary rounded-lg flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
         </div>
+        <h2 class="text-lg font-semibold">设置</h2>
       </div>
-      
       <!-- Content -->
-      <div class="p-4">
+      <div>
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <!-- General Settings Section -->
           <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">General</h3>
+            <h3 class="text-sm font-medium border-b border-base-200 pb-1">通用</h3>
             
             <!-- 最大历史记录数和时间 - 一行两列 -->
             <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">Max Items</label>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text text-xs">最大数量</span>
+                </label>
             <input
               v-model.number="settings.max_history_items"
               type="number"
               min="1"
-                  class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                  class="input input-bordered input-sm"
             />
           </div>
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">Max Days</label>
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text text-xs">最大时间（天）</span>
+                </label>
             <input
               v-model.number="settings.max_history_time"
               type="number"
               min="1"
-                  class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                  class="input input-bordered input-sm"
             />
               </div>
           </div>
 
           <!-- 快捷键 -->
-            <div class="space-y-1">
-              <label class="block text-xs font-medium text-gray-700">Global Hotkey</label>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text text-xs">全局热键</span>
+              </label>
             <div class="relative">
               <input
                 ref="hotkeyInputRef"
@@ -337,10 +340,9 @@ const handleSubmit = async () => {
                 type="text"
                   :placeholder="isRecording ? 'Press keys...' : `e.g. ${getDefaultModifierKey()}+Shift+V`"
                 :readonly="isRecording"
-                  class="w-full border rounded-md px-2 py-1.5 pr-14 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+                  class="input input-bordered input-sm pr-14"
                 :class="{
-                  'border-blue-400 bg-blue-50': isRecording,
-                  'border-gray-200': !isRecording
+                  'input-info': isRecording
                 }"
                 @keydown="handleKeyDown"
                 @keyup="handleKeyUp"
@@ -349,85 +351,83 @@ const handleSubmit = async () => {
               <button
                 type="button"
                 @click="isRecording ? stopRecording() : startRecording()"
-                  class="absolute right-1 top-1/2 transform -translate-y-1/2 px-2 py-0.5 text-xs font-medium rounded transition-all duration-200"
+                  class="btn btn-xs absolute right-1 top-1/2 transform -translate-y-1/2"
                 :class="{
-                  'bg-red-500 text-white hover:bg-red-600': isRecording,
-                  'bg-blue-500 text-white hover:bg-blue-600': !isRecording
+                  'btn-error': isRecording,
+                  'btn-primary': !isRecording
                 }"
               >
-                {{ isRecording ? 'Stop' : 'Record' }}
+                {{ isRecording ? '停止录制' : '开始录制' }}
               </button>
             </div>
-              <p v-if="isRecording && getRecordingPreview()" class="text-xs text-blue-600">
+              <p v-if="isRecording && getRecordingPreview()" class="text-xs text-info">
                 Preview: {{ getRecordingPreview() }}
               </p>
           </div>
 
           <!-- 开机自启动 -->
-            <label class="flex items-center space-x-2 p-2 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors duration-200 cursor-pointer">
+            <label class="label cursor-pointer bg-base-200 rounded-lg p-2 hover:bg-base-300 transition-colors">
+              <span class="label-text text-xs">开机自启动</span>
               <input
                 v-model="settings.auto_start"
                 type="checkbox"
-                class="w-3 h-3 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-1"
+                class="checkbox checkbox-sm checkbox-primary"
               />
-              <span class="text-xs font-medium text-gray-700">Start with system</span>
             </label>
           </div>
 
           <!-- Log Management Section -->
           <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">Log Management</h3>
+            <h3 class="text-sm font-medium border-b border-base-200 pb-1">日志管理</h3>
             
             <div class="grid grid-cols-2 gap-2">
               <!-- Open Log Folder -->
               <button
                 type="button"
                 @click="openLogFolder"
-                class="flex items-center justify-center space-x-1 p-2 bg-green-50 hover:bg-green-100 border border-green-200 rounded-md transition-colors duration-200"
+                class="btn btn-sm btn-success btn-outline gap-1"
               >
-                <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z"></path>
                 </svg>
-                <span class="text-xs font-medium text-green-700">Open Logs</span>
+                <span class="text-xs">打开日志文件夹</span>
               </button>
 
               <!-- Delete All Logs -->
               <button
                 type="button"
                 @click="deleteAllLogs"
-                class="flex items-center justify-center space-x-1 p-2 bg-red-50 hover:bg-red-100 border border-red-200 rounded-md transition-colors duration-200"
+                class="btn btn-sm btn-error btn-outline gap-1"
               >
-                <svg class="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
-                <span class="text-xs font-medium text-red-700">Delete All</span>
+                <span class="text-xs">删除所有日志</span>
               </button>
             </div>
             
-            <div class="p-2 bg-blue-50 border border-blue-200 rounded-md">
-              <div class="flex items-start space-x-2">
-                <svg class="w-3 h-3 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <p class="text-xs text-blue-800">Logs help diagnose issues. Files are rotated daily and cleaned after 30 days.</p>
-              </div>
+            <div class="alert alert-info">
+              <svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              <span class="text-xs">日志文件用于诊断问题。每天会自动轮换并在30天后删除。</span>
             </div>
           </div>
 
           <!-- 按钮组 -->
-          <div class="flex justify-end space-x-2 pt-3 border-t border-gray-200">
+          <div class="modal-action pt-3 border-t border-base-200">
             <button
               type="button"
-              class="px-3 py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-all duration-200"
+              class="btn btn-ghost btn-sm"
               @click="$emit('update:show', false)"
             >
-              Cancel
+              取消
             </button>
             <button
               type="submit"
-              class="px-4 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all duration-200 shadow-sm hover:shadow-md"
+              class="btn btn-primary btn-sm"
             >
-              Save Settings
+              保存设置
             </button>
           </div>
         </form>
@@ -447,4 +447,4 @@ const handleSubmit = async () => {
     cancel-text="Cancel"
     @confirm="confirmDeleteLogs"
   />
-</template> 
+</template>

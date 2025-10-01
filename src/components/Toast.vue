@@ -28,6 +28,16 @@ const getIcon = (type: string) => {
   }
 }
 
+const getAlertClass = (type: string) => {
+  switch (type) {
+    case 'success': return 'alert-success'
+    case 'error': return 'alert-error'
+    case 'warning': return 'alert-warning'
+    case 'info': return 'alert-info'
+    default: return 'alert-info'
+  }
+}
+
 const getColorClasses = (type: string) => {
   switch (type) {
     case 'success': 
@@ -83,7 +93,7 @@ watch(() => props.messages, (newMessages) => {
 </script>
 
 <template>
-  <div class="fixed top-4 right-4 z-[9999] space-y-2 pointer-events-none">
+  <div class="toast toast-top toast-end z-[9999]">
     <TransitionGroup
       name="toast"
       tag="div"
@@ -93,42 +103,35 @@ watch(() => props.messages, (newMessages) => {
         v-for="toast in messages"
         :key="toast.id"
         :class="[
-          'w-80 border rounded-lg shadow-lg backdrop-blur-sm pointer-events-auto',
-          'transform transition-all duration-300 ease-in-out',
-          getColorClasses(toast.type).container
+          'alert w-80 shadow-lg',
+          getAlertClass(toast.type)
         ]"
       >
-        <div class="p-4">
-          <div class="flex items-start space-x-3">
-            <div class="flex-shrink-0">
-              <component 
-                :is="getIcon(toast.type)" 
-                :class="['h-5 w-5', getColorClasses(toast.type).icon]"
-              />
-            </div>
-            <div class="flex-1">
-              <p :class="['text-sm font-medium leading-tight', getColorClasses(toast.type).title]">
-                {{ toast.title }}
-              </p>
-              <p 
-                v-if="toast.message" 
-                :class="['mt-1 text-sm leading-relaxed', getColorClasses(toast.type).message]"
-              >
-                {{ toast.message }}
-              </p>
-            </div>
-            <div class="ml-2 flex-shrink-0 flex">
-              <button
-                @click="removeToast(toast.id)"
-                :class="[
-                  'inline-flex p-1 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 hover:bg-black hover:bg-opacity-10',
-                  getColorClasses(toast.type).button
-                ]"
-              >
-                <span class="sr-only">Close</span>
-                <XMarkIcon class="h-3 w-3" />
-              </button>
-            </div>
+        <div class="flex items-start space-x-3">
+          <div class="flex-shrink-0">
+            <component 
+              :is="getIcon(toast.type)" 
+              class="h-5 w-5"
+            />
+          </div>
+          <div class="flex-1">
+            <p class="text-sm font-medium leading-tight">
+              {{ toast.title }}
+            </p>
+            <p 
+              v-if="toast.message" 
+              class="mt-1 text-sm leading-relaxed opacity-80"
+            >
+              {{ toast.message }}
+            </p>
+          </div>
+          <div class="ml-2 flex-shrink-0 flex">
+            <button
+              @click="removeToast(toast.id)"
+              class="btn btn-sm btn-circle btn-ghost"
+            >
+              <XMarkIcon class="h-3 w-3" />
+            </button>
           </div>
         </div>
       </div>
@@ -155,4 +158,4 @@ watch(() => props.messages, (newMessages) => {
 .toast-move {
   transition: transform 0.3s ease;
 }
-</style> 
+</style>
