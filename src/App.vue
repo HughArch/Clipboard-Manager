@@ -392,7 +392,7 @@ const scrollToSelectedItem = async (itemId: number) => {
   const selectedElement = document.querySelector(`[data-item-id="${itemId}"]`)
   if (selectedElement) {
     selectedElement.scrollIntoView({
-      behavior: 'smooth',
+      behavior: 'instant',
       block: 'nearest',
       inline: 'nearest'
     })
@@ -1420,10 +1420,8 @@ const handleKeyDown = async (e: KeyboardEvent) => {
     if (newSelectedItem && newSelectedItem.id) {
       selectedItem.value = newSelectedItem
       
-      // 滚动到新选中的条目
-      nextTick(() => {
-        scrollToSelectedItem(newSelectedItem.id)
-      })
+      // 立即滚动到新选中的条目，不使用nextTick避免延迟
+      scrollToSelectedItem(newSelectedItem.id)
     }
   }
 }
@@ -2676,9 +2674,9 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="card bg-base-100 border border-base-200 hover:bg-primary/5 cursor-pointer transition-all duration-200 mb-0.5 mx-3 relative group"
+                  class="card bg-base-100 border border-base-200 hover:bg-primary/5 cursor-pointer mb-0.5 mx-3 relative group"
                   :class="{ 
-                    'bg-primary/10 border-primary/20': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -2815,9 +2813,9 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -2931,9 +2929,9 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -3062,9 +3060,9 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -3209,9 +3207,9 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer transition-all duration-200"
+                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -3450,9 +3448,9 @@ const checkDataConsistency = () => {
                   class="w-4 h-4 rounded-full"
                   :style="{ backgroundColor: group.color }"
                 ></div>
-                <div>
+                <div class="flex items-center space-x-2">
                   <h3 class="text-sm font-medium text-gray-900">{{ group.name }}</h3>
-                  <p class="text-sm text-gray-500">{{ group.item_count }} 个条目</p>
+                  <span class="text-sm text-gray-500">({{ group.item_count }} 个条目)</span>
                 </div>
               </div>
               <div class="flex items-center space-x-2">
