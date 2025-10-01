@@ -38,43 +38,7 @@ const getAlertClass = (type: string) => {
   }
 }
 
-const getColorClasses = (type: string) => {
-  switch (type) {
-    case 'success': 
-      return {
-        container: 'bg-green-50 border-green-200',
-        icon: 'text-green-400',
-        title: 'text-green-800',
-        message: 'text-green-600',
-        button: 'text-green-400 hover:text-green-600'
-      }
-    case 'error': 
-      return {
-        container: 'bg-red-50 border-red-200',
-        icon: 'text-red-400',
-        title: 'text-red-800',
-        message: 'text-red-600',
-        button: 'text-red-400 hover:text-red-600'
-      }
-    case 'warning': 
-      return {
-        container: 'bg-yellow-50 border-yellow-200',
-        icon: 'text-yellow-400',
-        title: 'text-yellow-800',
-        message: 'text-yellow-600',
-        button: 'text-yellow-400 hover:text-yellow-600'
-      }
-    case 'info': 
-    default:
-      return {
-        container: 'bg-blue-50 border-blue-200',
-        icon: 'text-blue-400',
-        title: 'text-blue-800',
-        message: 'text-blue-600',
-        button: 'text-blue-400 hover:text-blue-600'
-      }
-  }
-}
+
 
 const removeToast = (id: string) => {
   emit('remove', id)
