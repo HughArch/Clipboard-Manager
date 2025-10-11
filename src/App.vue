@@ -214,6 +214,7 @@ const trimMemoryHistory = () => {
     
     if (removed > 0) {
       logger.debug('内存优化清理完成', { removed, totalItems: clipboardHistory.value.length })
+      triggerRef(clipboardHistory)
     }
   }
   
@@ -2138,10 +2139,12 @@ onMounted(async () => {
           if (existingIndex === -1) {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
+            triggerRef(clipboardHistory)
             
             // 新数据加入，需要失效缓存
             if (allDataLoaded.value) {
               allHistoryCache.value.unshift(newItem)
+              triggerRef(allHistoryCache)
               logger.debug('更新全部数据缓存，添加新条目', { itemId: newItem.id })
             }
             
@@ -2247,10 +2250,12 @@ onMounted(async () => {
           if (existingIndex === -1) {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
+            triggerRef(clipboardHistory)
             
             // 新数据加入，需要失效缓存
             if (allDataLoaded.value) {
               allHistoryCache.value.unshift(newItem)
+              triggerRef(allHistoryCache)
               logger.debug('更新全部数据缓存，添加新图片', { itemId: newItem.id })
             }
             
