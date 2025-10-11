@@ -899,62 +899,48 @@ const switchToGroup = async (groupId: number) => {
 const loadGroupData = async (groupId: number) => {
   logger.info('开始加载分组数据', { groupId })
   
-  if (allDataLoaded.value && allHistoryCache.value.length > 0) {
-    // 从内存缓存中过滤
-    logger.info('使用内存数据进行分组过滤', { 
-      groupId, 
-      cacheSize: allHistoryCache.value.length 
-    })
+  // 始终从数据库查询分组数据，避免仅使用内存缓存导致展示不全
+  try {
+    const rows = await db!.select(
+      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+       FROM clipboard_history 
+       WHERE group_id = ? 
+       ORDER BY timestamp DESC 
+       LIMIT ?`,
+      [groupId, MAX_MEMORY_ITEMS]
+    )
     
-    const groupItems = allHistoryCache.value.filter(item => item.groupId === groupId)
+    const processStart = performance.now()
+    const groupItems = rows.map((row: any) => ({
+      id: row.id,
+      content: row.content,
+      type: row.type,
+      timestamp: row.timestamp,
+      isFavorite: row.is_favorite === 1,
+      imagePath: row.image_path ?? null,
+      sourceAppName: row.source_app_name ?? 'Unknown',
+      sourceAppIcon: row.source_app_icon ?? null,
+      note: row.note ?? null,
+      groupId: row.group_id ?? null
+    }))
+    
     clipboardHistory.value = groupItems
     triggerRef(clipboardHistory)
     
-    logger.info('内存分组过滤完成', { 
+    // 初始化分页状态以支持“加载更多”
+    currentOffset.value = groupItems.length
+    hasMoreData.value = groupItems.length >= MAX_MEMORY_ITEMS
+    selectedItem.value = null
+    
+    const processTime = performance.now() - processStart
+    logger.info('数据库分组查询完成', { 
       groupId, 
-      filteredCount: groupItems.length, 
-      totalCount: allHistoryCache.value.length 
+      queryTime: `${processTime.toFixed(2)}ms`, 
+      rowCount: groupItems.length 
     })
-  } else {
-    // 从数据库查询
-    logger.info('从数据库加载分组数据', { groupId })
-    try {
-      const rows = await db!.select(
-        `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
-         FROM clipboard_history 
-         WHERE group_id = ? 
-         ORDER BY timestamp DESC 
-         LIMIT ?`,
-        [groupId, 300]
-      )
-      
-      const processStart = performance.now()
-      const groupItems = rows.map((row: any) => ({
-        id: row.id,
-        content: row.content,
-        type: row.type,
-        timestamp: row.timestamp,
-        isFavorite: row.is_favorite === 1,
-        imagePath: row.image_path ?? null,
-        sourceAppName: row.source_app_name ?? 'Unknown',
-        sourceAppIcon: row.source_app_icon ?? null,
-        note: row.note ?? null,
-        groupId: row.group_id ?? null
-      }))
-      
-      clipboardHistory.value = groupItems
-      triggerRef(clipboardHistory)
-      
-      const processTime = performance.now() - processStart
-      logger.info('数据库分组查询完成', { 
-        groupId, 
-        queryTime: `${processTime.toFixed(2)}ms`, 
-        rowCount: groupItems.length 
-      })
-    } catch (error) {
-      logger.error('加载分组数据失败', { groupId, error: String(error) })
-      showError('加载分组数据失败: ' + String(error))
-    }
+  } catch (error) {
+    logger.error('加载分组数据失败', { groupId, error: String(error) })
+    showError('加载分组数据失败: ' + String(error))
   }
 }
 
@@ -1457,7 +1443,14 @@ const loadTabData = async (tabIndex: number) => {
       logger.info('已缓存全部数据', { count: allHistoryCache.value.length })
     }
   } else {
-    // 使用内存中的数据进行过滤
+    // 收藏标签页改为使用数据库查询，确保展示数据库中的所有收藏并支持分页
+    if (isFavoritesTab) {
+      logger.info('收藏标签页使用数据库查询以覆盖内存过滤', { tabIndex })
+      await loadRecentHistory()
+      return
+    }
+
+    // 使用内存中的数据进行过滤（文本/图片）
     logger.info('使用内存数据进行过滤', { 
       tabIndex,
       cacheSize: allHistoryCache.value.length 
@@ -1469,8 +1462,6 @@ const loadTabData = async (tabIndex: number) => {
       filteredData = allHistoryCache.value.filter(item => item.type === 'text')
     } else if (isImagesTab) {
       filteredData = allHistoryCache.value.filter(item => item.type === 'image')
-    } else if (isFavoritesTab) {
-      filteredData = allHistoryCache.value.filter(item => item.isFavorite === true)
     }
     
     // 直接设置过滤后的数据
@@ -1670,6 +1661,10 @@ const searchFromDatabase = async () => {
     } else if (isFavoritesTab) {
       // 收藏标签页：只搜索收藏的文本项目
       sql += ' AND is_favorite = 1'
+    } else if (selectedTabIndex.value === 4 && selectedGroupId.value !== null) {
+      // 分组标签页：只搜索当前分组下的文本项目
+      sql += ' AND group_id = ?'
+      params.push(selectedGroupId.value as any)
     }
     // 全部标签页：搜索所有文本内容（无额外条件）
     
@@ -1798,6 +1793,7 @@ const loadMoreHistory = async () => {
     const isTextTab = selectedTabIndex.value === 1
     const isImagesTab = selectedTabIndex.value === 2
     const isFavoritesTab = selectedTabIndex.value === 3
+    const isGroupTab = selectedTabIndex.value === 4 && selectedGroupId.value !== null
     
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
@@ -1812,11 +1808,17 @@ const loadMoreHistory = async () => {
       sql = sql.replace('content', '\'\' as content')
     } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
+    } else if (isGroupTab) {
+      sql += ' WHERE group_id = ?'
     }
     
     sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
     
-    const rows = await db.select(sql, [50, currentOffset.value])
+    const params = isGroupTab 
+      ? [selectedGroupId.value, 50, currentOffset.value]
+      : [50, currentOffset.value]
+    
+    const rows = await db.select(sql, params)
     
     if (rows.length === 0) {
       hasMoreData.value = false
@@ -1912,6 +1914,7 @@ const loadRecentHistory = async () => {
     const isTextTab = selectedTabIndex.value === 1
     const isImagesTab = selectedTabIndex.value === 2
     const isFavoritesTab = selectedTabIndex.value === 3
+    const isGroupTab = selectedTabIndex.value === 4 && selectedGroupId.value !== null
     
     let sql: string
     
@@ -1934,18 +1937,21 @@ const loadRecentHistory = async () => {
         sql += ' WHERE type = \'text\''
       } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
+    } else if (isGroupTab) {
+      sql += ' WHERE group_id = ?'
     }
     
     sql += ' ORDER BY timestamp DESC LIMIT ?'
     }
     
     const dbQueryStart = performance.now()
-    const rows = await db.select(sql, [MAX_MEMORY_ITEMS])
+    const params = isGroupTab ? [selectedGroupId.value, MAX_MEMORY_ITEMS] : [MAX_MEMORY_ITEMS]
+    const rows = await db.select(sql, params)
     const dbQueryTime = performance.now() - dbQueryStart
     logger.info('数据库查询完成', { 
       queryTime: `${dbQueryTime.toFixed(2)}ms`,
       rowCount: rows.length,
-      tabType: isTextTab ? 'text' : isImagesTab ? 'image' : isFavoritesTab ? 'favorites' : 'all'
+      tabType: isTextTab ? 'text' : isImagesTab ? 'image' : isFavoritesTab ? 'favorites' : isGroupTab ? 'group' : 'all'
     })
     
     // 确保去重
