@@ -303,12 +303,12 @@ const handleSubmit = async () => {
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <!-- General Settings Section -->
           <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">General</h3>
+            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">通用设置</h3>
             
             <!-- 最大历史记录数和时间 - 一行两列 -->
             <div class="grid grid-cols-2 gap-3">
               <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">Max Items</label>
+                <label class="block text-xs font-medium text-gray-700">最大历史记录数</label>
             <input
               v-model.number="settings.max_history_items"
               type="number"
@@ -317,7 +317,7 @@ const handleSubmit = async () => {
             />
           </div>
               <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">Max Days</label>
+                <label class="block text-xs font-medium text-gray-700">最大历史记录时间（天）</label>
             <input
               v-model.number="settings.max_history_time"
               type="number"
@@ -329,7 +329,7 @@ const handleSubmit = async () => {
 
           <!-- 快捷键 -->
             <div class="space-y-1">
-              <label class="block text-xs font-medium text-gray-700">Global Hotkey</label>
+              <label class="block text-xs font-medium text-gray-700">全局热键</label>
             <div class="relative">
               <input
                 ref="hotkeyInputRef"
@@ -370,13 +370,13 @@ const handleSubmit = async () => {
                 type="checkbox"
                 class="w-3 h-3 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-1"
               />
-              <span class="text-xs font-medium text-gray-700">Start with system</span>
+              <span class="text-xs font-medium text-gray-700">开机自启动</span>
             </label>
           </div>
 
           <!-- Log Management Section -->
           <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">Log Management</h3>
+            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">日志管理</h3>
             
             <div class="grid grid-cols-2 gap-2">
               <!-- Open Log Folder -->
@@ -388,7 +388,7 @@ const handleSubmit = async () => {
                 <svg class="w-3 h-3 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z"></path>
                 </svg>
-                <span class="text-xs font-medium text-green-700">Open Logs</span>
+                <span class="text-xs font-medium text-green-700">打开日志文件夹</span>
               </button>
 
               <!-- Delete All Logs -->
@@ -400,7 +400,7 @@ const handleSubmit = async () => {
                 <svg class="w-3 h-3 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                 </svg>
-                <span class="text-xs font-medium text-red-700">Delete All</span>
+                <span class="text-xs font-medium text-red-700">删除所有日志</span>
               </button>
             </div>
             
@@ -409,7 +409,7 @@ const handleSubmit = async () => {
                 <svg class="w-3 h-3 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                 </svg>
-                <p class="text-xs text-blue-800">Logs help diagnose issues. Files are rotated daily and cleaned after 30 days.</p>
+                <p class="text-xs text-blue-800">日志文件用于诊断问题。每天会自动轮换并在30天后清理。</p>
               </div>
             </div>
           </div>
@@ -421,13 +421,13 @@ const handleSubmit = async () => {
               class="px-3 py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-all duration-200"
               @click="$emit('update:show', false)"
             >
-              Cancel
+              取消
             </button>
             <button
               type="submit"
               class="px-4 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all duration-200 shadow-sm hover:shadow-md"
             >
-              Save Settings
+              保存设置
             </button>
           </div>
         </form>

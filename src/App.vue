@@ -97,7 +97,7 @@ const showSettings = ref(false)
 const selectedTabIndex = ref(0)
 const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
 const showGroupDropdown = ref(false) // 是否显示分组下拉菜单
-const searchPlaceholders = ['Search clipboard history...', 'Search text...', 'Search images...', 'Search favorites...', 'Search group...']
+const searchPlaceholders = ['搜索剪贴板历史...', '搜索文本...', '搜索图片...', '搜索收藏...', '搜索分组...']
 
 // 计算有条目的分组
 const availableGroups = computed(() => groups.value.filter(g => g.item_count > 0))
@@ -3337,7 +3337,7 @@ const checkDataConsistency = () => {
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
               <h2 class="text-base font-semibold text-gray-900">
-                {{ selectedItem?.type === 'text' ? 'Text Content' : selectedItem?.type === 'image' ? 'Image Preview' : 'Select an Item' }}
+                {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : '选择条目' }}
               </h2>
             </div>
             <div class="flex items-center space-x-2">
@@ -3394,10 +3394,10 @@ const checkDataConsistency = () => {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
               </svg>
             </div>
-            <p class="text-base font-medium mb-2">Select an item to preview</p>
+            <p class="text-base font-medium mb-2">暂无剪贴板条目</p>
             <p class="text-xs text-center max-w-sm">
-              Choose any item from the clipboard history to see its content here. 
-              Double-click or press Enter to paste it.
+              从剪贴板历史中选择任何条目以查看其内容。 
+              双击或按Enter键粘贴它。
             </p>
           </div>
         </div>
