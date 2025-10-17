@@ -59,33 +59,30 @@ try {
     execSync(`npm version ${newVersion} --no-git-tag-version`, { stdio: 'inherit' });
   }
 
-  // 4. 更新 Tauri 配置文件中的版本号
-  log('yellow', '🔧 更新 Tauri 配置...');
-  const tauriConfigPath = path.join(__dirname, '../src-tauri/tauri.conf.json');
-  const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, 'utf8'));
-  tauriConfig.version = newVersion;
-  fs.writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2));
+  // 4. 更新前端版本配置文件（作为版本的唯一来源）
+  log('yellow', '🎨 更新前端版本配置...');
+  const versionTsPath = path.join(__dirname, '../src/config/version.ts');
+  let versionTsContent = fs.readFileSync(versionTsPath, 'utf8');
+  versionTsContent = versionTsContent.replace(/export const APP_VERSION = '.*';/, `export const APP_VERSION = '${newVersion}';`);
+  fs.writeFileSync(versionTsPath, versionTsContent);
 
-  // 5. 更新 Cargo.toml 中的版本号
-  log('yellow', '🦀 更新 Cargo.toml...');
-  const cargoTomlPath = path.join(__dirname, '../src-tauri/Cargo.toml');
-  let cargoContent = fs.readFileSync(cargoTomlPath, 'utf8');
-  cargoContent = cargoContent.replace(/^version = ".*"$/m, `version = "${newVersion}"`);
-  fs.writeFileSync(cargoTomlPath, cargoContent);
+  // 5. 同步版本到其他配置文件
+  log('yellow', '🔄 同步版本到其他配置文件...');
+  execSync('npm run sync-version', { stdio: 'inherit' });
 
   // 6. 提交更改
   log('yellow', '💾 提交版本更改...');
-  execSync('git add .', { stdio: 'inherit' });
-  execSync(`git commit -m "chore: bump version to v${newVersion}"`, { stdio: 'inherit' });
+  execSync(`git add .`);
+  execSync(`git commit -m "chore: release v${newVersion}"`);
 
   // 7. 创建标签
-  log('yellow', '🏷️  创建版本标签...');
-  execSync(`git tag v${newVersion}`, { stdio: 'inherit' });
+  log('yellow', '🏷️ 创建版本标签...');
+  execSync(`git tag v${newVersion}`);
 
   // 8. 推送到远程仓库
-  log('yellow', '📤 推送到远程仓库...');
-  execSync('git push origin main', { stdio: 'inherit' });
-  execSync(`git push origin v${newVersion}`, { stdio: 'inherit' });
+  log('yellow', '🚀 推送到远程仓库...');
+  execSync('git push');
+  execSync('git push --tags');
 
   log('green', `✅ 版本 v${newVersion} 发布成功！`);
   log('blue', '🔗 GitHub Actions 将自动构建并创建 Release');
@@ -94,4 +91,4 @@ try {
 } catch (error) {
   log('red', `❌ 发布失败: ${error.message}`);
   process.exit(1);
-} 
+}

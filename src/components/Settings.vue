@@ -3,6 +3,10 @@ import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { logger } from '../composables/useLogger'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { getFormattedVersion } from '../config/version'
+
+// 动态获取版本信息
+const appVersion = ref(getFormattedVersion())
 
 interface AppSettings {
   max_history_items: number
@@ -414,6 +418,28 @@ const handleSubmit = async () => {
             </div>
           </div>
 
+          <!-- 版本信息 -->
+          <div class="space-y-3">
+            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">版本信息</h3>
+            
+            <div class="p-3 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-md">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                  <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  <span class="text-sm font-medium text-gray-700">剪贴板管理器</span>
+                </div>
+                <div class="flex items-center space-x-2">
+                   <span class="text-xs text-gray-500">版本</span>
+                   <span class="px-2 py-1 text-xs font-mono font-medium text-blue-700 bg-blue-100 rounded-md">
+                     {{ appVersion }}
+                   </span>
+                 </div>
+               </div>
+             </div>
+          </div>
+
           <!-- 按钮组 -->
           <div class="flex justify-end space-x-2 pt-3 border-t border-gray-200">
             <button
@@ -447,4 +473,4 @@ const handleSubmit = async () => {
     cancel-text="Cancel"
     @confirm="confirmDeleteLogs"
   />
-</template> 
+</template>
