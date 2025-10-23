@@ -73,7 +73,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     // 首先获取需要删除的图片文件路径
     let time_images_query = "
         SELECT image_path FROM clipboard_history 
-        WHERE timestamp < ? AND is_favorite = 0 AND image_path IS NOT NULL
+        WHERE timestamp < ? AND is_favorite = 0 AND group_id IS NULL AND image_path IS NOT NULL
     ";
     
     let time_expired_images = match sqlx::query(time_images_query)
@@ -106,7 +106,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     
     let time_cleanup_query = "
         DELETE FROM clipboard_history 
-        WHERE timestamp < ? AND is_favorite = 0
+        WHERE timestamp < ? AND is_favorite = 0 AND group_id IS NULL
     ";
     
     match sqlx::query(time_cleanup_query)
@@ -122,9 +122,9 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         }
     }
     
-    // 2. 按数量清理：保留最新的指定数量记录（收藏的不计入数量限制）
-    // 首先获取当前非收藏记录的总数
-    let count_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE is_favorite = 0";
+    // 2. 按数量清理：保留最新的指定数量记录（收藏的和分组的不计入数量限制）
+    // 首先获取当前非收藏且非分组记录的总数
+    let count_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE is_favorite = 0 AND group_id IS NULL";
     let count_result = match sqlx::query(count_query)
         .fetch_one(db)
         .await {
@@ -136,7 +136,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     };
     
     let current_count: i64 = count_result.get("count");
-    tracing::info!("当前非收藏记录数量: {}, 最大允许: {}", current_count, settings.max_history_items);
+    tracing::info!("当前非收藏且非分组记录数量: {}, 最大允许: {}", current_count, settings.max_history_items);
     
     if current_count > settings.max_history_items as i64 {
         let excess_count = current_count - settings.max_history_items as i64;
@@ -146,10 +146,12 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         let count_images_query = "
             SELECT image_path FROM clipboard_history 
             WHERE is_favorite = 0 
+            AND group_id IS NULL
             AND image_path IS NOT NULL
             AND id IN (
                 SELECT id FROM clipboard_history 
                 WHERE is_favorite = 0 
+                AND group_id IS NULL
                 ORDER BY timestamp ASC 
                 LIMIT ?
             )
@@ -183,13 +185,15 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
             }
         }
         
-        // 删除最旧的非收藏记录
+        // 删除最旧的非收藏且非分组记录
         let count_cleanup_query = "
             DELETE FROM clipboard_history 
             WHERE is_favorite = 0 
+            AND group_id IS NULL
             AND id IN (
                 SELECT id FROM clipboard_history 
                 WHERE is_favorite = 0 
+                AND group_id IS NULL
                 ORDER BY timestamp ASC 
                 LIMIT ?
             )
