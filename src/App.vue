@@ -197,6 +197,39 @@ let lastTextContent = '' // 新增：记录最后处理的文本内容
 let lastTextProcessTime = 0 // 新增：记录最后处理文本的时间
 let isProcessingClipboard = false // 新增：防止并发处理
 
+// JSON格式化相关函数
+const isValidJSON = (str: string): boolean => {
+  try {
+    JSON.parse(str)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const formatJSON = (str: string): string => {
+  try {
+    const parsed = JSON.parse(str)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return str
+  }
+}
+
+// 计算属性：获取格式化后的预览内容
+const formattedPreviewContent = computed(() => {
+  if (!selectedItem.value || selectedItem.value.type !== 'text') {
+    return selectedItem.value?.content || ''
+  }
+  
+  const content = selectedItem.value.content
+  if (isValidJSON(content)) {
+    return formatJSON(content)
+  }
+  
+  return content
+})
+
 // 优化的内存管理函数（更激进的清理策略）
 const trimMemoryHistory = () => {
   // 如果不是在搜索状态，且历史记录超过限制，移除最旧的非收藏条目
@@ -3369,7 +3402,7 @@ const checkDataConsistency = () => {
             <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 min-h-full preview-container">
               <template v-if="selectedItem.type === 'text'">
                 <div class="prose prose-sm max-w-none preview-content">
-                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal preview-content">{{ selectedItem.content }}</pre>
+                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
                 </div>
               </template>
               <template v-else>
