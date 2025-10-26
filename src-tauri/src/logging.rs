@@ -251,4 +251,4 @@ pub fn redirect_stdio_to_log() -> Result<(), Box<dyn std::error::Error>> {
 pub fn redirect_stdio_to_log() -> Result<(), Box<dyn std::error::Error>> {
     // 在非Windows平台上，stdio重定向由系统处理
     Ok(())
-} 
+}

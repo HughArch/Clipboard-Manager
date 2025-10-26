@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
+    "tauri:dev:fast": "sh -c 'if command -v sccache >/dev/null 2>&1; then RUSTC_WRAPPER=sccache tauri dev; else tauri dev; fi'",
     "tauri:build": "tauri build",
     "sync-version": "node scripts/sync-version.cjs",
     "release": "node scripts/release.cjs",

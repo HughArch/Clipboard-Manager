@@ -2,7 +2,9 @@
 
 [build]
 # 使用大部分可用的CPU核心进行并行编译，但不是全部以避免系统卡死
-jobs = 4
+jobs = 12
+# 启用 sccache 作为 rustc 包装器
+rustc-wrapper = "sccache"
 
 [net]
 # 网络重试配置
@@ -17,7 +19,12 @@ protocol = "sparse"
 # linker = "lld-link"
 
 [env]
-# 启用增量编译缓存
-CARGO_INCREMENTAL = "1"
+# sccache 与增量编译冲突，这里关闭增量编译
+CARGO_INCREMENTAL = "0"
 # 启用并行前端
 CARGO_BUILD_PIPELINING = "true" 
+
+
+[target.x86_64-apple-darwin]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/opt/lld/bin/ld64.lld"]
