@@ -320,7 +320,7 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
     
     // 将字符串转换为 Shortcut 类型
     let shortcut_parsed = shortcut.parse::<Shortcut>().map_err(|e| {
-        let error_msg = format!("Invalid hotkey format: {}. Please use format like 'Ctrl+Shift+V'", e);
+        let error_msg = format!("Invalid hotkey format: {}. Please use format like 'Cmd+Shift+V' on macOS or 'Ctrl+Shift+V' on other platforms", e);
         tracing::info!("快捷键解析失败: {}", error_msg);
         error_msg
     })?;
@@ -346,6 +346,57 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
     
     tracing::info!("快捷键注册成功: {}", shortcut);
     Ok(())
+}
+
+// macOS 快捷键格式标准化函数
+fn normalize_shortcut_for_macos(shortcut: &str) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let parts: Vec<&str> = shortcut.split('+').collect();
+        let mut normalized_parts = Vec::new();
+        
+        // 处理修饰键
+        for part in parts {
+            let trimmed = part.trim();
+            match trimmed.to_lowercase().as_str() {
+                "alt" => {
+                    // 在 macOS 上，Alt 键应该使用 Option
+                    normalized_parts.push("Option".to_string());
+                },
+                "ctrl" => {
+                    // 在 macOS 上，通常使用 Cmd 而不是 Ctrl
+                    normalized_parts.push("Cmd".to_string());
+                },
+                "cmd" | "command" => {
+                    normalized_parts.push("Cmd".to_string());
+                },
+                "option" => {
+                    normalized_parts.push("Option".to_string());
+                },
+                "shift" => {
+                    normalized_parts.push("Shift".to_string());
+                },
+                _ => {
+                    // 主键保持不变，但转换为大写
+                    if trimmed.len() == 1 {
+                        normalized_parts.push(trimmed.to_uppercase());
+                    } else {
+                        normalized_parts.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+        
+        let result = normalized_parts.join("+");
+        tracing::info!("macOS 快捷键转换: {} -> {}", shortcut, result);
+        Ok(result)
+    }
+    
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 非 macOS 平台直接返回原始快捷键
+        Ok(shortcut.to_string())
+    }
 }
 
 // Windows 注册表操作
@@ -861,20 +912,12 @@ pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> 
     
     // 克隆参数用于后续日志输出
     let app_name_for_log = app_name.clone();
-    let bundle_id_clone = bundle_id.clone();
     
-    // 在新线程中执行激活和粘贴操作
+    // 在新线程中执行粘贴操作
     let result = tokio::task::spawn_blocking(move || {
-        // 先激活目标应用程序
-        activate_application(&app_name, bundle_id.as_deref())?;
-        
-        // 短暂等待应用程序激活
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        
-        // 然后执行粘贴
         #[cfg(target_os = "macos")]
         {
-            macos_simple_paste()
+            crate::macos_paste::smart_paste_to_app(&app_name, bundle_id.as_deref())
         }
         
         #[cfg(target_os = "windows")]
@@ -904,222 +947,14 @@ pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> 
     }
 }
 
-// 激活指定的应用程序
-fn activate_application(app_name: &str, bundle_id: Option<&str>) -> Result<(), String> {
-    use std::process::Command;
-    
-    #[cfg(target_os = "macos")]
-    {
-        tracing::info!("🎯 macOS: 激活应用程序 {} (bundle: {:?})", app_name, bundle_id);
-        
-        // 方法1: 如果有 bundle_id，优先使用 bundle identifier 激活（最可靠）
-        if let Some(bundle) = bundle_id {
-            if !bundle.is_empty() && bundle != "missing value" {
-                tracing::info!("尝试使用 bundle identifier 激活: {}", bundle);
-                let script = format!(r#"tell application id "{}" to activate"#, bundle);
-                let output = Command::new("osascript")
-                    .arg("-e")
-                    .arg(&script)
-                    .output()
-                    .map_err(|e| format!("使用 bundle ID 激活失败: {}", e))?;
-                
-                if output.status.success() {
-                    tracing::info!("✅ 成功通过 bundle ID 激活应用程序: {}", app_name);
-                    return Ok(());
-                } else {
-                    let error_msg = String::from_utf8_lossy(&output.stderr);
-                    tracing::warn!("⚠️ bundle ID 激活失败，尝试其他方法: {}", error_msg);
-                }
-            }
-        }
-        
-        // 方法2: 使用 open 命令激活应用程序（通过应用名称）
-        tracing::info!("尝试使用 open 命令激活应用程序");
-        let open_output = Command::new("open")
-            .arg("-a")
-            .arg(app_name)
-            .output()
-            .map_err(|e| format!("open 命令执行失败: {}", e))?;
-        
-        if open_output.status.success() {
-            tracing::info!("✅ 成功通过 open 命令激活应用程序: {}", app_name);
-            return Ok(());
-        } else {
-            let open_error = String::from_utf8_lossy(&open_output.stderr);
-            tracing::warn!("⚠️ open 命令激活失败，尝试其他方法: {}", open_error);
-        }
-        
-        // 方法3: 使用 System Events 通过进程名称激活
-        tracing::info!("尝试使用 System Events 激活应用程序");
-        let script = format!(r#"
-tell application "System Events"
-    set targetApp to first application process whose name is "{}"
-    set frontmost of targetApp to true
-end tell
-        "#, app_name);
-        
-        let output = Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .output()
-            .map_err(|e| format!("System Events 激活失败: {}", e))?;
-        
-        if output.status.success() {
-            tracing::info!("✅ 成功通过 System Events 激活应用程序: {}", app_name);
-            Ok(())
-        } else {
-            let error_msg = String::from_utf8_lossy(&output.stderr);
-            tracing::error!("❌ System Events 激活失败: {}", error_msg);
-            
-            // 方法4: 最后尝试直接通过应用名称激活
-            tracing::info!("尝试直接通过应用名称激活");
-            let backup_script = format!(r#"tell application "{}" to activate"#, app_name);
-            let backup_output = Command::new("osascript")
-                .arg("-e")
-                .arg(&backup_script)
-                .output()
-                .map_err(|e| format!("直接激活失败: {}", e))?;
-            
-            if backup_output.status.success() {
-                tracing::info!("✅ 成功通过直接方法激活应用程序: {}", app_name);
-                Ok(())
-            } else {
-                let backup_error = String::from_utf8_lossy(&backup_output.stderr);
-                Err(format!("所有激活方法都失败了: System Events错误: {}, 直接激活错误: {}", error_msg, backup_error))
-            }
-        }
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        tracing::info!("🎯 Windows: 激活应用程序 {}", app_name);
-        // TODO: 实现 Windows 的应用程序激活
-        Ok(())
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        tracing::info!("🎯 Linux: 激活应用程序 {}", app_name);
-        // TODO: 实现 Linux 的应用程序激活
-        Ok(())
-    }
-}
 
-
-
-// macOS 使用 rdev 库进行键盘模拟（更稳定）
+// macOS 使用新的智能粘贴逻辑（基于 EcoPaste 实现）
 #[cfg(target_os = "macos")]
 fn macos_simple_paste() -> Result<(), String> {
-    use rdev::{simulate, EventType, Key, SimulateError};
-    use std::thread;
-    use std::time::Duration;
+    tracing::info!("🍎 使用新的 macOS 智能粘贴逻辑...");
     
-    tracing::info!("使用 rdev 库执行 macOS 自动粘贴...");
-    
-    fn send_with_delay(event_type: &EventType, delay_ms: u64) -> Result<(), SimulateError> {
-        let delay = Duration::from_millis(delay_ms);
-        simulate(event_type)?;
-        thread::sleep(delay);
-        Ok(())
-    }
-    
-    // 鉴于时序不稳定问题，优先使用最可靠的 AppleScript 方案
-    tracing::info!("🎯 开始模拟 Cmd+V 按键组合...");
-    
-    // 方法1: 优先使用 AppleScript（最可靠的方案）
-    tracing::info!("方法1: 使用 AppleScript (最可靠)");
-    let applescript_result = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg("tell application \"System Events\" to keystroke \"v\" using command down")
-        .output();
-    
-    match applescript_result {
-        Ok(output) if output.status.success() => {
-            tracing::info!("✅ AppleScript 粘贴成功");
-            return Ok(());
-        }
-        Ok(output) => {
-            let error = String::from_utf8_lossy(&output.stderr);
-            tracing::error!("❌ AppleScript 失败: {}", error);
-        }
-        Err(e) => {
-            tracing::error!("❌ 执行 AppleScript 失败: {}", e);
-        }
-    }
-    
-    // 方法2: rdev 备用方案（改进的时序控制）
-    tracing::info!("方法2: 使用 rdev (改进时序控制)");
-    let rdev_result = (|| -> Result<(), SimulateError> {
-        tracing::debug!("🔧 使用改进的时序控制...");
-        
-        // 1. 按下 Cmd 键并等待系统注册
-        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 10)?;
-        tracing::info!("✅ Cmd键按下，等待10ms确保系统注册");
-        
-        // 2. 按下 V 键
-        send_with_delay(&EventType::KeyPress(Key::KeyV), 5)?;
-        tracing::info!("✅ V键按下");
-        
-        // 3. 保持一段时间让组合键生效
-        thread::sleep(Duration::from_millis(10));
-        tracing::debug!("⏳ 保持按键状态10ms");
-        
-        // 4. 释放 V 键
-        send_with_delay(&EventType::KeyRelease(Key::KeyV), 5)?;
-        tracing::info!("✅ V键释放");
-        
-        // 5. 释放 Cmd 键
-        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 5)?;
-        tracing::info!("✅ Cmd键释放");
-        
-        Ok(())
-    })();
-    
-    match rdev_result {
-        Ok(()) => {
-            tracing::info!("✅ rdev 方法2执行成功");
-            return Ok(());
-        }
-        Err(e) => {
-            tracing::error!("❌ rdev 方法2失败: {:?}", e);
-        }
-    }
-    
-    // 方法3: 更激进的 rdev 方案（更长延迟）
-    tracing::info!("方法3: 使用 rdev (极长延迟)");
-    let aggressive_result = (|| -> Result<(), SimulateError> {
-        tracing::debug!("🔧 使用极长延迟策略...");
-        
-        // 使用更长的延迟
-        send_with_delay(&EventType::KeyPress(Key::MetaLeft), 50)?;
-        tracing::info!("✅ Cmd键按下，等待50ms");
-        
-        send_with_delay(&EventType::KeyPress(Key::KeyV), 20)?;
-        tracing::info!("✅ V键按下，等待20ms");
-        
-        // 保持更长时间
-        thread::sleep(Duration::from_millis(30));
-        tracing::debug!("⏳ 保持按键状态30ms");
-        
-        send_with_delay(&EventType::KeyRelease(Key::KeyV), 20)?;
-        tracing::info!("✅ V键释放，等待20ms");
-        
-        send_with_delay(&EventType::KeyRelease(Key::MetaLeft), 20)?;
-        tracing::info!("✅ Cmd键释放");
-        
-        Ok(())
-    })();
-    
-    match aggressive_result {
-        Ok(()) => {
-            tracing::info!("✅ rdev 方法3 (极长延迟) 执行成功");
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("❌ 所有方法都失败了");
-            Err(format!("所有键盘模拟方法都失败: 最后一个错误: {:?}", e))
-        }
-    }
+    // 使用新的 macos_paste 模块
+    crate::macos_paste::smart_paste()
 }
 
 

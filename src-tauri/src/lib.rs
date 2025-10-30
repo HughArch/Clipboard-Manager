@@ -6,6 +6,10 @@ mod window_info;
 mod commands;
 mod logging;
 
+// macOS 专用粘贴模块
+#[cfg(target_os = "macos")]
+mod macos_paste;
+
 // 重新导出公共类型
 pub use types::*;
 
@@ -13,6 +17,10 @@ pub use types::*;
 use tauri::{Manager, Emitter};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+// macOS 全屏弹窗支持
+#[cfg(target_os = "macos")]
+use tauri_nspanel::{ManagerExt, WebviewWindowExt};
 
 use tauri_plugin_global_shortcut::{ShortcutState};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
@@ -138,6 +146,49 @@ fn start_clipboard_watcher(_app: tauri::AppHandle) -> Arc<AtomicBool> {
     should_stop
 }
 
+// macOS 专用：将窗口转换为 NSPanel 以支持全屏弹窗
+#[cfg(target_os = "macos")]
+fn init_macos_panel(app: &tauri::AppHandle) {
+    use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelLevel, StyleMask};
+    
+    // 定义自定义 Panel
+    tauri_panel! {
+        panel!(ClipboardPanel {
+            config: {
+                can_become_key_window: true,
+                is_floating_panel: true
+            }
+        })
+    }
+    
+    if let Some(window) = app.get_webview_window("main") {
+        match window.to_panel::<ClipboardPanel>() {
+            Ok(panel) => {
+                tracing::info!("✅ 成功转换窗口为 NSPanel");
+                
+                // 设置窗口级别为浮动（在所有普通窗口之上）
+                panel.set_level(PanelLevel::Floating.value());
+                
+                // 设置为非激活 panel，不会激活应用
+                panel.set_style_mask(StyleMask::empty().nonactivating_panel().into());
+                
+                // 关键配置：允许在全屏应用上显示
+                panel.set_collection_behavior(
+                    CollectionBehavior::new()
+                        .full_screen_auxiliary()  // 允许在全屏窗口之上显示
+                        .can_join_all_spaces()    // 可以在所有工作区显示
+                        .into(),
+                );
+                
+                tracing::info!("🎯 macOS 全屏弹窗配置完成");
+            }
+            Err(e) => {
+                tracing::error!("❌ 转换窗口为 NSPanel 失败: {:?}", e);
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 初始化日志系统
@@ -156,10 +207,18 @@ pub fn run() {
     tracing::info!("🚀 应用程序启动中...");
     tracing::info!("📋 准备初始化 Tauri Builder...");
     
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard::init())
-                .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_sql::Builder::default().build());
+    
+    // macOS 全屏弹窗支持
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.plugin(tauri_nspanel::init());
+    }
+    
+    builder
         .plugin(tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
@@ -180,6 +239,20 @@ pub fn run() {
             
             // 将剪贴板监听器的停止控制保存到应用状态
             app.manage(ClipboardWatcherState { should_stop: should_stop.clone() });
+
+            // macOS 专用：初始化 NSPanel 以支持全屏弹窗
+            #[cfg(target_os = "macos")]
+            {
+                tracing::info!("🍎 初始化 macOS NSPanel 以支持全屏弹窗...");
+                init_macos_panel(&app_handle);
+            }
+
+            // macOS 专用：启动应用切换监听器
+            #[cfg(target_os = "macos")]
+            {
+                tracing::info!("🍎 启动 macOS 应用切换监听器...");
+                macos_paste::start_app_observer();
+            }
 
             // 异步初始化数据库和其他操作
             let app_handle_for_delayed = app_handle.clone();
