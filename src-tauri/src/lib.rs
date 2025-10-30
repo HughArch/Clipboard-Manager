@@ -8,6 +8,10 @@ mod logging;
 
 // macOS 专用粘贴模块
 #[cfg(target_os = "macos")]
+#[macro_use]
+extern crate objc;
+
+#[cfg(target_os = "macos")]
 mod macos_paste;
 
 // 重新导出公共类型

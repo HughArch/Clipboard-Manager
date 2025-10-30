@@ -868,81 +868,120 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
 
 // 改进的自动粘贴功能 - 先激活目标应用，再执行粘贴
 #[tauri::command]
-pub async fn auto_paste() -> Result<(), String> {
+pub async fn auto_paste(app: AppHandle) -> Result<(), String> {
     tracing::info!("开始执行智能自动粘贴...");
     
-    // 在新线程中执行粘贴操作
-    let result = tokio::task::spawn_blocking(|| {
-        #[cfg(target_os = "macos")]
-        {
-            macos_simple_paste()
-        }
-        
-        #[cfg(target_os = "windows")]
-        {
-            windows_auto_paste()
-        }
-        
-        #[cfg(target_os = "linux")]
-        {
-            linux_auto_paste()
-        }
-    }).await;
+    #[cfg(target_os = "macos")]
+    {
+        macos_simple_paste(app)
+    }
     
-    match result {
-        Ok(Ok(())) => {
-            tracing::info!("智能自动粘贴操作完成");
-            Ok(())
+    #[cfg(target_os = "windows")]
+    {
+        // 在新线程中执行粘贴操作
+        let result = tokio::task::spawn_blocking(|| {
+            windows_auto_paste()
+        }).await;
+        
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("智能自动粘贴操作完成");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                tracing::info!("自动粘贴失败: {}", e);
+                Err(format!("粘贴操作失败: {}", e))
+            }
+            Err(e) => {
+                tracing::info!("粘贴任务执行失败: {}", e);
+                Err(format!("粘贴任务失败: {}", e))
+            }
         }
-        Ok(Err(e)) => {
-            tracing::info!("自动粘贴失败: {}", e);
-            Err(format!("粘贴操作失败: {}", e))
-        }
-        Err(e) => {
-            tracing::info!("粘贴任务执行失败: {}", e);
-            Err(format!("粘贴任务失败: {}", e))
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        // 在新线程中执行粘贴操作
+        let result = tokio::task::spawn_blocking(|| {
+            linux_auto_paste()
+        }).await;
+        
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("智能自动粘贴操作完成");
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                tracing::info!("自动粘贴失败: {}", e);
+                Err(format!("粘贴操作失败: {}", e))
+            }
+            Err(e) => {
+                tracing::info!("粘贴任务执行失败: {}", e);
+                Err(format!("粘贴任务失败: {}", e))
+            }
         }
     }
 }
 
 // 新增：智能粘贴功能 - 先激活指定应用，再粘贴
 #[tauri::command]
-pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> Result<(), String> {
+pub async fn smart_paste_to_app(app: AppHandle, app_name: String, bundle_id: Option<String>) -> Result<(), String> {
     tracing::info!("开始执行智能粘贴到应用: {} (bundle: {:?})", app_name, bundle_id);
     
-    // 克隆参数用于后续日志输出
-    let app_name_for_log = app_name.clone();
+    #[cfg(target_os = "macos")]
+    {
+        macos_smart_paste_to_app(app, app_name, bundle_id)
+    }
     
-    // 在新线程中执行粘贴操作
-    let result = tokio::task::spawn_blocking(move || {
-        #[cfg(target_os = "macos")]
-        {
-            crate::macos_paste::smart_paste_to_app(&app_name, bundle_id.as_deref())
-        }
+    #[cfg(target_os = "windows")]
+    {
+        // 克隆参数用于后续日志输出
+        let app_name_for_log = app_name.clone();
         
-        #[cfg(target_os = "windows")]
-        {
+        // 在新线程中执行粘贴操作
+        let result = tokio::task::spawn_blocking(move || {
             windows_auto_paste()
-        }
+        }).await;
         
-        #[cfg(target_os = "linux")]
-        {
-            linux_auto_paste()
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("智能粘贴到应用 {} 完成", app_name_for_log);
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                tracing::info!("智能粘贴失败: {}", e);
+                Err(format!("粘贴操作失败: {}", e))
+            }
+            Err(e) => {
+                tracing::info!("粘贴任务执行失败: {}", e);
+                Err(format!("粘贴任务失败: {}", e))
+            }
         }
-    }).await;
+    }
     
-    match result {
-        Ok(Ok(())) => {
-            tracing::info!("智能粘贴到应用 {} 完成", app_name_for_log);
-            Ok(())
-        }
-        Ok(Err(e)) => {
-            tracing::info!("智能粘贴失败: {}", e);
-            Err(format!("粘贴操作失败: {}", e))
-        }
-        Err(e) => {
-            tracing::info!("粘贴任务执行失败: {}", e);
-            Err(format!("粘贴任务失败: {}", e))
+    #[cfg(target_os = "linux")]
+    {
+        // 克隆参数用于后续日志输出
+        let app_name_for_log = app_name.clone();
+        
+        // 在新线程中执行粘贴操作
+        let result = tokio::task::spawn_blocking(move || {
+            linux_auto_paste()
+        }).await;
+        
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("智能粘贴到应用 {} 完成", app_name_for_log);
+                Ok(())
+            }
+            Ok(Err(e)) => {
+                tracing::info!("智能粘贴失败: {}", e);
+                Err(format!("粘贴操作失败: {}", e))
+            }
+            Err(e) => {
+                tracing::info!("粘贴任务执行失败: {}", e);
+                Err(format!("粘贴任务失败: {}", e))
+            }
         }
     }
 }
@@ -950,11 +989,19 @@ pub async fn smart_paste_to_app(app_name: String, bundle_id: Option<String>) -> 
 
 // macOS 使用新的智能粘贴逻辑（基于 EcoPaste 实现）
 #[cfg(target_os = "macos")]
-fn macos_simple_paste() -> Result<(), String> {
+fn macos_simple_paste(app: AppHandle) -> Result<(), String> {
     tracing::info!("🍎 使用新的 macOS 智能粘贴逻辑...");
     
     // 使用新的 macos_paste 模块
-    crate::macos_paste::smart_paste()
+    crate::macos_paste::smart_paste(Some(app))
+}
+
+// macOS 使用新的智能粘贴到指定应用
+#[cfg(target_os = "macos")]
+fn macos_smart_paste_to_app(app: AppHandle, app_name: String, bundle_id: Option<String>) -> Result<(), String> {
+    tracing::info!("🍎 执行 macOS 智能粘贴到应用: {}", app_name);
+    
+    crate::macos_paste::smart_paste_to_app(&app_name, bundle_id.as_deref(), Some(app))
 }
 
 
