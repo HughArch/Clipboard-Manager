@@ -318,8 +318,12 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
     // 先尝试注销已有的快捷键
     let _ = app.global_shortcut().unregister_all();
     
+    // macOS 特殊处理：标准化快捷键格式
+    let normalized_shortcut = normalize_shortcut_for_macos(&shortcut)?;
+    tracing::info!("标准化后的快捷键: {}", normalized_shortcut);
+    
     // 将字符串转换为 Shortcut 类型
-    let shortcut_parsed = shortcut.parse::<Shortcut>().map_err(|e| {
+    let shortcut_parsed = normalized_shortcut.parse::<Shortcut>().map_err(|e| {
         let error_msg = format!("Invalid hotkey format: {}. Please use format like 'Cmd+Shift+V' on macOS or 'Ctrl+Shift+V' on other platforms", e);
         tracing::info!("快捷键解析失败: {}", error_msg);
         error_msg
@@ -331,20 +335,20 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
         
         // 处理常见的错误类型
         if error_str.contains("HotKey already registered") || error_str.contains("already registered") {
-            let friendly_msg = format!("HotKey already registered: The hotkey '{}' is already in use by another application", shortcut);
+            let friendly_msg = format!("HotKey already registered: The hotkey '{}' is already in use by another application", normalized_shortcut);
             tracing::info!("快捷键冲突: {}", friendly_msg);
             friendly_msg
         } else if error_str.contains("Invalid") || error_str.contains("invalid") {
-            let friendly_msg = format!("Invalid hotkey format: '{}' is not a valid hotkey format", shortcut);
+            let friendly_msg = format!("Invalid hotkey format: '{}' is not a valid hotkey format", normalized_shortcut);
             tracing::info!("快捷键格式错误: {}", friendly_msg);
             friendly_msg
         } else {
             tracing::info!("快捷键注册失败: {}", error_str);
-            format!("Failed to register hotkey '{}': {}", shortcut, error_str)
+            format!("Failed to register hotkey '{}': {}", normalized_shortcut, error_str)
         }
     })?;
     
-    tracing::info!("快捷键注册成功: {}", shortcut);
+    tracing::info!("快捷键注册成功: {}", normalized_shortcut);
     Ok(())
 }
 
@@ -352,6 +356,26 @@ pub async fn register_shortcut(app: AppHandle, shortcut: String) -> Result<(), S
 fn normalize_shortcut_for_macos(shortcut: &str) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
+        // 先检查是否包含特殊字符（macOS Alt+字母产生的）
+        let has_special_chars = shortcut.chars().any(|c| {
+            !c.is_ascii() && c != '+'
+        });
+        
+        if has_special_chars {
+            // 如果包含特殊字符，这可能是用户按了 Alt+字母
+            // macOS 会将 Alt+V 转换为特殊字符如 Å
+            return Err(
+                "macOS does not support Alt+Letter combinations for global shortcuts. Please use Cmd+Letter, Cmd+Shift+Letter, or Ctrl+Letter instead. Recommended: Cmd+Shift+V".to_string()
+            );
+        }
+        
+        // 检查是否包含 Alt 或 Option
+        if shortcut.to_lowercase().contains("alt") || shortcut.to_lowercase().contains("option") {
+            return Err(
+                "macOS global shortcuts do not support Option/Alt key combinations. Please use Cmd+Shift+V or Ctrl+Shift+V instead.".to_string()
+            );
+        }
+        
         let parts: Vec<&str> = shortcut.split('+').collect();
         let mut normalized_parts = Vec::new();
         
@@ -359,19 +383,11 @@ fn normalize_shortcut_for_macos(shortcut: &str) -> Result<String, String> {
         for part in parts {
             let trimmed = part.trim();
             match trimmed.to_lowercase().as_str() {
-                "alt" => {
-                    // 在 macOS 上，Alt 键应该使用 Option
-                    normalized_parts.push("Option".to_string());
-                },
                 "ctrl" => {
-                    // 在 macOS 上，通常使用 Cmd 而不是 Ctrl
-                    normalized_parts.push("Cmd".to_string());
+                    normalized_parts.push("Ctrl".to_string());
                 },
                 "cmd" | "command" => {
                     normalized_parts.push("Cmd".to_string());
-                },
-                "option" => {
-                    normalized_parts.push("Option".to_string());
                 },
                 "shift" => {
                     normalized_parts.push("Shift".to_string());

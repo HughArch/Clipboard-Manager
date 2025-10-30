@@ -160,9 +160,22 @@ const handleKeyDown = (event: KeyboardEvent) => {
   event.preventDefault()
   event.stopPropagation()
   
+  // macOS 特殊处理：阻止 Alt 键
+  if (isMac() && event.altKey) {
+    // 停止录制并显示错误
+    stopRecording()
+    emit('show-toast', {
+      type: 'warning',
+      title: 'Unsupported Key',
+      message: 'macOS does not support Alt/Option key for global shortcuts. Please use Cmd+Shift+V or Ctrl+Shift+V.',
+      duration: 6000
+    })
+    return
+  }
+  
   // 记录按下的键 - 跨平台支持
   if (event.ctrlKey) recordingKeys.value.add('Ctrl')
-  if (event.altKey) recordingKeys.value.add('Alt')
+  if (!isMac() && event.altKey) recordingKeys.value.add('Alt') // 只在非 macOS 上允许 Alt
   if (event.shiftKey) recordingKeys.value.add('Shift')
   if (event.metaKey) {
     // 在 macOS 上 metaKey 是 Cmd 键，在其他系统上是 Windows 键
@@ -178,7 +191,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
   
   // 如果有修饰键+主键，自动停止录制
-  const hasModifier = event.ctrlKey || event.altKey || event.shiftKey || event.metaKey
+  const hasModifier = event.ctrlKey || (!isMac() && event.altKey) || event.shiftKey || event.metaKey
   const hasMainKey = event.key && (event.key.length === 1 || event.key.startsWith('F'))
   
   if (hasModifier && hasMainKey) {
@@ -229,16 +242,23 @@ const parseHotkeyError = (error: string): { title: string; message: string } => 
     }
   }
   
+  if (error.includes('does not support Option/Alt') || error.includes('does not support Alt')) {
+    return {
+      title: 'Unsupported Key Combination',
+      message: 'macOS does not support Alt/Option key for global shortcuts. Please use Cmd+Shift+V or Ctrl+Shift+V instead.'
+    }
+  }
+  
   if (error.includes('Invalid hotkey format')) {
     return {
       title: 'Invalid Format',
-      message: 'Use format: Ctrl+Shift+V'
+      message: `Please use format like: ${getDefaultModifierKey()}+Shift+V`
     }
   }
   
   return {
     title: 'Registration Failed',
-    message: 'Please try a different hotkey'
+    message: 'Please try a different hotkey combination'
   }
 }
 
