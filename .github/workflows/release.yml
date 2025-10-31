@@ -13,7 +13,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-22.04, windows-latest]
+        include:
+          - platform: macos-latest
+            os: macos
+            arch: universal
+            target: universal-apple-darwin
+          - platform: ubuntu-22.04
+            os: linux
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            os: windows
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -21,7 +33,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: matrix.os == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
@@ -29,7 +41,8 @@ jobs:
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          # 为 macOS 添加 Intel (x86_64) 和 Apple Silicon (aarch64) 目标
+          targets: ${{ matrix.os == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -56,6 +69,15 @@ jobs:
           echo "SCCACHE_DISABLE=1" >> $GITHUB_ENV
         shell: bash
 
+      - name: Verify Rust targets (macOS only)
+        if: matrix.os == 'macos'
+        run: |
+          echo "已安装的 Rust 目标架构:"
+          rustup target list --installed
+          echo "当前系统架构: $(uname -m)"
+          echo "Rust 默认目标: $(rustc -vV | grep host)"
+        shell: bash
+
       - name: Build the app
         uses: tauri-apps/tauri-action@v0.5.5
         env:
@@ -74,6 +96,21 @@ jobs:
             ### ✨ 主要功能
             - 增加前后端日志记录功能
             - 优化设置页面UI展示
+            - 支持 Apple Silicon (M1/M2/M3) 和 Intel 处理器
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }} 
+          # 为 macOS 构建 Universal Binary (支持 Intel 和 Apple Silicon)
+          args: ${{ matrix.os == 'macos' && '--target universal-apple-darwin' || '' }}
+
+      - name: Verify Universal Binary (macOS only)
+        if: matrix.os == 'macos'
+        run: |
+          echo "检查生成的 macOS 应用程序架构:"
+          if [ -f "src-tauri/target/universal-apple-darwin/release/bundle/macos/Clipboard Manager.app/Contents/MacOS/Clipboard Manager" ]; then
+            file "src-tauri/target/universal-apple-darwin/release/bundle/macos/Clipboard Manager.app/Contents/MacOS/Clipboard Manager"
+            lipo -info "src-tauri/target/universal-apple-darwin/release/bundle/macos/Clipboard Manager.app/Contents/MacOS/Clipboard Manager"
+          else
+            echo "未找到 Universal Binary 文件，列出目标目录内容:"
+            find src-tauri/target -name "Clipboard Manager" -type f 2>/dev/null || echo "未找到任何 Clipboard Manager 可执行文件"
+          fi
+        shell: bash 
