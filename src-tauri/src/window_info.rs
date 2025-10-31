@@ -37,7 +37,7 @@ pub fn get_last_window_info() -> &'static Arc<RwLock<(std::time::Instant, Option
     })
 }
 
-// 获取当前活动窗口的应用程序信息（增加限流）
+// 获取当前活动窗口的应用程序信息（增加限流，优化快速响应）
 #[cfg(target_os = "windows")]
 #[tauri::command]
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
@@ -56,8 +56,9 @@ pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     }
 
     tracing::debug!("🔄 开始获取新的窗口信息...");
-    let new_info = get_active_window_info_impl();
-    tracing::info!("✅ 获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
+    // 优化：使用快速版本，不获取图标以提高响应速度
+    let new_info = get_active_window_info_fast();
+    tracing::info!("✅ 快速获取到窗口信息: 名称='{}'", new_info.name);
     
     // 更新缓存
     if let Ok(mut guard) = get_last_window_info().write() {
@@ -79,6 +80,79 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
     tracing::info!("✅ 剪贴板专用：获取到窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
 
     Ok(new_info)
+}
+
+// 快速版本：只获取应用名称，不获取图标（用于快捷键快速响应）
+#[cfg(target_os = "windows")]
+fn get_active_window_info_fast() -> SourceAppInfo {
+    tracing::debug!("🪟 开始快速获取活动窗口信息（无图标）...");
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            tracing::error!("❌ 无法获取前台窗口句柄");
+            return SourceAppInfo {
+                name: "Unknown".to_string(),
+                icon: None,
+                bundle_id: None,
+            };
+        }
+
+        // 获取窗口标题
+        let mut window_title = [0u16; 256];
+        let title_len = GetWindowTextW(hwnd, window_title.as_mut_ptr(), window_title.len() as i32);
+        
+        // 获取进程ID
+        let mut process_id = 0;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        
+        // 打开进程句柄
+        let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, 0, process_id);
+        if process_handle.is_null() {
+            let title = if title_len > 0 {
+                OsString::from_wide(&window_title[..title_len as usize])
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                "Unknown".to_string()
+            };
+            return SourceAppInfo {
+                name: title,
+                icon: None, // 快速版本不获取图标
+                bundle_id: None,
+            };
+        }
+
+        // 获取进程可执行文件路径
+        let mut exe_path = [0u16; 256];
+        let path_len = GetModuleFileNameExW(process_handle, ptr::null_mut(), exe_path.as_mut_ptr(), exe_path.len() as u32);
+        
+        CloseHandle(process_handle);
+
+        let app_name = if path_len > 0 {
+            let path_os = OsString::from_wide(&exe_path[..path_len as usize]);
+            let path_str = path_os.to_string_lossy().to_string();
+            
+            // 提取文件名（不包含扩展名）
+            if let Some(file_name) = std::path::Path::new(&path_str).file_stem() {
+                file_name.to_string_lossy().to_string()
+            } else {
+                "Unknown".to_string()
+            }
+        } else if title_len > 0 {
+            // 如果无法获取进程路径，使用窗口标题
+            OsString::from_wide(&window_title[..title_len as usize])
+                .to_string_lossy()
+                .to_string()
+        } else {
+            "Unknown".to_string()
+        };
+
+        SourceAppInfo {
+            name: app_name,
+            icon: None, // 快速版本不获取图标
+            bundle_id: None,
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -466,7 +540,91 @@ pub fn convert_bgra_to_png_base64(bgra_data: &[u8], width: u32, height: u32) -> 
 pub async fn get_active_window_info() -> Result<SourceAppInfo, String> {
     use std::process::Command;
     
-    tracing::debug!("🔍 macOS: 获取当前活动窗口信息");
+    tracing::debug!("🔍 macOS: 快速获取当前活动窗口信息（无图标）");
+    
+    // 检查缓存（快速响应）
+    let cache_duration = Duration::from_secs(1); // 缩短缓存时间以提高准确性
+    
+    if let Ok(guard) = get_last_window_info().read() {
+        if guard.0.elapsed() < cache_duration {
+            if let Some(ref cached_info) = guard.1 {
+                tracing::debug!("📋 使用缓存的窗口信息: {}", cached_info.name);
+                // 返回不带图标的版本以提高速度
+                return Ok(SourceAppInfo {
+                    name: cached_info.name.clone(),
+                    icon: None, // 快速版本不返回图标
+                    bundle_id: cached_info.bundle_id.clone(),
+                });
+            }
+        }
+    }
+    
+    // 使用 AppleScript 获取当前活动应用程序的信息
+    let script = r#"
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set appBundleID to bundle identifier of frontApp
+    return appName & "|" & appBundleID
+end tell
+    "#;
+    
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .output()
+        .map_err(|e| format!("执行 AppleScript 失败: {}", e))?;
+    
+    if output.status.success() {
+        let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let parts: Vec<&str> = result.split('|').collect();
+        
+        if parts.len() >= 2 {
+            let app_name = parts[0].to_string();
+            let bundle_id = parts[1].to_string();
+            
+            tracing::info!("✅ 快速获取到活动应用: {} ({})", app_name, bundle_id);
+            
+            let app_info = SourceAppInfo {
+                name: app_name,
+                icon: None, // 快速版本不获取图标
+                bundle_id: Some(bundle_id),
+            };
+            
+            // 更新缓存（包含完整信息用于后续获取图标）
+            if let Ok(mut guard) = get_last_window_info().write() {
+                guard.0 = std::time::Instant::now();
+                guard.1 = Some(app_info.clone());
+                tracing::debug!("💾 窗口信息已缓存");
+            }
+            
+            Ok(app_info)
+        } else {
+            tracing::warn!("⚠️ 解析应用信息失败: {}", result);
+            Ok(SourceAppInfo {
+                name: result,
+                icon: None,
+                bundle_id: None,
+            })
+        }
+    } else {
+        let error_msg = String::from_utf8_lossy(&output.stderr);
+        tracing::error!("❌ 获取活动窗口失败: {}", error_msg);
+        Ok(SourceAppInfo {
+            name: "Unknown".to_string(),
+            icon: None,
+            bundle_id: None,
+        })
+    }
+}
+
+// 获取完整的窗口信息（包含图标）- 用于需要图标的场景
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub async fn get_active_window_info_with_icon() -> Result<SourceAppInfo, String> {
+    use std::process::Command;
+    
+    tracing::debug!("🔍 macOS: 获取完整窗口信息（包含图标）");
     
     // 使用 AppleScript 获取当前活动应用程序的信息
     let script = r#"
@@ -518,11 +676,24 @@ end tell
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
         tracing::error!("❌ 获取活动窗口失败: {}", error_msg);
-            Ok(SourceAppInfo {
-        name: "Unknown".to_string(),
-        icon: None,
-        bundle_id: None,
-    })
+        Ok(SourceAppInfo {
+            name: "Unknown".to_string(),
+            icon: None,
+            bundle_id: None,
+        })
+    }
+}
+
+// Windows 版本的完整窗口信息获取（包含图标）
+#[cfg(target_os = "windows")]
+#[tauri::command]
+pub async fn get_active_window_info_with_icon() -> Result<SourceAppInfo, String> {
+    tracing::debug!("🔍 Windows: 获取完整窗口信息（包含图标）");
+    
+    let new_info = get_active_window_info_impl();
+    tracing::info!("✅ 获取到完整窗口信息: 名称='{}', 图标='{}'", new_info.name, if new_info.icon.is_some() { "有" } else { "无" });
+    
+    Ok(new_info)
 }
 
 // 专门用于剪贴板监听的窗口信息获取函数（不使用缓存）
@@ -570,7 +741,6 @@ pub async fn get_active_window_info_for_clipboard() -> Result<SourceAppInfo, Str
         icon: None,
         bundle_id: None,
     })
-    }
 }
 
 // macOS 专用：根据 bundle ID 获取应用图标

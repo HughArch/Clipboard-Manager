@@ -363,6 +363,7 @@ pub fn run() {
             commands::get_auto_start_status,
             commands::register_shortcut,
             window_info::get_active_window_info,
+            window_info::get_active_window_info_with_icon,
             window_info::get_active_window_info_for_clipboard,
             // 日志相关命令  
             commands::open_log_folder,
@@ -410,30 +411,44 @@ fn show_window(app: &tauri::AppHandle) {
     }
 }
 
-// 改进的显示窗口函数 - 在显示前获取活动窗口上下文
+// 优化的显示窗口函数 - 快速获取基本信息，立即显示窗口，异步获取图标
 fn show_window_with_context(app: &tauri::AppHandle) {
-    // 先获取当前活动窗口信息（在显示剪贴板管理器之前）
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        // 获取活动窗口信息
+        // 快速获取窗口信息（不包含图标，用于粘贴功能）
         let active_app_info = window_info::get_active_window_info().await;
         
-        // 显示窗口
+        // 立即显示窗口
         if let Some(window) = app_handle.get_webview_window("main") {
             let _ = window.show();
             let _ = window.set_focus();
             
-            // 将活动窗口信息发送给前端
+            tracing::debug!("🚀 窗口已显示，发送窗口信息");
+            
+            // 立即发送基本窗口信息给前端（用于粘贴功能）
             if let Ok(app_info) = active_app_info {
                 tracing::debug!("📤 发送前一个活动应用信息到前端: {}", app_info.name);
-                let _ = window.emit("previous-app-info", app_info);
+                let _ = window.emit("previous-app-info", app_info.clone());
+                
+                // 如果需要图标，异步获取完整信息（包含图标）
+                if app_info.icon.is_none() {
+                    let app_handle_for_icon = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Ok(full_app_info) = window_info::get_active_window_info_with_icon().await {
+                            if full_app_info.icon.is_some() {
+                                tracing::debug!("🎨 异步获取到应用图标，更新前端");
+                                if let Some(window) = app_handle_for_icon.get_webview_window("main") {
+                                    let _ = window.emit("previous-app-info", full_app_info);
+                                }
+                            }
+                        }
+                    });
+                }
             } else {
                 tracing::warn!("⚠️ 无法获取前一个活动应用信息");
             }
             
-            // 添加小延迟确保窗口完全显示
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            // 再次设置焦点，确保焦点在 webview 上
+            // 确保窗口获得焦点
             let _ = window.set_focus();
         }
     });
