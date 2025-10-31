@@ -18,14 +18,17 @@ jobs:
             os: macos
             arch: universal
             target: universal-apple-darwin
+            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: ubuntu-22.04
             os: linux
             arch: x86_64
             target: x86_64-unknown-linux-gnu
+            rust-targets: ""
           - platform: windows-latest
             os: windows
             arch: x86_64
             target: x86_64-pc-windows-msvc
+            rust-targets: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -41,8 +44,8 @@ jobs:
       - name: Rust setup
         uses: dtolnay/rust-toolchain@stable
         with:
-          # 为 macOS 添加 Intel (x86_64) 和 Apple Silicon (aarch64) 目标
-          targets: ${{ matrix.os == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          # 根据矩阵配置添加目标架构
+          targets: ${{ matrix.rust-targets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
@@ -63,7 +66,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Disable sccache for Tauri build
+      - name: Setup macOS build environment
+        if: matrix.os == 'macos'
+        run: |
+          # 禁用 sccache
+          echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
+          echo "SCCACHE_DISABLE=1" >> $GITHUB_ENV
+          # 设置 macOS 构建环境变量
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
+          # 确保使用系统默认的 clang
+          echo "CC=clang" >> $GITHUB_ENV
+          echo "CXX=clang++" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Setup other platforms
+        if: matrix.os != 'macos'
         run: |
           echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
           echo "SCCACHE_DISABLE=1" >> $GITHUB_ENV
@@ -76,10 +93,13 @@ jobs:
           rustup target list --installed
           echo "当前系统架构: $(uname -m)"
           echo "Rust 默认目标: $(rustc -vV | grep host)"
+          echo "Xcode 版本:"
+          xcode-select --print-path
+          clang --version
         shell: bash
 
       - name: Build the app
-        uses: tauri-apps/tauri-action@v0.5.5
+        uses: tauri-apps/tauri-action@v0.5.14
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
@@ -99,8 +119,8 @@ jobs:
             - 支持 Apple Silicon (M1/M2/M3) 和 Intel 处理器
           releaseDraft: false
           prerelease: false
-          # 为 macOS 构建 Universal Binary (支持 Intel 和 Apple Silicon)
-          args: ${{ matrix.os == 'macos' && '--target universal-apple-darwin' || '' }}
+          # 根据目标平台设置构建参数
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
 
       - name: Verify Universal Binary (macOS only)
         if: matrix.os == 'macos'

@@ -3,7 +3,7 @@
  * 这是应用版本的唯一定义源，所有前端组件都应该从这里引用版本信息
  */
 
-export const APP_VERSION = '1.1.9';
+export const APP_VERSION = '1.1.10';
 
 /**
  * 获取应用版本
