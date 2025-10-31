@@ -35,6 +35,8 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          # 禁用 sccache 缓存以避免 CI 问题
+          cache-all-crates: "true"
 
       - name: Sync node version and setup cache
         uses: actions/setup-node@v4
@@ -48,12 +50,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Disable sccache for Tauri build
+        run: |
+          echo "RUSTC_WRAPPER=" >> $GITHUB_ENV
+          echo "SCCACHE_DISABLE=1" >> $GITHUB_ENV
+        shell: bash
+
       - name: Build the app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          # 禁用 sccache 避免 CI 环境中的问题
+          RUSTC_WRAPPER: ""
+          SCCACHE_DISABLE: "1"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Clipboard Manager ${{ github.ref_name }}'
