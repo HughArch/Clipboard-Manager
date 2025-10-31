@@ -318,9 +318,8 @@ const handleSubmit = async () => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
             </svg>
           </div>
-          <h2 class="text-lg font-semibold text-gray-900">Settings</h2>
+          <h2 class="text-lg font-semibold text-gray-900">设置</h2>
         </div>
-        <h2 class="text-lg font-semibold">设置</h2>
       </div>
       <!-- Content -->
       <div class="p-4 flex-1 overflow-y-auto">

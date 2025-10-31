@@ -3348,8 +3348,9 @@ const checkDataConsistency = () => {
                 
                 <div v-if="clipboardHistory.length === 0 && !isLoadingMore" class="p-8 text-center text-gray-400">
                   <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <!-- 空分组图标：文件夹 -->
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                     </svg>
                   </div>
                   <p class="text-sm">该分组暂无条目</p>
@@ -3383,8 +3384,12 @@ const checkDataConsistency = () => {
                 @click="showGroupManager = !showGroupManager"
                 title="分组管理"
               >
+                <!-- 分组管理图标：多个文件夹表示分组 -->
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                  <circle cx="8" cy="4" r="1" fill="currentColor"></circle>
+                  <circle cx="12" cy="4" r="1" fill="currentColor"></circle>
+                  <circle cx="16" cy="4" r="1" fill="currentColor"></circle>
                 </svg>
               </button>
               <button 
@@ -3474,8 +3479,12 @@ const checkDataConsistency = () => {
           
           <!-- 分组列表 -->
           <div v-if="groups.length === 0" class="text-center py-8 text-gray-500">
+            <!-- 无分组图标：多个文件夹 -->
             <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14-7l2 2-2 2m2-2h-6m6 7l2 2-2 2m2-2h-6"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+              <circle cx="8" cy="4" r="1" fill="currentColor"></circle>
+              <circle cx="12" cy="4" r="1" fill="currentColor"></circle>
+              <circle cx="16" cy="4" r="1" fill="currentColor"></circle>
             </svg>
             <p>暂无分组</p>
             <p class="text-sm">点击上方按钮创建第一个分组</p>
