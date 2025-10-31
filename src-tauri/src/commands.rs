@@ -415,56 +415,98 @@ fn normalize_shortcut_for_macos(shortcut: &str) -> Result<String, String> {
     }
 }
 
-// Windows 注册表操作
+// Windows 注册表操作（使用 Windows API，避免 CMD 弹窗）
 #[cfg(target_os = "windows")]
 fn set_windows_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
-    use std::process::Command;
+    use winapi::um::winreg::{
+        RegCreateKeyExW, RegSetValueExW, RegDeleteValueW, RegCloseKey,
+        HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ
+    };
+    use winapi::shared::winerror::{ERROR_SUCCESS, ERROR_FILE_NOT_FOUND};
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
     
-    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+    tracing::debug!("🪟 Windows: 设置自启动状态: {} (应用: {})", enable, app_name);
     
-    if enable {
-        // 添加到启动项
-        let output = Command::new("reg")
-            .args(&[
-                "add",
-                key_path,
-                "/v",
-                app_name,
-                "/t",
-                "REG_SZ",
-                "/d",
-                &format!("\"{}\"", exe_path.display()),
-                "/f"
-            ])
-            .output()
-            .map_err(|e| format!("执行注册表命令失败: {}", e))?;
-            
-        if !output.status.success() {
-            return Err(format!("添加启动项失败: {}", String::from_utf8_lossy(&output.stderr)));
+    // 转换路径为 UTF-16
+    let subkey_path = OsStr::new(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    
+    let value_name = OsStr::new(app_name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    
+    unsafe {
+        let mut hkey = ptr::null_mut();
+        
+        // 打开或创建注册表键
+        let result = RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            subkey_path.as_ptr(),
+            0,
+            ptr::null_mut(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_WRITE,
+            ptr::null_mut(),
+            &mut hkey,
+            ptr::null_mut(),
+        );
+        
+        if result != ERROR_SUCCESS as i32 {
+            return Err(format!("无法打开注册表键: 错误代码 {}", result));
         }
-    } else {
-        // 从启动项移除
-        let output = Command::new("reg")
-            .args(&[
-                "delete",
-                key_path,
-                "/v",
-                app_name,
-                "/f"
-            ])
-            .output()
-            .map_err(|e| format!("执行注册表命令失败: {}", e))?;
+        
+        let final_result = if enable {
+            // 添加启动项
+            let exe_path_str = format!("\"{}\"", exe_path.display());
+            let exe_path_wide = OsStr::new(&exe_path_str)
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<u16>>();
             
-        // 注意：如果键不存在，reg delete 会返回错误，但这是正常的
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.contains("无法找到指定的注册表项或值") && !stderr.contains("The system was unable to find the specified registry key or value") {
-                return Err(format!("移除启动项失败: {}", stderr));
+            tracing::debug!("📝 添加注册表值: {} = {}", app_name, exe_path_str);
+            
+            let set_result = RegSetValueExW(
+                hkey,
+                value_name.as_ptr(),
+                0,
+                REG_SZ,
+                exe_path_wide.as_ptr() as *const u8,
+                (exe_path_wide.len() * 2) as u32,
+            );
+            
+            if set_result == ERROR_SUCCESS as i32 {
+                tracing::info!("✅ Windows: 成功添加自启动项");
+                Ok(())
+            } else {
+                Err(format!("设置注册表值失败: 错误代码 {}", set_result))
             }
-        }
+        } else {
+            // 移除启动项
+            tracing::debug!("🗑️ 删除注册表值: {}", app_name);
+            
+            let delete_result = RegDeleteValueW(hkey, value_name.as_ptr());
+            
+            if delete_result == ERROR_SUCCESS as i32 {
+                tracing::info!("✅ Windows: 成功移除自启动项");
+                Ok(())
+            } else if delete_result == ERROR_FILE_NOT_FOUND as i32 {
+                tracing::info!("ℹ️ Windows: 自启动项不存在，无需移除");
+                Ok(()) // 不存在也算成功
+            } else {
+                Err(format!("删除注册表值失败: 错误代码 {}", delete_result))
+            }
+        };
+        
+        // 关闭注册表键
+        RegCloseKey(hkey);
+        
+        final_result
     }
-    
-    Ok(())
 }
 
 #[tauri::command]
@@ -517,25 +559,74 @@ pub async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
     }
 }
 
-// 检查 Windows 自启动状态
+// 检查 Windows 自启动状态（使用 Windows API）
 #[cfg(target_os = "windows")]
 fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
-    use std::process::Command;
+    use winapi::um::winreg::{
+        RegOpenKeyExW, RegQueryValueExW, RegCloseKey,
+        HKEY_CURRENT_USER, KEY_READ
+    };
+    use winapi::shared::winerror::{ERROR_SUCCESS, ERROR_FILE_NOT_FOUND};
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr;
     
-    let key_path = r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run";
+    tracing::debug!("🔍 Windows: 检查自启动状态: {}", app_name);
     
-    let output = Command::new("reg")
-        .args(&[
-            "query",
-            key_path,
-            "/v",
-            app_name
-        ])
-        .output()
-        .map_err(|e| format!("Failed to query registry: {}", e))?;
+    // 转换路径为 UTF-16
+    let subkey_path = OsStr::new(r"Software\Microsoft\Windows\CurrentVersion\Run")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
     
-    // 如果查询成功且找到了值，说明自启动已启用
-    Ok(output.status.success())
+    let value_name = OsStr::new(app_name)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    
+    unsafe {
+        let mut hkey = ptr::null_mut();
+        
+        // 打开注册表键
+        let open_result = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey_path.as_ptr(),
+            0,
+            KEY_READ,
+            &mut hkey,
+        );
+        
+        if open_result != ERROR_SUCCESS as i32 {
+            tracing::debug!("📋 Windows: 无法打开注册表键，自启动未启用");
+            return Ok(false);
+        }
+        
+        // 查询值是否存在
+        let mut value_type = 0u32;
+        let mut data_size = 0u32;
+        
+        let query_result = RegQueryValueExW(
+            hkey,
+            value_name.as_ptr(),
+            ptr::null_mut(),
+            &mut value_type,
+            ptr::null_mut(),
+            &mut data_size,
+        );
+        
+        // 关闭注册表键
+        RegCloseKey(hkey);
+        
+        let exists = query_result == ERROR_SUCCESS as i32;
+        
+        if exists {
+            tracing::info!("✅ Windows: 自启动已启用");
+        } else {
+            tracing::debug!("📋 Windows: 自启动未启用");
+        }
+        
+        Ok(exists)
+    }
 }
 
 // 非 Windows 系统的占位实现
