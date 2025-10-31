@@ -548,26 +548,55 @@ fn get_windows_auto_start_status(_app_name: &str) -> Result<bool, String> {
 
 #[cfg(target_os = "macos")]
 fn set_macos_auto_start(enable: bool, app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> Result<(), String> {
-    use std::process::Command;
-    
     tracing::debug!("🍎 macOS: 设置自启动状态: {} (应用: {})", enable, app_name);
     
     if enable {
-        // 方法1: 尝试使用 Login Items (推荐方法)
-        if let Err(e1) = add_to_login_items_applescript(app_name, exe_path) {
-            tracing::warn!("⚠️ AppleScript 方法失败: {}", e1);
-            
-            // 方法2: 回退到 LaunchAgent 方法
-            tracing::debug!("🔄 尝试 LaunchAgent 方法...");
-            add_to_launch_agent(app_name, bundle_id, exe_path)?;
-        }
-    } else {
-        // 移除自启动：尝试两种方法
+        // 清理可能存在的旧配置
         let _ = remove_from_login_items_applescript(app_name);
         let _ = remove_from_launch_agent(bundle_id);
+        
+        // 优先使用 Login Items (系统偏好设置中可见，用户体验更好)
+        match add_to_login_items_applescript(app_name, exe_path) {
+            Ok(_) => {
+                tracing::info!("✅ 成功使用 Login Items 设置自启动");
+                Ok(())
+            }
+            Err(e1) => {
+                tracing::warn!("⚠️ Login Items 方法失败: {}", e1);
+                
+                // 回退到 LaunchAgent 方法
+                tracing::debug!("🔄 尝试 LaunchAgent 方法...");
+                match add_to_launch_agent(app_name, bundle_id, exe_path) {
+                    Ok(_) => {
+                        tracing::info!("✅ 成功使用 LaunchAgent 设置自启动");
+                        Ok(())
+                    }
+                    Err(e2) => {
+                        let error_msg = format!("所有自启动方法都失败了 - Login Items: {}, LaunchAgent: {}", e1, e2);
+                        tracing::error!("❌ {}", error_msg);
+                        Err(error_msg)
+                    }
+                }
+            }
+        }
+    } else {
+        // 移除自启动：尝试两种方法，确保彻底清理
+        let login_result = remove_from_login_items_applescript(app_name);
+        let agent_result = remove_from_launch_agent(bundle_id);
+        
+        // 只要有一个成功就认为移除成功
+        match (login_result, agent_result) {
+            (Ok(_), _) | (_, Ok(_)) => {
+                tracing::info!("✅ 成功移除自启动配置");
+                Ok(())
+            }
+            (Err(e1), Err(e2)) => {
+                tracing::warn!("⚠️ 移除自启动时出现错误 - Login Items: {}, LaunchAgent: {}", e1, e2);
+                // 移除操作即使失败也不报错，因为可能本来就没有配置
+                Ok(())
+            }
+        }
     }
-    
-    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -587,47 +616,36 @@ fn get_macos_auto_start_status(app_name: &str, bundle_id: &str) -> Result<bool, 
     Ok(false)
 }
 
-// 使用 AppleScript 添加到登录项
+// 使用 AppleScript 添加到登录项（优化版本）
 #[cfg(target_os = "macos")]
 fn add_to_login_items_applescript(app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
     use std::process::Command;
     
-    // 获取应用程序的父目录路径（.app bundle）
-    let app_bundle_path = if exe_path.to_string_lossy().contains(".app/Contents/MacOS/") {
-        // 如果是 .app bundle 内的可执行文件，获取 .app 路径
-        let path_str = exe_path.to_string_lossy();
-        if let Some(app_end) = path_str.find(".app/Contents/MacOS/") {
-            format!("{}.app", &path_str[..app_end])
-        } else {
-            exe_path.to_string_lossy().to_string()
-        }
-    } else {
-        exe_path.to_string_lossy().to_string()
-    };
+    // 获取应用程序的 .app bundle 路径
+    let app_bundle_path = get_app_bundle_path(exe_path)?;
     
     tracing::debug!("📁 应用 Bundle 路径: {}", app_bundle_path);
     
+    // 使用更简单和可靠的 AppleScript
     let script = format!(r#"
 tell application "System Events"
-    -- 检查应用是否已经在登录项中
-    set loginItems to login items
-    set appExists to false
-    repeat with loginItem in loginItems
-        if name of loginItem is "{}" then
-            set appExists to true
-            exit repeat
-        end if
-    end repeat
-    
-    -- 如果不存在，则添加
-    if not appExists then
-        make login item at end with properties {{path:"{}", name:"{}", hidden:false}}
+    try
+        -- 检查应用是否已经在登录项中
+        set loginItems to login items
+        repeat with loginItem in loginItems
+            if path of loginItem is "{}" then
+                return "ALREADY_EXISTS"
+            end if
+        end repeat
+        
+        -- 添加到登录项，设置为隐藏启动
+        make login item at end with properties {{path:"{}", hidden:true}}
         return "SUCCESS_ADDED"
-    else
-        return "ALREADY_EXISTS"
-    end if
+    on error errMsg
+        return "ERROR: " & errMsg
+    end try
 end tell
-    "#, app_name, app_bundle_path, app_name);
+    "#, app_bundle_path, app_bundle_path);
     
     let output = Command::new("osascript")
         .arg("-e")
@@ -638,6 +656,11 @@ end tell
     if output.status.success() {
         let result = String::from_utf8_lossy(&output.stdout).trim().to_string();
         tracing::info!("✅ AppleScript 结果: {}", result);
+        
+        if result.starts_with("ERROR:") {
+            return Err(format!("AppleScript 错误: {}", result));
+        }
+        
         Ok(())
     } else {
         let error_msg = String::from_utf8_lossy(&output.stderr);
@@ -645,23 +668,69 @@ end tell
     }
 }
 
-// 使用 AppleScript 从登录项移除
+// 获取 .app bundle 路径的辅助函数
+#[cfg(target_os = "macos")]
+fn get_app_bundle_path(exe_path: &PathBuf) -> Result<String, String> {
+    let path_str = exe_path.to_string_lossy();
+    
+    // 如果是开发环境或者直接的可执行文件
+    if path_str.contains("/target/debug/") || path_str.contains("/target/release/") {
+        // 开发环境，尝试找到 .app bundle
+        if let Some(app_end) = path_str.find(".app/Contents/MacOS/") {
+            return Ok(format!("{}.app", &path_str[..app_end]));
+        }
+        // 如果找不到 .app，可能是开发环境，返回错误让其使用 LaunchAgent
+        return Err("开发环境，无法找到 .app bundle".to_string());
+    }
+    
+    // 生产环境，应该在 .app bundle 内
+    if let Some(app_end) = path_str.find(".app/Contents/MacOS/") {
+        Ok(format!("{}.app", &path_str[..app_end]))
+    } else {
+        // 如果不在 .app bundle 内，可能是直接的可执行文件
+        Err("不在 .app bundle 内，使用 LaunchAgent 方法".to_string())
+    }
+}
+
+// 使用 AppleScript 从登录项移除（优化版本）
 #[cfg(target_os = "macos")]
 fn remove_from_login_items_applescript(app_name: &str) -> Result<(), String> {
     use std::process::Command;
     
+    // 更灵活的移除脚本，支持按名称和路径匹配
     let script = format!(r#"
 tell application "System Events"
-    set loginItems to login items
-    repeat with loginItem in loginItems
-        if name of loginItem is "{}" then
-            delete loginItem
+    try
+        set loginItems to login items
+        set itemsToDelete to {{}}
+        
+        -- 收集需要删除的项目
+        repeat with loginItem in loginItems
+            set itemName to name of loginItem
+            set itemPath to path of loginItem
+            
+            -- 按名称匹配或路径包含应用名称
+            if itemName is "{}" or itemPath contains "{}" or itemPath contains "Clipboard" then
+                set end of itemsToDelete to loginItem
+            end if
+        end repeat
+        
+        -- 删除匹配的项目
+        repeat with itemToDelete in itemsToDelete
+            delete itemToDelete
+        end repeat
+        
+        if (count of itemsToDelete) > 0 then
             return "SUCCESS_REMOVED"
+        else
+            return "NOT_FOUND"
         end if
-    end repeat
-    return "NOT_FOUND"
+        
+    on error errMsg
+        return "ERROR: " & errMsg
+    end try
 end tell
-    "#, app_name);
+    "#, app_name, app_name);
     
     let output = Command::new("osascript")
         .arg("-e")
@@ -728,6 +797,18 @@ fn add_to_launch_agent(app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> R
     let plist_filename = format!("{}.plist", bundle_id);
     let plist_path = launch_agents_dir.join(&plist_filename);
     
+    // 尝试使用 .app bundle 路径，如果失败则使用可执行文件路径
+    let launch_path = match get_app_bundle_path(exe_path) {
+        Ok(app_bundle) => {
+            tracing::info!("✅ 使用 .app bundle 路径: {}", app_bundle);
+            app_bundle
+        }
+        Err(_) => {
+            tracing::warn!("⚠️ 无法获取 .app bundle，使用可执行文件路径");
+            exe_path.to_string_lossy().to_string()
+        }
+    };
+
     let plist_content = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -736,6 +817,8 @@ fn add_to_launch_agent(app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> R
     <string>{}</string>
     <key>ProgramArguments</key>
     <array>
+        <string>open</string>
+        <string>-a</string>
         <string>{}</string>
     </array>
     <key>RunAtLoad</key>
@@ -744,12 +827,19 @@ fn add_to_launch_agent(app_name: &str, bundle_id: &str, exe_path: &PathBuf) -> R
     <false/>
     <key>LaunchOnlyOnce</key>
     <true/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
     <key>StandardOutPath</key>
-    <string>/tmp/{}.out</string>
+    <string>/dev/null</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/{}.err</string>
+    <string>/dev/null</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
 </dict>
-</plist>"#, bundle_id, exe_path.to_string_lossy(), bundle_id, bundle_id);
+</plist>"#, bundle_id, launch_path);
     
     fs::write(&plist_path, plist_content)
         .map_err(|e| format!("写入 plist 文件失败: {}", e))?;
