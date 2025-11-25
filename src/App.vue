@@ -409,6 +409,23 @@ const handleWindowFocus = async () => {
   await focusSearchInput()
 }
 
+// 处理窗口失去焦点事件
+const handleWindowBlur = async () => {
+  // 当窗口失去焦点时，延迟一小段时间后隐藏窗口
+  // 这样可以避免快速切换窗口时的闪烁
+  setTimeout(async () => {
+    try {
+      const appWindow = getCurrentWindow()
+      if (await appWindow.isVisible() && !await appWindow.isFocused()) {
+        await appWindow.hide()
+        logger.debug('窗口失去焦点，已隐藏')
+      }
+    } catch (error) {
+      logger.error('失去焦点时隐藏窗口失败', { error: String(error) })
+    }
+  }, 20)
+}
+
 // 隐藏应用窗口
 const hideWindow = async () => {
   try {
@@ -2332,7 +2349,7 @@ onMounted(async () => {
     
     // 点击外部隐藏分组下拉菜单
     document.addEventListener('click', hideGroupDropdown)
-    
+
     // 处理窗口关闭事件，隐藏到托盘而不是关闭
     const appWindow = getCurrentWindow()
     
@@ -2348,6 +2365,8 @@ onMounted(async () => {
     const unlistenFocusFunc = await appWindow.onFocusChanged(({ payload: focused }) => {
       if (focused) {
         handleWindowFocus()
+      } else {
+        handleWindowBlur()
       }
     })
     
@@ -2423,7 +2442,7 @@ onUnmounted(() => {
   
   // 清理分组下拉菜单事件监听器
   document.removeEventListener('click', hideGroupDropdown)
-  
+
   // 清理Tauri窗口焦点事件监听器
   if (unlistenFocus.value) {
     unlistenFocus.value()
@@ -2569,7 +2588,7 @@ const checkDataConsistency = () => {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-base-200 rounded-lg shadow-2xl border border-base-300 overflow-hidden">
+  <div class="app-container h-screen flex flex-col bg-base-200 rounded-lg shadow-2xl border border-base-300 overflow-hidden">
     <!-- Main Content -->
     <div class="flex-1 flex min-h-0">
       <!-- Left Sidebar -->

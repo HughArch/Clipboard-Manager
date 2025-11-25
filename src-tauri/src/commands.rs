@@ -420,8 +420,9 @@ fn normalize_shortcut_for_macos(shortcut: &str) -> Result<String, String> {
 fn set_windows_auto_start(enable: bool, app_name: &str, exe_path: &PathBuf) -> Result<(), String> {
     use winapi::um::winreg::{
         RegCreateKeyExW, RegSetValueExW, RegDeleteValueW, RegCloseKey,
-        HKEY_CURRENT_USER, KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ
+        HKEY_CURRENT_USER
     };
+    use winapi::um::winnt::{KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ};
     use winapi::shared::winerror::{ERROR_SUCCESS, ERROR_FILE_NOT_FOUND};
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
@@ -564,8 +565,9 @@ pub async fn get_auto_start_status(_app: AppHandle) -> Result<bool, String> {
 fn get_windows_auto_start_status(app_name: &str) -> Result<bool, String> {
     use winapi::um::winreg::{
         RegOpenKeyExW, RegQueryValueExW, RegCloseKey,
-        HKEY_CURRENT_USER, KEY_READ
+        HKEY_CURRENT_USER
     };
+    use winapi::um::winnt::KEY_READ;
     use winapi::shared::winerror::{ERROR_SUCCESS, ERROR_FILE_NOT_FOUND};
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
