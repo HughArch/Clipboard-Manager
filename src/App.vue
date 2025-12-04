@@ -2750,16 +2750,16 @@ const checkDataConsistency = () => {
                     <div class="flex items-start space-x-1.5 flex-1 min-w-0 mr-1.5">
                       <!-- 源应用图标 -->
                       <div class="avatar">
-                        <div class="w-4 h-4 rounded">
+                        <div class="w-3 h-3 rounded">
                           <img 
                             v-if="item.sourceAppIcon" 
                             :src="item.sourceAppIcon" 
                             :alt="item.sourceAppName"
-                            class="w-4 h-4 rounded object-contain"
+                            class="w-3 h-3 rounded object-contain"
                           />
                           <div 
                             v-else 
-                            class="w-4 h-4 rounded bg-base-300 flex items-center justify-center"
+                            class="w-3 h-3 rounded bg-base-300 flex items-center justify-center"
                             :title="item.sourceAppName"
                           >
                             <svg class="w-2 h-2 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
@@ -2816,7 +2816,7 @@ const checkDataConsistency = () => {
                     <div class="card-actions justify-end absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1">
                       <!-- 删除按钮 -->
                       <button
-                        class="w-4 h-4 bg-red-50 hover:bg-red-500 hover:text-white border border-red-200 text-red-600 rounded flex items-center justify-center"
+                        class="w-3 h-3 bg-red-50 hover:bg-red-500 hover:text-white border border-red-200 text-red-600 rounded flex items-center justify-center"
                         @click.stop="deleteItem(item)"
                         title="删除"
                       >
@@ -2826,7 +2826,7 @@ const checkDataConsistency = () => {
                       </button>
                       <!-- 收藏按钮 -->
                     <button
-                      class="w-4 h-4 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
+                      class="w-3 h-3 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
                       :class="item.isFavorite ? 'bg-yellow-100 text-yellow-600 border-yellow-300' : 'bg-gray-50 text-gray-600 border-gray-200'"
                       @click.stop="toggleFavorite(item)"
                         title="收藏"
@@ -3322,7 +3322,7 @@ const checkDataConsistency = () => {
                                   class="w-full h-full object-cover"
                                 />
                                 <div v-else class="w-full h-full flex items-center justify-center">
-                                  <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                                   </svg>
                                 </div>
@@ -3404,7 +3404,7 @@ const checkDataConsistency = () => {
                 title="分组管理"
               >
                 <!-- 分组管理图标：多个文件夹表示分组 -->
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
                   <circle cx="8" cy="4" r="1" fill="currentColor"></circle>
                   <circle cx="12" cy="4" r="1" fill="currentColor"></circle>
@@ -3416,7 +3416,7 @@ const checkDataConsistency = () => {
                 @click="showSettings = !showSettings"
                 title="设置"
               >
-                <Cog6ToothIcon class="w-4 h-4" />
+                <Cog6ToothIcon class="w-3 h-3" />
               </button>
             </div>
           </div>
@@ -3490,7 +3490,7 @@ const checkDataConsistency = () => {
             @click="openGroupForm()"
             class="w-full mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
             </svg>
             <span>新建分组</span>
@@ -3517,7 +3517,7 @@ const checkDataConsistency = () => {
             >
               <div class="flex items-center space-x-3">
                 <div 
-                  class="w-4 h-4 rounded-full"
+                  class="w-3 h-3 rounded-full"
                   :style="{ backgroundColor: group.color }"
                 ></div>
                 <div class="flex items-center space-x-2">
@@ -3531,7 +3531,7 @@ const checkDataConsistency = () => {
                   class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                   title="编辑分组"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
                   </svg>
                 </button>
@@ -3540,7 +3540,7 @@ const checkDataConsistency = () => {
                   class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                   title="删除分组"
                 >
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                   </svg>
                 </button>
@@ -3612,13 +3612,13 @@ const checkDataConsistency = () => {
         <div class="flex justify-end space-x-2 p-3 border-t border-gray-200">
           <button
             @click="closeGroupForm"
-            class="px-3 py-1.5 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+            class="px-3 py-1 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
           >
             取消
           </button>
           <button
             @click="saveGroup"
-            class="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+            class="px-3 py-1 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
           >
             {{ editingGroup ? '更新' : '创建' }}
           </button>
@@ -3668,7 +3668,7 @@ const checkDataConsistency = () => {
               class="w-full p-2 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
             >
               <div 
-                class="w-4 h-4 rounded-full"
+                class="w-3 h-3 rounded-full"
                 :style="{ backgroundColor: group.color }"
               ></div>
               <div class="flex items-center justify-between flex-1">
@@ -3689,54 +3689,83 @@ const checkDataConsistency = () => {
     />
     
     <!-- 右键菜单 -->
-    <div 
+    <div
       v-if="showContextMenu"
-      :style="{ 
-        position: 'fixed', 
-        left: contextMenuPosition.x + 'px', 
+      :style="{
+        position: 'fixed',
+        left: contextMenuPosition.x + 'px',
         top: contextMenuPosition.y + 'px',
         zIndex: 9999
       }"
-      class="bg-white rounded shadow-md border border-gray-200 py-0 w-20 text-xs"
+      class="bg-white/95 backdrop-blur-xl rounded-lg shadow-xl border border-gray-200/60 py-0.5 min-w-32 overflow-hidden"
       @click.stop
     >
+      <!-- 备注选项 -->
       <button
         @click="handleContextMenuAction('note')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 hover:text-blue-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        备注
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-blue-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+        </svg>
+        <span>备注</span>
       </button>
+
+      <!-- 分组选项 -->
       <button
         @click="handleContextMenuAction('group')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        分组
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-emerald-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
+        </svg>
+        <span>分组</span>
       </button>
+
       <!-- 移除分组选项（仅在分组模式下显示） -->
       <button
         v-if="currentTabInfo.isGroupMode"
         @click="handleContextMenuAction('remove-group')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50 hover:text-orange-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        移除分组
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-orange-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+        </svg>
+        <span>移除分组</span>
       </button>
+
+      <!-- 复制选项 -->
       <button
         @click="handleContextMenuAction('copy')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 hover:text-purple-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        复制
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-purple-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
+        </svg>
+        <span>复制</span>
       </button>
+
+  
+      <!-- 收藏选项 -->
       <button
         @click="handleContextMenuAction('favorite')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs text-gray-700 hover:bg-gray-100 transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-yellow-50 hover:to-amber-50 hover:text-yellow-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        收藏
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-yellow-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
+        </svg>
+        <span>{{ contextMenuItem?.is_favorite ? '取消收藏' : '收藏' }}</span>
       </button>
+
+      <!-- 删除选项 -->
       <button
         @click="handleContextMenuAction('delete')"
-        class="w-full pl-1.5 pr-3 py-0.5 text-left text-xs transition-colors duration-100"
+        class="w-full px-3 py-1 text-left text-xs text-red-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-rose-50 hover:text-red-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
       >
-        删除
+        <svg class="w-3 h-3 text-red-500 group-hover:text-red-600 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+        </svg>
+        <span>删除</span>
       </button>
     </div>
 
@@ -3765,13 +3794,13 @@ const checkDataConsistency = () => {
         <div class="flex justify-end space-x-2 mt-3">
           <button
             @click="closeNoteDialog"
-            class="px-3 py-1.5 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors duration-100"
+            class="px-3 py-1 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors duration-100"
           >
             取消
           </button>
           <button
             @click="saveNote"
-            class="px-3 py-1.5 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors duration-100"
+            class="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors duration-100"
           >
             保存
           </button>
