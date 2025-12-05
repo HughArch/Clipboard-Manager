@@ -1060,13 +1060,22 @@ const checkDuplicateContent = async (content: string, contentType: 'text' | 'ima
     // 先检查内存中的历史记录
     const existingItem = clipboardHistory.value.find(item => {
       if (item.type === 'image' && contentType === 'image') {
-        // 图片优先比较哈希
+        // 1. 优先比较哈希 (如果有)
         if (hash && item.dataHash && item.dataHash === hash) {
           return true
         }
-        // 如果没有哈希或哈希不匹配（旧数据），尝试比较路径
-        // 注意：content 是 base64/path 混合，这里比较可能不可靠，主要依赖哈希
-        return item.imagePath === content
+        
+        // 2. 比较图片路径 (针对没有哈希的旧数据，或者哈希未计算的情况)
+        // 注意：content 字段现在存的是路径。item.imagePath 也是路径。
+        // 我们比较 content 是否相等 (如果是路径)，或者 imagePath 是否相等
+        if (content && !content.startsWith('data:image') && item.content === content) {
+            return true
+        }
+        if (item.imagePath && item.imagePath === content) {
+            return true
+        }
+        
+        return false
       }
       return item.content === content && item.type === contentType
     })
@@ -1128,6 +1137,9 @@ const moveItemToFront = async (itemId: number) => {
       // 添加到最前面
       clipboardHistory.value.unshift(item)
       
+      // 触发响应式更新
+      triggerRef(clipboardHistory)
+      
       // 如果移动的项目就是当前选中的项目，更新选中项目的引用
       if (selectedItem.value?.id === itemId) {
         selectedItem.value = item
@@ -1167,6 +1179,7 @@ const moveItemToFront = async (itemId: number) => {
         
         // 添加到内存列表的开头
         clipboardHistory.value.unshift(item)
+        triggerRef(clipboardHistory)
         
         // 执行内存清理以防止列表过长
         trimMemoryHistory()
@@ -1294,6 +1307,10 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
       // 隐藏窗口
       appWindow.hide()
     ])
+    
+    // 成功写入剪贴板后，将条目移动到最前面
+    // 这对于图片特别重要，因为文件复制(CF_HDROP)可能不会触发 onImageUpdate 监听器
+    await moveItemToFront(item.id)
     
     const pasteStart = performance.now()
     // 使用智能粘贴：如果有目标应用信息，就激活目标应用再粘贴
@@ -1768,6 +1785,7 @@ const exitSearchMode = async () => {
     clipboardHistory.value = finalDeduplicatedItems.sort((a: any, b: any) => 
       new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     )
+    triggerRef(clipboardHistory)
     
     logger.debug('数据恢复完成', { newItemsCount: currentNewestItems.length, originalItemsCount: deduplicatedOriginal.length, totalItems: finalDeduplicatedItems.length })
     
