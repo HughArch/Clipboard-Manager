@@ -1223,11 +1223,11 @@ const resolveImage = (item: any): string | undefined => {
 }
 
 // 复制内容到系统剪贴板并智能粘贴到目标应用
-const copyToClipboard = async (item: any) => {
+const copyToClipboard = async (item: any, asPath: boolean = false) => {
   if (!item) return
   
   const startTime = performance.now()
-  logger.info('开始智能复制和粘贴', { type: item.type, id: item.id })
+  logger.info('开始智能复制和粘贴', { type: item.type, id: item.id, asPath })
   
   try {
     // 使用之前保存的目标应用信息（在快捷键触发时获取的）
@@ -1243,9 +1243,6 @@ const copyToClipboard = async (item: any) => {
       }
     }
     
-    // 准备要复制的内容
-    // let contentToCopy = item.content // 不再需要，直接在下面处理
-    
     // 获取窗口引用，准备并行操作
     const appWindow = getCurrentWindow()
     
@@ -1257,7 +1254,7 @@ const copyToClipboard = async (item: any) => {
         if (item.type === 'text') {
           await writeText(item.content)
         } else if (item.type === 'image') {
-          // 图片处理：直接使用路径调用后端命令
+          // 图片处理：
           let imagePath = item.content
           
           // 确保路径存在
@@ -1270,17 +1267,24 @@ const copyToClipboard = async (item: any) => {
                  if (rows.length > 0) imagePath = rows[0].content
              }
           }
-          
+
           if (imagePath && !imagePath.startsWith('data:image')) {
-             try {
-               logger.debug('调用后端直接复制图片文件', { path: imagePath })
-               await invoke('copy_image_to_clipboard', { imagePath })
-               logger.debug('图片写入剪贴板完成 (Rust)', { 
-                  time: `${(performance.now() - writeStart).toFixed(2)}ms` 
-               })
-             } catch (e) {
-               logger.error('复制图片失败', { path: imagePath, error: String(e) })
-               throw e // 抛出错误以便外层捕获
+             if (asPath) {
+                 // 如果作为路径粘贴，直接写入路径文本到剪贴板
+                 logger.debug('将图片路径作为文本复制', { path: imagePath })
+                 await writeText(imagePath)
+             } else {
+                 // 正常粘贴图片
+                 try {
+                   logger.debug('调用后端直接复制图片文件', { path: imagePath })
+                   await invoke('copy_image_to_clipboard', { imagePath })
+                   logger.debug('图片写入剪贴板完成 (Rust)', { 
+                      time: `${(performance.now() - writeStart).toFixed(2)}ms` 
+                   })
+                 } catch (e) {
+                   logger.error('复制图片失败', { path: imagePath, error: String(e) })
+                   throw e // 抛出错误以便外层捕获
+                 }
              }
           } else {
              logger.warn('无效的图片路径，无法复制', { itemId: item.id })
@@ -1396,9 +1400,11 @@ const handleKeyDown = async (e: KeyboardEvent) => {
     }
   } else if (e.key === 'Enter') {
     e.preventDefault()
+    // 检查是否按下了修饰键 (Ctrl on Win/Linux, Cmd on Mac)
+    const asPath = isModifierPressed(e)
     // 按Enter键复制当前选中的项目到剪贴板
     if (selectedItem.value) {
-      copyToClipboard(selectedItem.value)
+      copyToClipboard(selectedItem.value, asPath)
     }
     return
   }
@@ -1418,8 +1424,11 @@ const handleKeyDown = async (e: KeyboardEvent) => {
 }
 
 // 处理双击事件
-const handleDoubleClick = (item: any) => {
-  copyToClipboard(item)
+const handleDoubleClick = (event: MouseEvent, item: any) => {
+  // 检查是否按下了修饰键 (Ctrl on Win/Linux, Cmd on Mac)
+  // 注意：MouseEvents 有 ctrlKey, metaKey 等属性
+  const asPath = isMac() ? event.metaKey : event.ctrlKey
+  copyToClipboard(item, asPath)
 }
 
 // 处理按钮切换
@@ -2685,7 +2694,7 @@ const checkDataConsistency = () => {
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
-                  @dblclick="handleDoubleClick(item)"
+                  @dblclick="handleDoubleClick($event, item)"
                   @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="card-body" :class="item.type === 'image' ? 'p-1.5' : 'p-0.5'">
@@ -2811,23 +2820,22 @@ const checkDataConsistency = () => {
             </div>
 
             <div v-show="false" class="h-full flex flex-col min-h-0">
-              <!-- Text List -->
-              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
-                <div
-                  v-for="item in filteredHistory"
-                  :key="item.id"
-                  :data-item-id="item.id"
-                  :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
-                  :class="{ 
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
-                  }"
-                  @click="selectedItem = item"
-                  @dblclick="handleDoubleClick(item)"
-                  @contextmenu="showItemContextMenu($event, item)"
-                >
-                  <div class="flex items-start justify-between">
+                            <!-- Text List -->
+                            <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
+                              <div
+                                v-for="item in filteredHistory"
+                                :key="item.id"
+                                :data-item-id="item.id"
+                                :title="item.note || ''"
+                                class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
+                                :class="{
+                                  'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                                  'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                                }"
+                                @click="selectedItem = item"
+                                @dblclick="handleDoubleClick($event, item)"
+                                @contextmenu="showItemContextMenu($event, item)"
+                              >                  <div class="flex items-start justify-between">
                     <div class="flex items-start space-x-2 flex-1 min-w-0 mr-2">
                       <!-- 源应用图标 -->
                       <div class="flex-shrink-0 w-6 h-6 mt-0.5">
@@ -2940,7 +2948,7 @@ const checkDataConsistency = () => {
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
-                  @dblclick="handleDoubleClick(item)"
+                  @dblclick="handleDoubleClick($event, item)"
                   @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
@@ -3071,7 +3079,7 @@ const checkDataConsistency = () => {
                     'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
-                  @dblclick="handleDoubleClick(item)"
+                  @dblclick="handleDoubleClick($event, item)"
                   @contextmenu="showItemContextMenu($event, item)"
                 >
                   <div class="flex items-start justify-between">
