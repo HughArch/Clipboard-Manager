@@ -189,6 +189,7 @@
     "allow-get-groups",
     "allow-update-group",
     "allow-delete-group",
-    "allow-add-item-to-group"
+    "allow-add-item-to-group",
+    "allow-delete-item"
   ]
 } 

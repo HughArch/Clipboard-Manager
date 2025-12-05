@@ -388,7 +388,8 @@ pub fn run() {
             commands::get_groups,
             commands::update_group,
             commands::delete_group,
-            commands::add_item_to_group
+            commands::add_item_to_group,
+            commands::delete_item
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

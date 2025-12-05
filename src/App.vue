@@ -560,11 +560,8 @@ const deleteItem = (item: any) => {
     type: 'danger',
     onConfirm: async () => {
       try {
-        // 从数据库删除
-        await db!.execute(
-          'DELETE FROM clipboard_history WHERE id = ?',
-          [item.id]
-        )
+        // 调用后端删除命令 (同时处理数据库和文件)
+        await invoke('delete_item', { id: item.id })
         
         // 从内存中移除
         const index = clipboardHistory.value.findIndex(i => i.id === item.id)

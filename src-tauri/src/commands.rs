@@ -1934,6 +1934,55 @@ pub async fn delete_group(app: AppHandle, id: i64) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn delete_item(app: AppHandle, id: i64) -> Result<(), String> {
+    tracing::info!("删除条目: ID={}", id);
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+        
+        // 1. 获取条目信息，检查是否有图片文件
+        let result = sqlx::query_as::<_, (Option<String>,)>("SELECT image_path FROM clipboard_history WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await;
+            
+        if let Ok(Some((Some(image_path),))) = result {
+            // 如果有图片文件，尝试删除
+            let path = PathBuf::from(&image_path);
+            if path.exists() {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    tracing::warn!("删除图片文件失败: {} ({})", image_path, e);
+                } else {
+                    tracing::info!("已删除图片文件: {}", image_path);
+                }
+            }
+        }
+        
+        // 2. 从数据库删除记录
+        let delete_result = sqlx::query("DELETE FROM clipboard_history WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await;
+            
+        match delete_result {
+            Ok(_) => {
+                tracing::info!("✅ 条目删除成功: ID={}", id);
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("数据库删除失败: {}", e);
+                tracing::error!("❌ 删除条目失败: {}", error_msg);
+                Err(error_msg)
+            }
+        }
+    } else {
+        let error_msg = "无法获取数据库状态".to_string();
+        tracing::error!("❌ 删除条目失败: {}", error_msg);
+        Err(error_msg)
+    }
+}
+
+#[tauri::command]
 pub async fn add_item_to_group(app: AppHandle, item_id: i64, group_id: Option<i64>) -> Result<(), String> {
     tracing::info!("设置条目分组: item_id={}, group_id={:?}", item_id, group_id);
     if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
