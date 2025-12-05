@@ -22,8 +22,7 @@ import {
   onTextUpdate, 
   onImageUpdate, 
   startListening,
-  writeText,
-  writeImageBase64
+  writeText
 } from 'tauri-plugin-clipboard-api'
 
 
