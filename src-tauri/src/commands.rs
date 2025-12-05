@@ -1387,49 +1387,32 @@ pub async fn load_image_file(image_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn generate_thumbnail(base64_data: String, width: Option<u32>, height: Option<u32>) -> Result<String, String> {
-    let width = width.unwrap_or(200);
-    let height = height.unwrap_or(150);
+pub async fn save_clipboard_image(base64_data: String) -> Result<String, String> {
+    // 1. 解析base64数据
+    // 处理可能的前缀 "data:image/png;base64,"
+    let base64_start = base64_data.find("base64,").map(|i| i + 7).unwrap_or(0);
+    let base64_str = &base64_data[base64_start..];
     
-    // 解析base64数据
-    let base64_start = base64_data.find("base64,").ok_or("无效的base64格式")?;
-    let base64_str = &base64_data[base64_start + 7..]; // "base64,".len() = 7
-    
-    // 解码base64
+    // 2. 解码base64
     let image_bytes = general_purpose::STANDARD
         .decode(base64_str)
         .map_err(|e| format!("base64解码失败: {}", e))?;
+
+    // 3. 获取图片目录
+    let images_dir = get_app_images_dir()?;
     
-    // 加载图片
-    let img = image::load_from_memory(&image_bytes)
-        .map_err(|e| format!("图片加载失败: {}", e))?;
+    // 4. 生成文件名 (使用时间戳)
+    let timestamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let filename = format!("img_{}.png", timestamp);
+    let file_path = images_dir.join(&filename);
+    println!("保存图片到: {:?}", file_path);
     
-    // 计算等比例缩放尺寸
-    let (img_width, img_height) = (img.width(), img.height());
-    let aspect_ratio = img_width as f64 / img_height as f64;
-    let target_aspect_ratio = width as f64 / height as f64;
-    
-    let (target_width, target_height) = if aspect_ratio > target_aspect_ratio {
-        // 图片更宽，以宽度为准
-        (width, (width as f64 / aspect_ratio) as u32)
-    } else {
-        // 图片更高，以高度为准
-        ((height as f64 * aspect_ratio) as u32, height)
-    };
-    
-    // 生成缩略图
-    let thumbnail = img.resize(target_width, target_height, FilterType::Lanczos3);
-    
-    // 转换为JPEG格式以减小文件大小
-    let mut jpeg_buffer = Vec::new();
-    thumbnail.write_to(&mut std::io::Cursor::new(&mut jpeg_buffer), ImageFormat::Jpeg)
-        .map_err(|e| format!("JPEG编码失败: {}", e))?;
-    
-    // 转换为base64
-    let b64 = general_purpose::STANDARD.encode(&jpeg_buffer);
-    let thumbnail_data_url = format!("data:image/jpeg;base64,{}", b64);
-    
-    Ok(thumbnail_data_url)
+    // 5. 保存文件
+    std::fs::write(&file_path, image_bytes)
+        .map_err(|e| format!("写入图片文件失败: {}", e))?;
+        
+    // 6. 返回文件路径字符串
+    Ok(file_path.to_string_lossy().to_string())
 }
 
 // ===== 日志相关命令 =====

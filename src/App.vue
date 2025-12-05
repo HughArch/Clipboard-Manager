@@ -130,7 +130,7 @@ const currentTabInfo = computed(() => {
   }
 })
 const fullImageContent = ref<string | null>(null) // 存储完整图片的 base64 数据
-const thumbnailCache = shallowRef(new Map<string, string>()) // 缩略图缓存 - 使用 shallowRef 优化性能
+// 移除 thumbnailCache
 let db: Awaited<ReturnType<any>> | null = null
 const isSearching = ref(false) // 添加搜索状态标识
 const isLoadingMore = ref(false) // 添加加载更多状态
@@ -214,6 +214,14 @@ const formatJSON = (str: string): string => {
   } catch {
     return str
   }
+}
+
+// 计算字符串的 SHA-256 哈希
+const calculateHash = async (text: string): Promise<string> => {
+  const msgBuffer = new TextEncoder().encode(text)
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer)
+  const hashArray = Array.from(new Uint8Array(hashBuffer))
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
 // 计算属性：获取格式化后的预览内容
@@ -583,12 +591,7 @@ const deleteItem = (item: any) => {
           }
         }
         
-        // 清理缩略图缓存
-        const itemKey = item.id.toString()
-        if (thumbnailCache.value.has(itemKey)) {
-          thumbnailCache.value.delete(itemKey)
-          triggerRef(thumbnailCache)
-        }
+        // 移除缩略图清理逻辑
         
         // 如果当前选中的项是被删除的项，清除选中状态
         if (selectedItem.value?.id === item.id) {
@@ -952,7 +955,7 @@ const loadGroupData = async (groupId: number) => {
   // 始终从数据库查询分组数据，避免仅使用内存缓存导致展示不全
   try {
     const rows = await db!.select(
-      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash 
        FROM clipboard_history 
        WHERE group_id = ? 
        ORDER BY timestamp DESC 
@@ -971,7 +974,8 @@ const loadGroupData = async (groupId: number) => {
       sourceAppName: row.source_app_name ?? 'Unknown',
       sourceAppIcon: row.source_app_icon ?? null,
       note: row.note ?? null,
-      groupId: row.group_id ?? null
+      groupId: row.group_id ?? null,
+      dataHash: row.data_hash ?? null
     }))
     
     clipboardHistory.value = groupItems
@@ -1054,13 +1058,19 @@ const handleContextMenuAction = (action: string) => {
 }
 
 // 检查是否是重复内容，如果是则返回已有条目的ID
-const checkDuplicateContent = async (content: string, contentType: 'text' | 'image'): Promise<number | null> => {
+const checkDuplicateContent = async (content: string, contentType: 'text' | 'image', hash?: string): Promise<number | null> => {
   try {
     // 先检查内存中的历史记录
-  const existingItem = clipboardHistory.value.find(item => {
-      if (item.type === 'image' && item.imagePath && contentType === 'image') {
-      return item.imagePath === content
-    }
+    const existingItem = clipboardHistory.value.find(item => {
+      if (item.type === 'image' && contentType === 'image') {
+        // 图片优先比较哈希
+        if (hash && item.dataHash && item.dataHash === hash) {
+          return true
+        }
+        // 如果没有哈希或哈希不匹配（旧数据），尝试比较路径
+        // 注意：content 是 base64/path 混合，这里比较可能不可靠，主要依赖哈希
+        return item.imagePath === content
+      }
       return item.content === content && item.type === contentType
     })
     
@@ -1070,12 +1080,24 @@ const checkDuplicateContent = async (content: string, contentType: 'text' | 'ima
     
     // 如果内存中没有找到，检查数据库（防止内存清理导致的漏检）
     if (db) {
-      const dbResult = await db.select(
-        'SELECT id FROM clipboard_history WHERE content = ? AND type = ? ORDER BY timestamp DESC LIMIT 1',
-        [content, contentType]
-      )
-      if (dbResult.length > 0) {
-        return dbResult[0].id
+      if (contentType === 'image' && hash) {
+        // 使用哈希查询数据库
+        const dbResult = await db.select(
+          'SELECT id FROM clipboard_history WHERE data_hash = ? AND type = ? ORDER BY timestamp DESC LIMIT 1',
+          [hash, contentType]
+        )
+        if (dbResult.length > 0) {
+          return dbResult[0].id
+        }
+      } else {
+        // 文本或无哈希的情况，使用 content 查询
+        const dbResult = await db.select(
+          'SELECT id FROM clipboard_history WHERE content = ? AND type = ? ORDER BY timestamp DESC LIMIT 1',
+          [content, contentType]
+        )
+        if (dbResult.length > 0) {
+          return dbResult[0].id
+        }
       }
     }
     
@@ -1159,127 +1181,47 @@ const moveItemToFront = async (itemId: number) => {
 }
 
 // 生成状态记录，防止重复生成
-const generatingThumbnails = ref(new Set<string>())
+// const generatingThumbnails = ref(new Set<string>())
 
-// 可视区域计算
-// const calculateVisibleItems = (scrollTop: number, containerHeight: number, itemHeight: number) => {
-//   const startIndex = Math.floor(scrollTop / itemHeight)
-//   const endIndex = Math.min(
-//     startIndex + Math.ceil(containerHeight / itemHeight) + 5, // 额外渲柕 5 个项目
-//     filteredHistory.value.length - 1
-//   )
-//   return { startIndex: Math.max(0, startIndex - 2), endIndex } // 预渲柕 2 个项目
-// }
+// 异步加载的图片缓存
+const visibleImages = shallowRef(new Map<string, string>())
+const pendingImageLoads = new Set<string>()
 
-// 仅为新复制的图片生成缩略图
-const generateThumbnailForNewItem = async (item: any) => {
-  if (item.type !== 'image') {
-    return
-  }
+// 异步解析列表图片
+const resolveImage = (item: any): string | undefined => {
+  if (item.type !== 'image') return undefined
   
   const itemKey = item.id.toString()
   
-  // 检查是否已经在缓存中或正在生成
-  if (thumbnailCache.value.has(itemKey) || generatingThumbnails.value.has(itemKey)) {
-    logger.debug('缩略图已存在或正在生成，跳过', { itemId: item.id })
-    return
+  // 如果已经在缓存中，直接返回
+  if (visibleImages.value.has(itemKey)) {
+    return visibleImages.value.get(itemKey)
   }
   
-  // 标记为正在生成
-  generatingThumbnails.value.add(itemKey)
-  
-  try {
-    let originalImage = item.content
-    
-    // 如果有imagePath（旧格式），优先使用
-    if (item.imagePath) {
-      originalImage = await invoke('load_image_file', { imagePath: item.imagePath }) as string
-    }
-    
-    logger.debug('开始为新图片生成缩略图', { itemId: item.id, hasOriginalImage: !!originalImage })
-    
-    // 生成缩略图
-    const thumbnail = await invoke('generate_thumbnail', { 
-      base64Data: originalImage,
-      width: 200,
-      height: 150
-    }) as string
-    
-    // 存入缓存
-    thumbnailCache.value.set(itemKey, thumbnail)
-    triggerRef(thumbnailCache) // 手动触发缓存更新
-    
-    // 将缩略图保存到数据库
-    try {
-      await db!.execute(
-        'UPDATE clipboard_history SET thumbnail_data = ? WHERE id = ?',
-        [thumbnail, item.id]
-      )
-      logger.debug('缩略图已保存到数据库', { itemId: item.id })
-    } catch (dbError) {
-      logger.warn('保存缩略图到数据库失败', { itemId: item.id, error: String(dbError) })
-    }
-    
-    logger.debug('新图片缩略图生成成功', { itemId: item.id })
-  } catch (error) {
-    logger.warn('生成缩略图失败', { error: String(error), itemId: item.id })
-    // 失败时使用原图作为后备
-    thumbnailCache.value.set(itemKey, item.content || '')
-    triggerRef(thumbnailCache) // 手动触发缓存更新
-  } finally {
-    // 移除生成状态标记
-    generatingThumbnails.value.delete(itemKey)
-  }
-}
-
-// 检查项目是否在可视区域内
-// const isItemVisible = (itemIndex: number, scrollContainer?: HTMLElement): boolean => {
-//   if (!scrollContainer) return true
-//   
-//   const itemHeight = 80 // 估算的项目高度
-//   const itemTop = itemIndex * itemHeight
-//   const itemBottom = itemTop + itemHeight
-//   
-//   const containerTop = scrollContainer.scrollTop
-//   const containerBottom = containerTop + scrollContainer.clientHeight
-//   
-//   // 添加一些缓冲区域
-//   const buffer = 200
-//   return itemBottom >= (containerTop - buffer) && itemTop <= (containerBottom + buffer)
-// }
-
-// 统计缩略图调用次数
-let thumbnailCallCount = 0
-let lastThumbnailLogTime = 0
-
-// 获取缩略图（同步，用于模板）
-const getThumbnailSync = (item: any): string | undefined => {
-  if (item.type !== 'image') {
+  // 如果正在加载，返回 undefined (显示占位符)
+  if (pendingImageLoads.has(itemKey)) {
     return undefined
   }
   
-  thumbnailCallCount++
-  const now = Date.now()
+  // 触发异步加载
+  pendingImageLoads.add(itemKey)
   
-  // 每秒最多记录一次日志，避免日志洪水
-  if (now - lastThumbnailLogTime > 1000) {
-    logger.debug('缩略图调用统计', { 
-      callCount: thumbnailCallCount,
-      cacheSize: thumbnailCache.value.size,
-      recentItemId: item.id
-    })
-    lastThumbnailLogTime = now
-    thumbnailCallCount = 0
-  }
+  // 使用 nextTick 确保不会在渲染循环中直接触发大量请求
+  nextTick(async () => {
+    try {
+      // 使用 loadImageContent 复用加载逻辑
+      const imageContent = await loadImageContent(item)
+      if (imageContent) {
+        visibleImages.value.set(itemKey, imageContent)
+        triggerRef(visibleImages)
+      }
+    } catch (e) {
+      // ignore error
+    } finally {
+      pendingImageLoads.delete(itemKey)
+    }
+  })
   
-  const itemKey = item.id.toString()
-  
-  // 如果缓存中有，直接返回
-  if (thumbnailCache.value.has(itemKey)) {
-    return thumbnailCache.value.get(itemKey)!
-  }
-
-  // 对于历史数据，不生成缩略图，返回 undefined 以显示占位符
   return undefined
 }
 
@@ -1306,17 +1248,34 @@ const copyToClipboard = async (item: any) => {
     // 准备要复制的内容
     let contentToCopy = item.content
     
-    // 对于图片，如果是当前选中的项目且有完整图片内容，则使用完整内容
-    if (item.type === 'image' && selectedItem.value?.id === item.id && fullImageContent.value) {
-      contentToCopy = fullImageContent.value
-    } else if (item.type === 'image' && item.imagePath) {
-      // 如果是旧格式的图片（有 imagePath），尝试加载完整图片
-      try {
-        const fullImage = await invoke('load_image_file', { imagePath: item.imagePath }) as string
-        contentToCopy = fullImage
-      } catch (error) {
-        logger.warn('加载完整图片失败，使用缩略图', { error: String(error) })
-        contentToCopy = item.content
+    // 对于图片，需要获取完整的 base64 数据
+    if (item.type === 'image') {
+      // 如果已有完整图片内容（如预览中），直接使用
+      if (selectedItem.value?.id === item.id && fullImageContent.value) {
+        contentToCopy = fullImageContent.value
+      } else {
+        // 否则从文件加载
+        try {
+          // item.content 应该是路径
+          let imagePath = item.content
+          // 如果内存中 content 为空（如列表加载优化），尝试从 DB 或 imagePath 字段获取
+          if (!imagePath || imagePath.trim() === '') {
+             if (item.imagePath) {
+                 imagePath = item.imagePath
+             } else {
+                 // 尝试从 DB 查 path
+                 const rows = await db!.select('SELECT content FROM clipboard_history WHERE id = ?', [item.id])
+                 if (rows.length > 0) imagePath = rows[0].content
+             }
+          }
+          
+          if (imagePath) {
+             contentToCopy = await invoke('load_image_file', { imagePath }) as string
+          }
+        } catch (error) {
+          logger.warn('加载图片文件以复制失败', { error: String(error) })
+          // 如果失败，contentToCopy 保持原值（可能是路径），后续写入会失败但会有错误日志
+        }
       }
     }
     
@@ -1586,35 +1545,36 @@ const loadImageContent = async (item: any): Promise<string | null> => {
   if (item.type !== 'image') return null
   
   try {
-    // 如果已经有内容且不是空字符串，直接返回
-    if (item.content && item.content.trim() !== '') {
-      return item.content
+    // 从数据库加载完整内容（假设是路径）
+    // 如果内存中已有 path，直接使用
+    let imagePath = item.content;
+    if (!imagePath || imagePath.trim() === '') {
+        logger.info('按需加载图片路径', { itemId: item.id })
+        const rows = await db!.select(
+          'SELECT content FROM clipboard_history WHERE id = ?',
+          [item.id]
+        )
+        if (rows.length > 0) {
+            imagePath = rows[0].content
+        }
     }
-    
-    // 从数据库加载完整内容
-    logger.info('按需加载图片内容', { itemId: item.id })
-    const loadStart = performance.now()
-    
-    const rows = await db!.select(
-      'SELECT content FROM clipboard_history WHERE id = ?',
-      [item.id]
-    )
-    
-    const loadTime = performance.now() - loadStart
-    
-    if (rows.length > 0) {
-      const content = rows[0].content
-      logger.info('图片内容加载完成', { 
-        itemId: item.id, 
-        loadTime: `${loadTime.toFixed(2)}ms`,
-        contentSize: content ? `${(content.length / 1024).toFixed(1)}KB` : '0KB'
-      })
-      return content
+
+    if (!imagePath || imagePath.trim() === '') {
+        logger.warn('未找到图片路径', { itemId: item.id })
+        return null
     }
-    
-    return null
+
+    // 加载图片文件
+    logger.debug('从路径加载图片文件', { path: imagePath })
+    try {
+        const loadedImage = await invoke('load_image_file', { imagePath }) as string
+        return loadedImage
+    } catch (e) {
+        logger.error('加载图片文件失败', { path: imagePath, error: String(e) })
+        return null
+    }
   } catch (error) {
-    logger.error('加载图片内容失败', { itemId: item.id, error: String(error) })
+    logger.error('加载图片内容流程失败', { itemId: item.id, error: String(error) })
     return null
   }
 }
@@ -1628,16 +1588,8 @@ watch(selectedItem, async (newItem) => {
   
   if (newItem && newItem.type === 'image') {
     try {
-      let imageContent: string | null = null
-      
-      // 优先尝试从 imagePath 加载（兼容旧数据）
-      if (newItem.imagePath) {
-        logger.info('从文件路径加载图片', { imagePath: newItem.imagePath })
-        imageContent = await invoke('load_image_file', { imagePath: newItem.imagePath }) as string
-        } else {
-        // 使用按需加载函数
-        imageContent = await loadImageContent(newItem)
-        }
+      // 直接使用按需加载函数，它现在专门处理文件路径
+      const imageContent = await loadImageContent(newItem)
       
       if (imageContent) {
           // 检查图片大小
@@ -1648,9 +1600,9 @@ watch(selectedItem, async (newItem) => {
           })
         }
         fullImageContent.value = imageContent
-        } else {
+      } else {
         logger.warn('无法加载图片内容', { itemId: newItem.id })
-          fullImageContent.value = null
+        fullImageContent.value = null
       }
     } catch (error) {
       logger.error('加载图片失败', { itemId: newItem.id, error: String(error) })
@@ -1696,7 +1648,7 @@ const searchFromDatabase = async () => {
     
     // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
       FROM clipboard_history 
       WHERE type = 'text' AND LOWER(content) LIKE ?
     `
@@ -1733,7 +1685,8 @@ const searchFromDatabase = async () => {
         sourceAppName: row.source_app_name ?? 'Unknown',
         sourceAppIcon: row.source_app_icon ?? null,
         note: row.note ?? null,
-        groupId: row.group_id ?? null
+        groupId: row.group_id ?? null,
+        dataHash: row.data_hash ?? null
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
@@ -1844,7 +1797,7 @@ const loadMoreHistory = async () => {
     const isGroupTab = selectedTabIndex.value === 4 && selectedGroupId.value !== null
     
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
       FROM clipboard_history
     `
     
@@ -1852,8 +1805,8 @@ const loadMoreHistory = async () => {
       sql += ' WHERE type = \'text\''
     } else if (isImagesTab) {
       sql += ' WHERE type = \'image\''
-      // 对于图片标签页，不加载完整的 content 字段
-      sql = sql.replace('content', '\'\' as content')
+      // 对于图片标签页，不加载完整的 content 字段 (但现在 content 是路径，所以可以加载)
+      // sql = sql.replace('content', '\'\' as content') 
     } else if (isFavoritesTab) {
       sql += ' WHERE is_favorite = 1'
     } else if (isGroupTab) {
@@ -1890,14 +1843,8 @@ const loadMoreHistory = async () => {
       sourceAppName: row.source_app_name ?? 'Unknown',
       sourceAppIcon: row.source_app_icon ?? null,
       note: row.note ?? null,
-      groupId: row.group_id ?? null
-        }
-        
-        // 如果是图片且有缩略图数据，恢复到缓存中
-        if (row.type === 'image' && row.thumbnail_data) {
-          const itemKey = row.id.toString()
-          thumbnailCache.value.set(itemKey, row.thumbnail_data)
-          logger.debug('从数据库恢复缩略图（加载更多）', { itemId: row.id })
+      groupId: row.group_id ?? null,
+      dataHash: row.data_hash ?? null // 映射哈希值
         }
         
         return item
@@ -1910,19 +1857,12 @@ const loadMoreHistory = async () => {
     }
     currentOffset.value += rows.length // 使用原始查询的数据量来更新偏移量
     
-    // 如果恢复了缩略图，触发缓存更新
-    const thumbnailsRestored = newItems.filter((item: any) => item.type === 'image' && thumbnailCache.value.has(item.id.toString())).length
-    if (thumbnailsRestored > 0) {
-      triggerRef(thumbnailCache)
-    }
-    
     logger.debug('加载了更多记录', { 
       queriedCount: rows.length,
       newItemsCount: newItems.length,
       duplicatesFiltered: rows.length - newItems.length,
       totalCount: clipboardHistory.value.length,
-      currentOffset: currentOffset.value,
-      thumbnailsRestored 
+      currentOffset: currentOffset.value
     })
     
     // 如果返回的记录数少于请求的数量，说明没有更多数据了
@@ -1966,18 +1906,18 @@ const loadRecentHistory = async () => {
     
     let sql: string
     
-    // 对于图片标签页，不加载完整的 content 字段以提高性能，但加载缩略图数据
+    // 对于图片标签页，不加载完整的 content 字段以提高性能
     if (isImagesTab) {
       sql = `
-        SELECT id, '' as content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
         FROM clipboard_history
         WHERE type = 'image'
         ORDER BY timestamp DESC LIMIT ?
       `
-      logger.info('使用优化的图片查询（不加载 content 字段，但加载缩略图）')
+      logger.info('使用优化的图片查询')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash 
       FROM clipboard_history
     `
     
@@ -2009,7 +1949,7 @@ const loadRecentHistory = async () => {
       .map((row: any) => {
         const item = {
         id: row.id,
-          content: row.content, // 对于图片标签页，这里是空字符串
+          content: row.content,
         type: row.type,
         timestamp: row.timestamp,
         isFavorite: row.is_favorite === 1,
@@ -2018,15 +1958,9 @@ const loadRecentHistory = async () => {
           sourceAppIcon: row.source_app_icon ?? null,
           note: row.note ?? null,
           groupId: row.group_id ?? null,
+          dataHash: row.data_hash ?? null, // 映射哈希值
           // 标记是否需要懒加载内容
           needsContentLoad: isImagesTab && row.type === 'image'
-        }
-        
-        // 如果是图片且有缩略图数据，恢复到缓存中
-        if (row.type === 'image' && row.thumbnail_data) {
-          const itemKey = row.id.toString()
-          thumbnailCache.value.set(itemKey, row.thumbnail_data)
-          logger.debug('从数据库恢复缩略图', { itemId: row.id })
         }
         
         return item
@@ -2044,13 +1978,7 @@ const loadRecentHistory = async () => {
       processTime: `${processTime.toFixed(2)}ms`,
       originalCount: rows.length,
       deduplicatedCount: deduplicatedHistory.length,
-      thumbnailsRestored: thumbnailCache.value.size
     })
-    
-    // 如果恢复了缩略图，触发缓存更新
-    if (thumbnailCache.value.size > 0) {
-      triggerRef(thumbnailCache)
-    }
     
     const updateStart = performance.now()
     // 使用 shallowRef 时需要手动触发更新
@@ -2255,11 +2183,26 @@ onMounted(async () => {
         // 创建data URL格式
         const imageDataUrl = `data:image/png;base64,${base64Image}`
         
+        // 计算图片哈希 (使用原始 base64 字符串计算，更准确且性能更好)
+        const imageHash = await calculateHash(base64Image)
+        
         // 检查是否是重复内容
-        const duplicateItemId = await checkDuplicateContent(imageDataUrl, 'image')
+        const duplicateItemId = await checkDuplicateContent(imageDataUrl, 'image', imageHash)
         if (duplicateItemId) {
-          logger.debug('Duplicate image content detected, moving item to front', { itemId: duplicateItemId })
+          logger.debug('Duplicate image content detected, moving item to front', { itemId: duplicateItemId, hash: imageHash })
           await moveItemToFront(duplicateItemId)
+          return
+        }
+
+        // 保存图片到文件系统
+        let savedImagePath: string | null = null
+        try {
+          // 传入原始 base64Image (不带 data:image/png;base64, 前缀，或者带也可以，后端已处理)
+          savedImagePath = await invoke('save_clipboard_image', { base64Data: base64Image }) as string
+          logger.info('图片已保存到文件', { path: savedImagePath })
+        } catch (err) {
+          logger.error('保存图片文件失败', { error: String(err) })
+          // 如果保存失败，无法继续处理
           return
         }
 
@@ -2278,21 +2221,22 @@ onMounted(async () => {
         }
 
         const item = {
-          content: imageDataUrl, // 直接使用base64数据
+          content: savedImagePath, // 强制使用路径
           type: 'image',
           timestamp: new Date().toISOString(),
           isFavorite: false,
-          imagePath: null, // 新插件暂时不支持文件路径
+          imagePath: savedImagePath, 
           sourceAppName: sourceAppInfo.name,
-          sourceAppIcon: sourceAppInfo.icon
+          sourceAppIcon: sourceAppInfo.icon,
+          dataHash: imageHash // 存储哈希到内存对象
         }
         
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.dataHash]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -2312,9 +2256,6 @@ onMounted(async () => {
               triggerRef(allHistoryCache)
               logger.debug('更新全部数据缓存，添加新图片', { itemId: newItem.id })
             }
-            
-            // 为新复制的图片生成缩略图
-            generateThumbnailForNewItem(newItem)
             
             // 如果在搜索模式下，也需要添加到原始数据
             if (isInSearchMode) {
@@ -2795,8 +2736,8 @@ const checkDataConsistency = () => {
                       </div>
                         <div v-else class="mt-0.5">
                           <img 
-                            v-if="getThumbnailSync(item)"
-                            :src="getThumbnailSync(item)"
+                            v-if="resolveImage(item)"
+                            :src="resolveImage(item)"
                             alt="Image thumbnail"
                             class="w-16 h-12 object-cover rounded border"
                             loading="lazy"
@@ -3046,8 +2987,8 @@ const checkDataConsistency = () => {
                           </div>
                       <div class="mt-1">
                         <img 
-                          v-if="getThumbnailSync(item)"
-                          :src="getThumbnailSync(item)"
+                          v-if="resolveImage(item)"
+                          :src="resolveImage(item)"
                           alt="Image thumbnail"
                           class="w-16 h-12 object-cover rounded border"
                           loading="lazy"
@@ -3181,8 +3122,8 @@ const checkDataConsistency = () => {
                       </div>
                         <div v-else class="mt-1">
                           <img 
-                            v-if="getThumbnailSync(item)"
-                            :src="getThumbnailSync(item)"
+                            v-if="resolveImage(item)"
+                            :src="resolveImage(item)"
                             alt="Image thumbnail"
                             class="w-16 h-12 object-cover rounded border"
                             loading="lazy"
@@ -3316,8 +3257,8 @@ const checkDataConsistency = () => {
                             <div class="flex items-center space-x-2">
                               <div class="w-12 h-12 border border-gray-200 rounded overflow-hidden bg-gray-50 flex-shrink-0">
                                 <img 
-                                  v-if="getThumbnailSync(item)"
-                                  :src="getThumbnailSync(item)"
+                                  v-if="resolveImage(item)"
+                                  :src="resolveImage(item)"
                                   alt="Thumbnail"
                                   class="w-full h-full object-cover"
                                 />

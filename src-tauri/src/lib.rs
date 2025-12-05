@@ -84,6 +84,11 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
 
+    // 添加数据哈希字段（如果不存在）- 用于去重检测
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN data_hash TEXT")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
+
     // 创建分组表
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS groups (
@@ -121,6 +126,12 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await
         .map_err(|e| format!("无法创建 is_favorite 索引: {}", e))?;
+
+    // 为 data_hash 字段创建索引以提高去重查询性能
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_hash ON clipboard_history(data_hash)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建 data_hash 索引: {}", e))?;
     
     // 创建复合索引以优化常用查询组合
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_type_timestamp ON clipboard_history(type, timestamp DESC)")
@@ -356,7 +367,7 @@ pub fn run() {
             commands::smart_paste_to_app,
             commands::reset_database,
             commands::load_image_file,
-            commands::generate_thumbnail,
+            commands::save_clipboard_image,
             commands::cleanup_history,
             commands::load_settings,
             commands::set_auto_start,

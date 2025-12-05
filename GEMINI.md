@@ -1,5 +1,9 @@
 # Clipboard Manager
 
+## Introduction
+* 每次需要修改前，都先制定好相关的plan，避免做出来的东西和预期不符，并严格按照计划执行
+* 如果对需求有疑问，需要主动询问相关的细节
+
 ## Project Overview
 
 **Clipboard Manager** is a powerful, cross-platform clipboard history tool built with **Tauri v2**. It is designed to be lightweight, fast, and privacy-focused (all data stored locally).

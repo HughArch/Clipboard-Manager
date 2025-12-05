@@ -66,6 +66,11 @@
       "commands": ["load_image_file"]
     },
     {
+      "identifier": "allow-save-clipboard-image",
+      "description": "Allows saving clipboard images to disk",
+      "commands": ["save_clipboard_image"]
+    },
+    {
       "identifier": "allow-clear-memory-cache",
       "description": "Allows clearing memory cache",
       "commands": ["clear_memory_cache"]
