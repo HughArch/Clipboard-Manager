@@ -1415,6 +1415,74 @@ pub async fn save_clipboard_image(base64_data: String) -> Result<String, String>
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+pub async fn copy_image_to_clipboard(image_path: String) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    tracing::info!("复制图片到剪贴板: {}", image_path);
+    
+    let path = PathBuf::from(&image_path);
+    if !path.exists() {
+        return Err(format!("图片文件不存在: {}", image_path));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 优化：使用文件复制 (CF_HDROP) 代替图片数据写入
+        // 这避免了昂贵的解码和位图转换操作，耗时通常 < 10ms
+        use clipboard_win::{formats, Clipboard, Setter};
+        
+        let _clip = Clipboard::new_attempts(10)
+            .map_err(|e| format!("无法打开剪贴板: {}", e))?;
+            
+        // 设置文件列表 (CF_HDROP)
+        let paths = vec![image_path.clone()];
+        
+        // 使用 formats::FileList
+        formats::FileList.write_clipboard(&paths)
+            .map_err(|e| format!("设置剪贴板文件失败: {}", e))?;
+            
+        tracing::info!("✅ 图片以文件形式写入剪贴板 (Windows CF_HDROP), 耗时: {:?}", start.elapsed());
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 其他平台继续使用 arboard 处理图像数据
+        
+        // 读取图片文件
+        let read_start = std::time::Instant::now();
+        let image_bytes = std::fs::read(&path)
+            .map_err(|e| format!("读取图片文件失败: {}", e))?;
+        tracing::debug!("读取文件耗时: {:?}", read_start.elapsed());
+            
+        // 解码图片
+        let decode_start = std::time::Instant::now();
+        let img = image::load_from_memory(&image_bytes)
+            .map_err(|e| format!("解码图片失败: {}", e))?;
+        tracing::debug!("解码图片耗时: {:?}", decode_start.elapsed());
+        
+        let rgba8 = img.to_rgba8();
+        let (width, height) = rgba8.dimensions();
+        let image_data = arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Borrowed(&rgba8),
+        };
+        
+        // 使用 arboard 写入剪贴板
+        let write_start = std::time::Instant::now();
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| format!("初始化剪贴板失败: {}", e))?;
+            
+        clipboard.set_image(image_data)
+            .map_err(|e| format!("写入剪贴板失败: {}", e))?;
+        tracing::debug!("写入剪贴板耗时: {:?}", write_start.elapsed());
+            
+        tracing::info!("✅ 图片成功写入剪贴板 (Rust Arboard), 总耗时: {:?}", start.elapsed());
+        Ok(())
+    }
+}
+
 // ===== 日志相关命令 =====
 
 /// 前端写入日志到文件

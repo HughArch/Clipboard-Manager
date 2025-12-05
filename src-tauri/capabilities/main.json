@@ -190,6 +190,7 @@
     "allow-update-group",
     "allow-delete-group",
     "allow-add-item-to-group",
-    "allow-delete-item"
+    "allow-delete-item",
+    "allow-copy-image-to-clipboard"
   ]
 } 

@@ -1226,9 +1226,10 @@ const resolveImage = (item: any): string | undefined => {
 const copyToClipboard = async (item: any) => {
   if (!item) return
   
+  const startTime = performance.now()
+  logger.info('开始智能复制和粘贴', { type: item.type, id: item.id })
+  
   try {
-    logger.debug('开始智能复制和粘贴', { type: item.type, id: item.id })
-    
     // 使用之前保存的目标应用信息（在快捷键触发时获取的）
     let targetApp: SourceAppInfo | null = previousActiveApp.value
     
@@ -1243,19 +1244,23 @@ const copyToClipboard = async (item: any) => {
     }
     
     // 准备要复制的内容
-    let contentToCopy = item.content
+    // let contentToCopy = item.content // 不再需要，直接在下面处理
     
-    // 对于图片，需要获取完整的 base64 数据
-    if (item.type === 'image') {
-      // 如果已有完整图片内容（如预览中），直接使用
-      if (selectedItem.value?.id === item.id && fullImageContent.value) {
-        contentToCopy = fullImageContent.value
-      } else {
-        // 否则从文件加载
-        try {
-          // item.content 应该是路径
+    // 获取窗口引用，准备并行操作
+    const appWindow = getCurrentWindow()
+    
+    const writeStart = performance.now()
+    // 并行执行剪贴板写入和窗口隐藏操作
+    await Promise.all([
+      // 写入系统剪贴板
+      (async () => {
+        if (item.type === 'text') {
+          await writeText(item.content)
+        } else if (item.type === 'image') {
+          // 图片处理：直接使用路径调用后端命令
           let imagePath = item.content
-          // 如果内存中 content 为空（如列表加载优化），尝试从 DB 或 imagePath 字段获取
+          
+          // 确保路径存在
           if (!imagePath || imagePath.trim() === '') {
              if (item.imagePath) {
                  imagePath = item.imagePath
@@ -1266,32 +1271,19 @@ const copyToClipboard = async (item: any) => {
              }
           }
           
-          if (imagePath) {
-             contentToCopy = await invoke('load_image_file', { imagePath }) as string
-          }
-        } catch (error) {
-          logger.warn('加载图片文件以复制失败', { error: String(error) })
-          // 如果失败，contentToCopy 保持原值（可能是路径），后续写入会失败但会有错误日志
-        }
-      }
-    }
-    
-    // 获取窗口引用，准备并行操作
-    const appWindow = getCurrentWindow()
-    
-    // 并行执行剪贴板写入和窗口隐藏操作
-    const [, ] = await Promise.all([
-      // 写入系统剪贴板
-      (async () => {
-        if (item.type === 'text') {
-          await writeText(contentToCopy)
-        } else if (item.type === 'image') {
-          // 提取 base64 数据（去掉 data:image/png;base64, 前缀）
-          const base64Data = contentToCopy?.replace(/^data:image\/[^;]+;base64,/, '') || ''
-          if (base64Data) {
-            await writeImageBase64(base64Data)
+          if (imagePath && !imagePath.startsWith('data:image')) {
+             try {
+               logger.debug('调用后端直接复制图片文件', { path: imagePath })
+               await invoke('copy_image_to_clipboard', { imagePath })
+               logger.debug('图片写入剪贴板完成 (Rust)', { 
+                  time: `${(performance.now() - writeStart).toFixed(2)}ms` 
+               })
+             } catch (e) {
+               logger.error('复制图片失败', { path: imagePath, error: String(e) })
+               throw e // 抛出错误以便外层捕获
+             }
           } else {
-            throw new Error('Invalid image data')
+             logger.warn('无效的图片路径，无法复制', { itemId: item.id })
           }
         }
       })(),
@@ -1299,6 +1291,7 @@ const copyToClipboard = async (item: any) => {
       appWindow.hide()
     ])
     
+    const pasteStart = performance.now()
     // 使用智能粘贴：如果有目标应用信息，就激活目标应用再粘贴
     if (targetApp && targetApp.name && targetApp.name !== 'Unknown' && 
         !targetApp.name.includes('Clipboard') && !targetApp.name.includes('clipboard')) {
@@ -1311,6 +1304,11 @@ const copyToClipboard = async (item: any) => {
       logger.debug('执行普通粘贴')
       await invoke('auto_paste')
     }
+    
+    logger.info('整个复制粘贴流程完成', { 
+      totalTime: `${(performance.now() - startTime).toFixed(2)}ms`,
+      pasteTime: `${(performance.now() - pasteStart).toFixed(2)}ms`
+    })
     
   } catch (error) {
     logger.error('复制和粘贴失败', { error: String(error) })
@@ -1561,8 +1559,14 @@ const loadImageContent = async (item: any): Promise<string | null> => {
         return null
     }
 
+    // 简单的 sanity check
+    if (imagePath.startsWith('data:image')) {
+        logger.warn('检测到 base64 数据而非路径，这不应该发生', { itemId: item.id })
+        return imagePath // 如果真的发生了，就返回它，虽然不符合预期
+    }
+
     // 加载图片文件
-    logger.debug('从路径加载图片文件', { path: imagePath })
+    // logger.debug('从路径加载图片文件', { path: imagePath })
     try {
         const loadedImage = await invoke('load_image_file', { imagePath }) as string
         return loadedImage

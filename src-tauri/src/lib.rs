@@ -368,6 +368,7 @@ pub fn run() {
             commands::reset_database,
             commands::load_image_file,
             commands::save_clipboard_image,
+            commands::copy_image_to_clipboard,
             commands::cleanup_history,
             commands::load_settings,
             commands::set_auto_start,
