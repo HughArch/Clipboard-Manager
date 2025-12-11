@@ -62,7 +62,8 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
             image_path TEXT,
             source_app_name TEXT,
             source_app_icon TEXT,
-            thumbnail_data TEXT
+            thumbnail_data TEXT,
+            metadata TEXT
         )"
     )
     .execute(&pool)
@@ -73,7 +74,7 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
     let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN thumbnail_data TEXT")
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
-    
+
     // 进行数据库迁移 - 添加备注字段（如果不存在）
     let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN note TEXT")
         .execute(&pool)
@@ -86,6 +87,11 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
 
     // 添加数据哈希字段（如果不存在）- 用于去重检测
     let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN data_hash TEXT")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
+
+    // 添加元数据字段（如果不存在）- 用于存储图片大小、分辨率等
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN metadata TEXT")
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
 
@@ -368,6 +374,7 @@ pub fn run() {
             commands::reset_database,
             commands::load_image_file,
             commands::save_clipboard_image,
+            commands::get_image_metadata,
             commands::copy_image_to_clipboard,
             commands::cleanup_history,
             commands::load_settings,
@@ -377,7 +384,7 @@ pub fn run() {
             window_info::get_active_window_info,
             window_info::get_active_window_info_with_icon,
             window_info::get_active_window_info_for_clipboard,
-            // 日志相关命令  
+            // 日志相关命令
             commands::open_log_folder,
             commands::delete_all_logs,
             commands::write_frontend_log,

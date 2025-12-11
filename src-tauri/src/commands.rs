@@ -1392,27 +1392,111 @@ pub async fn save_clipboard_image(base64_data: String) -> Result<String, String>
     // 处理可能的前缀 "data:image/png;base64,"
     let base64_start = base64_data.find("base64,").map(|i| i + 7).unwrap_or(0);
     let base64_str = &base64_data[base64_start..];
-    
+
     // 2. 解码base64
     let image_bytes = general_purpose::STANDARD
         .decode(base64_str)
         .map_err(|e| format!("base64解码失败: {}", e))?;
 
-    // 3. 获取图片目录
+    // 3. 获取图片信息（宽度、高度、大小）
+    let (width, height, format) = match image::load_from_memory(&image_bytes) {
+        Ok(img) => {
+            let width = img.width();
+            let height = img.height();
+            let format = match img {
+                image::DynamicImage::ImageLuma8(_) => "Luma8",
+                image::DynamicImage::ImageLumaA8(_) => "LumaA8",
+                image::DynamicImage::ImageRgb8(_) => "RGB8",
+                image::DynamicImage::ImageRgba8(_) => "RGBA8",
+                image::DynamicImage::ImageLuma16(_) => "Luma16",
+                image::DynamicImage::ImageLumaA16(_) => "LumaA16",
+                image::DynamicImage::ImageRgb16(_) => "RGB16",
+                image::DynamicImage::ImageRgba16(_) => "RGBA16",
+                image::DynamicImage::ImageRgb32F(_) => "RGB32F",
+                image::DynamicImage::ImageRgba32F(_) => "RGBA32F",
+                _ => "Unknown"
+            };
+            (width, height, format)
+        }
+        Err(_) => (0, 0, "Unknown"),
+    };
+
+    // 4. 获取图片目录
     let images_dir = get_app_images_dir()?;
-    
-    // 4. 生成文件名 (使用时间戳)
+
+    // 5. 生成文件名 (使用时间戳)
     let timestamp = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
     let filename = format!("img_{}.png", timestamp);
     let file_path = images_dir.join(&filename);
     println!("保存图片到: {:?}", file_path);
-    
-    // 5. 保存文件
-    std::fs::write(&file_path, image_bytes)
+
+    // 6. 保存文件
+    std::fs::write(&file_path, &image_bytes)
         .map_err(|e| format!("写入图片文件失败: {}", e))?;
-        
-    // 6. 返回文件路径字符串
-    Ok(file_path.to_string_lossy().to_string())
+
+    // 7. 构建元数据 JSON
+    let metadata = serde_json::json!({
+        "width": width,
+        "height": height,
+        "size": image_bytes.len(),
+        "format": format
+    });
+
+    // 8. 构建返回结果
+    let result = serde_json::json!({
+        "path": file_path.to_string_lossy().to_string(),
+        "metadata": metadata
+    });
+
+    // 9. 返回包含路径和元数据的JSON对象
+    Ok(result.to_string())
+}
+
+#[tauri::command]
+pub async fn get_image_metadata(image_path: String) -> Result<serde_json::Value, String> {
+    let path = PathBuf::from(&image_path);
+
+    // 检查文件是否存在
+    if !path.exists() {
+        return Err("图片文件不存在".to_string());
+    }
+
+    // 读取图片文件
+    let image_data = std::fs::read(&path)
+        .map_err(|e| format!("无法读取图片文件: {}", e))?;
+
+    // 获取图片信息（宽度、高度、大小）
+    let (width, height, format) = match image::load_from_memory(&image_data) {
+        Ok(img) => {
+            let width = img.width();
+            let height = img.height();
+            let format = match img {
+                image::DynamicImage::ImageLuma8(_) => "Luma8",
+                image::DynamicImage::ImageLumaA8(_) => "LumaA8",
+                image::DynamicImage::ImageRgb8(_) => "RGB8",
+                image::DynamicImage::ImageRgba8(_) => "RGBA8",
+                image::DynamicImage::ImageLuma16(_) => "Luma16",
+                image::DynamicImage::ImageLumaA16(_) => "LumaA16",
+                image::DynamicImage::ImageRgb16(_) => "RGB16",
+                image::DynamicImage::ImageRgba16(_) => "RGBA16",
+                image::DynamicImage::ImageRgb32F(_) => "RGB32F",
+                image::DynamicImage::ImageRgba32F(_) => "RGBA32F",
+                _ => "Unknown"
+            };
+            (width, height, format)
+        }
+        Err(_) => (0, 0, "Unknown"),
+    };
+
+    // 构建元数据 JSON
+    let metadata = serde_json::json!({
+        "width": width,
+        "height": height,
+        "size": image_data.len(),
+        "format": format
+    });
+
+    Ok(metadata)
 }
 
 #[tauri::command]

@@ -393,7 +393,6 @@ const handleSubmit = async () => {
                 type="checkbox"
                 class="checkbox checkbox-sm checkbox-primary"
               />
-              <span class="text-xs font-medium text-gray-700">开机自启动</span>
             </label>
           </div>
 

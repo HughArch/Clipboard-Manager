@@ -318,6 +318,54 @@ const formatTime = (() => {
   return formatFunction as typeof formatFunction & { clearCache: () => void }
 })()
 
+// 格式化文件大小
+const formatFileSize = (bytes: number): string => {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`
+}
+
+// 解析图片元数据
+const parseImageMetadata = (metadata: any): { width: number, height: number, size: number, format: string } | null => {
+  if (!metadata) return null
+
+  // 如果 metadata 是字符串，尝试解析为 JSON
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata)
+    } catch (e) {
+      return null
+    }
+  }
+
+  // 验证必需的字段
+  if (typeof metadata !== 'object' ||
+      typeof metadata.width !== 'number' ||
+      typeof metadata.height !== 'number' ||
+      typeof metadata.size !== 'number') {
+    return null
+  }
+
+  return {
+    width: metadata.width,
+    height: metadata.height,
+    size: metadata.size,
+    format: metadata.format || 'Unknown'
+  }
+}
+
+// 获取图片元数据的显示文本
+const getImageMetadataText = (item: any): string => {
+  const metadata = parseImageMetadata(item.metadata)
+  if (!metadata || metadata.width === 0 || metadata.height === 0) {
+    return ''
+  }
+
+  return `${metadata.width}×${metadata.height} · ${formatFileSize(metadata.size)}`
+}
+
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
 // 存储Tauri事件监听器的unlisten函数
@@ -951,10 +999,10 @@ const loadGroupData = async (groupId: number) => {
   // 始终从数据库查询分组数据，避免仅使用内存缓存导致展示不全
   try {
     const rows = await db!.select(
-      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash 
-       FROM clipboard_history 
-       WHERE group_id = ? 
-       ORDER BY timestamp DESC 
+      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
+       FROM clipboard_history
+       WHERE group_id = ?
+       ORDER BY timestamp DESC
        LIMIT ?`,
       [groupId, MAX_MEMORY_ITEMS]
     )
@@ -971,7 +1019,8 @@ const loadGroupData = async (groupId: number) => {
       sourceAppIcon: row.source_app_icon ?? null,
       note: row.note ?? null,
       groupId: row.group_id ?? null,
-      dataHash: row.data_hash ?? null
+      dataHash: row.data_hash ?? null,
+      metadata: row.metadata ?? null
     }))
     
     clipboardHistory.value = groupItems
@@ -1157,7 +1206,7 @@ const moveItemToFront = async (itemId: number) => {
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       const dbResult = await db.select(
-        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id FROM clipboard_history WHERE id = ?',
+        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, metadata FROM clipboard_history WHERE id = ?',
         [itemId]
       )
       
@@ -1173,7 +1222,8 @@ const moveItemToFront = async (itemId: number) => {
           sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
           note: row.note ?? null,
-          groupId: row.group_id ?? null
+          groupId: row.group_id ?? null,
+          metadata: row.metadata ?? null
         }
         
         // 添加到内存列表的开头
@@ -1674,8 +1724,8 @@ const searchFromDatabase = async () => {
     
     // 构建SQL查询 - 只搜索文本类型的内容
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
-      FROM clipboard_history 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
+      FROM clipboard_history
       WHERE type = 'text' AND LOWER(content) LIKE ?
     `
     
@@ -1712,7 +1762,8 @@ const searchFromDatabase = async () => {
         sourceAppIcon: row.source_app_icon ?? null,
         note: row.note ?? null,
         groupId: row.group_id ?? null,
-        dataHash: row.data_hash ?? null
+        dataHash: row.data_hash ?? null,
+        metadata: row.metadata ?? null
       }))
       .filter((item: any) => {
         if (seenIds.has(item.id)) {
@@ -1822,9 +1873,9 @@ const loadMoreHistory = async () => {
     const isImagesTab = selectedTabIndex.value === 2
     const isFavoritesTab = selectedTabIndex.value === 3
     const isGroupTab = selectedTabIndex.value === 4 && selectedGroupId.value !== null
-    
+
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
+      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
       FROM clipboard_history
     `
     
@@ -1861,19 +1912,20 @@ const loadMoreHistory = async () => {
       .filter((row: any) => !existingIds.has(row.id)) // 过滤掉已存在的记录
       .map((row: any) => {
         const item = {
-      id: row.id,
-      content: row.content,
-      type: row.type,
-      timestamp: row.timestamp,
-      isFavorite: row.is_favorite === 1,
-      imagePath: row.image_path ?? null,
-      sourceAppName: row.source_app_name ?? 'Unknown',
-      sourceAppIcon: row.source_app_icon ?? null,
-      note: row.note ?? null,
-      groupId: row.group_id ?? null,
-      dataHash: row.data_hash ?? null // 映射哈希值
+          id: row.id,
+          content: row.content,
+          type: row.type,
+          timestamp: row.timestamp,
+          isFavorite: row.is_favorite === 1,
+          imagePath: row.image_path ?? null,
+          sourceAppName: row.source_app_name ?? 'Unknown',
+          sourceAppIcon: row.source_app_icon ?? null,
+          note: row.note ?? null,
+          groupId: row.group_id ?? null,
+          dataHash: row.data_hash ?? null, // 映射哈希值
+          metadata: row.metadata ?? null
         }
-        
+
         return item
       })
     
@@ -1936,7 +1988,7 @@ const loadRecentHistory = async () => {
     // 对于图片标签页，不加载完整的 content 字段以提高性能
     if (isImagesTab) {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
         FROM clipboard_history
         WHERE type = 'image'
         ORDER BY timestamp DESC LIMIT ?
@@ -1944,7 +1996,7 @@ const loadRecentHistory = async () => {
       logger.info('使用优化的图片查询')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash 
+        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
       FROM clipboard_history
     `
     
@@ -1975,21 +2027,22 @@ const loadRecentHistory = async () => {
     const deduplicatedHistory = rows
       .map((row: any) => {
         const item = {
-        id: row.id,
+          id: row.id,
           content: row.content,
-        type: row.type,
-        timestamp: row.timestamp,
-        isFavorite: row.is_favorite === 1,
-        imagePath: row.image_path ?? null,
-        sourceAppName: row.source_app_name ?? 'Unknown',
+          type: row.type,
+          timestamp: row.timestamp,
+          isFavorite: row.is_favorite === 1,
+          imagePath: row.image_path ?? null,
+          sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
           note: row.note ?? null,
           groupId: row.group_id ?? null,
           dataHash: row.data_hash ?? null, // 映射哈希值
+          metadata: row.metadata ?? null,
           // 标记是否需要懒加载内容
           needsContentLoad: isImagesTab && row.type === 'image'
         }
-        
+
         return item
       })
       .filter((item: any) => {
@@ -2122,19 +2175,25 @@ onMounted(async () => {
         }
 
         const item = {
-          content: newText,
+          content: newText || '',
           type: 'text',
           timestamp: new Date().toISOString(),
           isFavorite: false,
           imagePath: null,
-          sourceAppName: sourceAppInfo.name,
-          sourceAppIcon: sourceAppInfo.icon
+          sourceAppName: sourceAppInfo.name || 'Unknown',
+          sourceAppIcon: sourceAppInfo.icon || null
         }
-        
+
+        // 确保 content 不为空
+        if (!item.content) {
+          logger.warn('文本内容为空，跳过保存')
+          return
+        }
+
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon) 
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
           )
@@ -2223,13 +2282,23 @@ onMounted(async () => {
 
         // 保存图片到文件系统
         let savedImagePath: string | null = null
+        let imageMetadata: any = null
         try {
           // 传入原始 base64Image (不带 data:image/png;base64, 前缀，或者带也可以，后端已处理)
-          savedImagePath = await invoke('save_clipboard_image', { base64Data: base64Image }) as string
-          logger.info('图片已保存到文件', { path: savedImagePath })
+          const resultStr = await invoke('save_clipboard_image', { base64Data: base64Image }) as string
+          const result = JSON.parse(resultStr)
+          savedImagePath = result.path
+          imageMetadata = result.metadata
+          logger.info('图片已保存到文件', { path: savedImagePath, metadata: imageMetadata })
         } catch (err) {
           logger.error('保存图片文件失败', { error: String(err) })
           // 如果保存失败，无法继续处理
+          return
+        }
+
+        // 确保 savedImagePath 不为 null
+        if (!savedImagePath) {
+          logger.error('保存图片路径为空')
           return
         }
 
@@ -2239,7 +2308,7 @@ onMounted(async () => {
           icon: undefined,
           bundle_id: undefined
         }
-        
+
         try {
           const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
           sourceAppInfo = appInfo
@@ -2252,18 +2321,25 @@ onMounted(async () => {
           type: 'image',
           timestamp: new Date().toISOString(),
           isFavorite: false,
-          imagePath: savedImagePath, 
-          sourceAppName: sourceAppInfo.name,
-          sourceAppIcon: sourceAppInfo.icon,
-          dataHash: imageHash // 存储哈希到内存对象
+          imagePath: savedImagePath,
+          sourceAppName: sourceAppInfo.name || 'Unknown',
+          sourceAppIcon: sourceAppInfo.icon || null,
+          dataHash: imageHash, // 存储哈希到内存对象
+          metadata: imageMetadata || null // 存储图片元数据
         }
-        
+
+        // 确保 content 不为空
+        if (!item.content) {
+          logger.error('图片路径为空，无法保存')
+          return
+        }
+
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.dataHash]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.dataHash, item.metadata]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -2762,7 +2838,7 @@ const checkDataConsistency = () => {
                           {{ item.content }}
                       </div>
                         <div v-else class="mt-0.5">
-                          <img 
+                          <img
                             v-if="resolveImage(item)"
                             :src="resolveImage(item)"
                             alt="Image thumbnail"
@@ -2770,14 +2846,18 @@ const checkDataConsistency = () => {
                             loading="lazy"
                             @error="($event.target as HTMLImageElement).style.display = 'none'"
                           />
-                          <div 
+                          <div
                             v-else
                             class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
                           >
                             <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
-                    </div>
+                          </div>
+                          <!-- 图片元数据显示 -->
+                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                            {{ getImageMetadataText(item) }}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3012,7 +3092,7 @@ const checkDataConsistency = () => {
                             ></div>
                           </div>
                       <div class="mt-1">
-                        <img 
+                        <img
                           v-if="resolveImage(item)"
                           :src="resolveImage(item)"
                           alt="Image thumbnail"
@@ -3020,13 +3100,17 @@ const checkDataConsistency = () => {
                           loading="lazy"
                           @error="($event.target as HTMLImageElement).style.display = 'none'"
                         />
-                        <div 
+                        <div
                           v-else
                           class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
                         >
                           <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                           </svg>
+                        </div>
+                        <!-- 图片元数据显示 -->
+                        <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                          {{ getImageMetadataText(item) }}
                         </div>
                       </div>
                     </div>
@@ -3147,7 +3231,7 @@ const checkDataConsistency = () => {
                           {{ item.content }}
                       </div>
                         <div v-else class="mt-1">
-                          <img 
+                          <img
                             v-if="resolveImage(item)"
                             :src="resolveImage(item)"
                             alt="Image thumbnail"
@@ -3155,14 +3239,18 @@ const checkDataConsistency = () => {
                             loading="lazy"
                             @error="($event.target as HTMLImageElement).style.display = 'none'"
                           />
-                          <div 
+                          <div
                             v-else
                             class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
                           >
                             <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
-                    </div>
+                          </div>
+                          <!-- 图片元数据显示 -->
+                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                            {{ getImageMetadataText(item) }}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3282,7 +3370,7 @@ const checkDataConsistency = () => {
                           <template v-else>
                             <div class="flex items-center space-x-2">
                               <div class="w-12 h-12 border border-gray-200 rounded overflow-hidden bg-gray-50 flex-shrink-0">
-                                <img 
+                                <img
                                   v-if="resolveImage(item)"
                                   :src="resolveImage(item)"
                                   alt="Thumbnail"
@@ -3294,7 +3382,10 @@ const checkDataConsistency = () => {
                                   </svg>
                                 </div>
                               </div>
-                              <p class="text-sm text-gray-500">图片</p>
+                              <div class="flex flex-col">
+                                <p class="text-sm text-gray-500">图片</p>
+                                <p v-if="getImageMetadataText(item)" class="text-xs text-gray-400">{{ getImageMetadataText(item) }}</p>
+                              </div>
                             </div>
                           </template>
                         </div>
@@ -3398,7 +3489,7 @@ const checkDataConsistency = () => {
                 </div>
               </template>
               <template v-else>
-                <div class="flex items-center justify-center">
+                <div class="flex flex-col items-center justify-center space-y-4">
                   <div v-if="!fullImageContent" class="flex flex-col items-center justify-center py-8">
                     <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
                     <p class="text-gray-500 text-sm">Loading full image...</p>
@@ -3409,6 +3500,10 @@ const checkDataConsistency = () => {
                     alt="Clipboard image"
                     class="max-w-full max-h-full object-contain rounded-lg shadow-lg"
                   />
+                  <!-- 图片元数据显示 -->
+                  <div v-if="selectedItem?.type === 'image' && getImageMetadataText(selectedItem)" class="text-sm text-gray-600 bg-white bg-opacity-80 px-3 py-1 rounded-full border border-gray-200">
+                    {{ getImageMetadataText(selectedItem) }}
+                  </div>
                 </div>
               </template>
             </div>
