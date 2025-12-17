@@ -368,12 +368,20 @@ const getImageMetadataText = (item: any): string => {
 
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
+// 历史记录列表容器引用
+const historyListRef = ref<HTMLElement | null>(null)
 // 存储Tauri事件监听器的unlisten函数
 const unlistenFocus = ref<(() => void) | null>(null)
 const unlistenPreviousApp = ref<(() => void) | null>(null)
 
 // 清理搜索框并选中第一个条目的函数
 const resetToDefault = async () => {
+  logger.debug('resetToDefault START', { 
+    visible: document.visibilityState, 
+    scrollTop: historyListRef.value?.scrollTop,
+    selectedId: selectedItem.value?.id 
+  })
+
   // 清理搜索框内容
   searchQuery.value = ''
   
@@ -381,19 +389,36 @@ const resetToDefault = async () => {
   if (isInSearchMode) {
     await exitSearchMode()
   }
+
+  // 强制滚动容器到顶部
+  if (historyListRef.value) {
+    const oldScroll = historyListRef.value.scrollTop
+    historyListRef.value.scrollTop = 0
+    logger.debug('resetToDefault: Reset scrollTop', { old: oldScroll, new: historyListRef.value.scrollTop })
+  } else {
+    logger.warn('resetToDefault: historyListRef is null')
+  }
   
   // 等待下一个tick以确保过滤后的历史列表已更新
   await nextTick()
   
   // 选中第一个条目（如果存在）
   if (filteredHistory.value.length > 0) {
-    selectedItem.value = filteredHistory.value[0]
+    const firstItem = filteredHistory.value[0]
+    // 只有当选中的不是第一个时才变更，避免重复触发 watcher
+    if (selectedItem.value?.id !== firstItem.id) {
+       selectedItem.value = firstItem
+       logger.debug('resetToDefault: Selected first item', { id: firstItem.id })
+    }
     
-    // 滚动到选中的条目
-    await scrollToSelectedItem(selectedItem.value.id)
+    // 如果scrollTop已经置0，且选中第一项，不需要调用scrollToSelectedItem
+    // 这可以避免不必要的滚动计算和潜在的动画
+    // await scrollToSelectedItem(selectedItem.value.id)
   } else {
     selectedItem.value = null
   }
+  
+  logger.debug('resetToDefault END')
 }
 
 // 自动聚焦搜索框
@@ -460,7 +485,10 @@ const focusSearchInput = async () => {
 
 // 处理窗口焦点事件，当窗口显示/获得焦点时重置状态
 const handleWindowFocus = async () => {
-  await resetToDefault()
+  logger.debug('handleWindowFocus: Window focused')
+  // 移除 resetToDefault，因为它应该在隐藏时已经完成
+  // 再次调用会导致视觉跳变（如果状态不一致）
+  // await resetToDefault() 
   await focusSearchInput()
 }
 
@@ -471,9 +499,14 @@ const handleWindowBlur = async () => {
   setTimeout(async () => {
     try {
       const appWindow = getCurrentWindow()
-      if (await appWindow.isVisible() && !await appWindow.isFocused()) {
+      // 只要失去焦点，就重置并隐藏
+      // 不检查 isVisible()，因为如果是通过快捷键隐藏，此时 isVisible 已经是 false 了
+      // 但我们需要确保状态被重置
+      if (!await appWindow.isFocused()) {
+        await resetToDefault()
+        // 确保窗口是隐藏的
         await appWindow.hide()
-        logger.debug('窗口失去焦点，已隐藏')
+        logger.debug('窗口失去焦点，已确保重置并隐藏')
       }
     } catch (error) {
       logger.error('失去焦点时隐藏窗口失败', { error: String(error) })
@@ -485,8 +518,13 @@ const handleWindowBlur = async () => {
 const hideWindow = async () => {
   try {
     const appWindow = getCurrentWindow()
+    // 立即重置状态，确保下次显示时位置正确
+    // 放在 hide 之前是为了确保 layout 更新被浏览器处理（虽然会有短暂的视觉跳变，但比显示时跳变好）
+    await resetToDefault()
+    logger.debug('hideWindow: resetToDefault called before hide')
+    
     await appWindow.hide()
-    logger.debug('窗口已隐藏')
+    logger.debug('hideWindow: Window hidden called')
   } catch (error) {
     logger.error('隐藏窗口失败', { error: String(error) })
   }
@@ -497,11 +535,14 @@ const scrollToSelectedItem = async (itemId: number) => {
   await nextTick()
   const selectedElement = document.querySelector(`[data-item-id="${itemId}"]`)
   if (selectedElement) {
+    logger.debug('scrollToSelectedItem: Scrolling to item', { itemId, currentScrollTop: historyListRef.value?.scrollTop })
     selectedElement.scrollIntoView({
       behavior: 'instant',
       block: 'nearest',
       inline: 'nearest'
     })
+  } else {
+    logger.warn('scrollToSelectedItem: Element not found', { itemId })
   }
 }
 
@@ -1308,6 +1349,9 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
     // 获取窗口引用，准备并行操作
     const appWindow = getCurrentWindow()
     
+    // 隐藏窗口前立即重置状态，避免下次打开时跳变
+    await resetToDefault()
+
     const writeStart = performance.now()
     // 并行执行剪贴板写入和窗口隐藏操作
     await Promise.all([
@@ -2421,8 +2465,9 @@ onMounted(async () => {
       // 阻止默认的关闭行为
       event.preventDefault()
       // 隐藏窗口到系统托盘
+      await resetToDefault()
       await appWindow.hide()
-      logger.debug('窗口隐藏到系统托盘')
+      logger.debug('窗口隐藏到系统托盘 (state reset before hide)')
     })
     
     // 组件挂载后自动聚焦搜索框
@@ -2775,7 +2820,7 @@ const checkDataConsistency = () => {
               </div>
               
               <!-- 统一的列表内容 -->
-              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll">
+              <div class="flex-1 overflow-y-auto min-h-0" @scroll="handleScroll" ref="historyListRef">
                 <div
                   v-for="item in filteredHistory"
                   :key="item.id"
