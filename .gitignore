@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 target/
 CLAUDE.md
+.claude/*
+src-tauri/Cargo.lock

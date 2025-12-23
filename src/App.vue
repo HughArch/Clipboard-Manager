@@ -195,6 +195,7 @@ let lastImageProcessTime = 0
 let lastTextContent = '' // 新增：记录最后处理的文本内容
 let lastTextProcessTime = 0 // 新增：记录最后处理文本的时间
 let isProcessingClipboard = false // 新增：防止并发处理
+let isManualCopy = false // 新增：标记是否是主动复制操作（防止监听器误触发）
 
 // JSON格式化相关函数
 const isValidJSON = (str: string): boolean => {
@@ -1328,11 +1329,14 @@ const resolveImage = (item: any): string | undefined => {
 // 复制内容到系统剪贴板并智能粘贴到目标应用
 const copyToClipboard = async (item: any, asPath: boolean = false) => {
   if (!item) return
-  
+
   const startTime = performance.now()
   logger.info('开始智能复制和粘贴', { type: item.type, id: item.id, asPath })
-  
+
   try {
+    // 设置主动复制标志，防止监听器误触发
+    isManualCopy = true
+
     // 使用之前保存的目标应用信息（在快捷键触发时获取的）
     let targetApp: SourceAppInfo | null = previousActiveApp.value
     
@@ -1419,11 +1423,16 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
       await invoke('auto_paste')
     }
     
-    logger.info('整个复制粘贴流程完成', { 
+    logger.info('整个复制粘贴流程完成', {
       totalTime: `${(performance.now() - startTime).toFixed(2)}ms`,
       pasteTime: `${(performance.now() - pasteStart).toFixed(2)}ms`
     })
-    
+
+    // 延迟重置主动复制标志，确保所有剪贴板事件都已完成
+    setTimeout(() => {
+      isManualCopy = false
+    }, 500) // 500ms 后重置，给系统足够时间完成所有剪贴板操作
+
   } catch (error) {
     logger.error('复制和粘贴失败', { error: String(error) })
     // 如果出错，重新显示窗口
@@ -1433,6 +1442,10 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
     } catch (showError) {
       logger.error('显示窗口失败', { error: String(showError) })
     }
+    // 出错时也要重置标志
+    setTimeout(() => {
+      isManualCopy = false
+    }, 500)
   }
 }
 
@@ -2164,7 +2177,13 @@ onMounted(async () => {
     unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
         logger.debug('检测到文本剪贴板变化', { length: newText.length })
-        
+
+        // 如果是主动复制操作（如粘贴图片），跳过监听器处理
+        if (isManualCopy) {
+          logger.debug('检测到主动复制操作，跳过文本监听器处理')
+          return
+        }
+
         // 防止并发处理
         if (isProcessingClipboard) {
           logger.debug('正在处理其他剪贴板事件，跳过')
@@ -2285,6 +2304,12 @@ onMounted(async () => {
     // 注册剪贴板图片变化监听器
     unlistenClipboardImage = await onImageUpdate(async (base64Image: string) => {
       try {
+        // 如果是主动复制操作（如粘贴图片），跳过监听器处理
+        if (isManualCopy) {
+          logger.debug('检测到主动复制操作，跳过图片监听器处理')
+          return
+        }
+
         // 防止并发处理
         if (isProcessingClipboard) {
           logger.debug('正在处理其他剪贴板事件，跳过')
