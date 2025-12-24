@@ -1,6 +1,6 @@
 [package]
 name = "Clipboard-Manager"
-version = "1.1.12"
+version = "1.1.13"
 description = "A app record clipboard history"
 authors = ["Hugh"]
 edition = "2024"
