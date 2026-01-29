@@ -380,7 +380,8 @@ const resetToDefault = async () => {
   logger.debug('resetToDefault START', { 
     visible: document.visibilityState, 
     scrollTop: historyListRef.value?.scrollTop,
-    selectedId: selectedItem.value?.id 
+    selectedId: selectedItem.value?.id,
+    searchQuery: searchQuery.value
   })
 
   // 清理搜索框内容
@@ -400,26 +401,25 @@ const resetToDefault = async () => {
     logger.warn('resetToDefault: historyListRef is null')
   }
   
-  // 等待下一个tick以确保过滤后的历史列表已更新
+  // 等待多个 tick 确保所有响应式更新完成
+  await nextTick()
   await nextTick()
   
   // 选中第一个条目（如果存在）
   if (filteredHistory.value.length > 0) {
     const firstItem = filteredHistory.value[0]
-    // 只有当选中的不是第一个时才变更，避免重复触发 watcher
-    if (selectedItem.value?.id !== firstItem.id) {
-       selectedItem.value = firstItem
-       logger.debug('resetToDefault: Selected first item', { id: firstItem.id })
-    }
-    
-    // 如果scrollTop已经置0，且选中第一项，不需要调用scrollToSelectedItem
-    // 这可以避免不必要的滚动计算和潜在的动画
-    // await scrollToSelectedItem(selectedItem.value.id)
+    // 总是更新选中项，确保引用是最新的
+    selectedItem.value = firstItem
+    logger.debug('resetToDefault: Selected first item', { id: firstItem.id })
   } else {
     selectedItem.value = null
+    logger.debug('resetToDefault: No items, cleared selection')
   }
   
-  logger.debug('resetToDefault END')
+  logger.debug('resetToDefault END', {
+    finalSelectedId: selectedItem.value?.id,
+    filteredCount: filteredHistory.value.length
+  })
 }
 
 // 自动聚焦搜索框
@@ -487,9 +487,33 @@ const focusSearchInput = async () => {
 // 处理窗口焦点事件，当窗口显示/获得焦点时重置状态
 const handleWindowFocus = async () => {
   logger.debug('handleWindowFocus: Window focused')
-  // 移除 resetToDefault，因为它应该在隐藏时已经完成
-  // 再次调用会导致视觉跳变（如果状态不一致）
-  // await resetToDefault() 
+  
+  // 等待所有异步操作完成后再确保选中状态正确
+  // 使用多个 nextTick 确保所有 Vue 响应式更新都已完成
+  await nextTick()
+  await nextTick()
+  
+  // 无条件地确保选中第一项（如果有记录的话）
+  // 这能解决各种时序问题导致的状态不一致
+  if (filteredHistory.value.length > 0) {
+    const firstItem = filteredHistory.value[0]
+    if (selectedItem.value?.id !== firstItem.id) {
+      selectedItem.value = firstItem
+      logger.debug('handleWindowFocus: Corrected selection to first item', { 
+        oldId: selectedItem.value?.id,
+        newId: firstItem.id 
+      })
+    } else {
+      logger.debug('handleWindowFocus: First item already selected', { id: firstItem.id })
+    }
+  } else {
+    // 没有记录时清空选中
+    if (selectedItem.value !== null) {
+      selectedItem.value = null
+      logger.debug('handleWindowFocus: No items, cleared selection')
+    }
+  }
+  
   await focusSearchInput()
 }
 
@@ -1353,8 +1377,9 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
     // 获取窗口引用，准备并行操作
     const appWindow = getCurrentWindow()
     
-    // 隐藏窗口前立即重置状态，避免下次打开时跳变
-    await resetToDefault()
+    // 注意：不在这里调用 resetToDefault()
+    // 因为窗口失焦时 handleWindowBlur() 会自动调用
+    // 在这里提前调用会导致时序问题和视觉跳变
 
     const writeStart = performance.now()
     // 并行执行剪贴板写入和窗口隐藏操作

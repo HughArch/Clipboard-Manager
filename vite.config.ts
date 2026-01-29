@@ -3,7 +3,6 @@ import vue from "@vitejs/plugin-vue";
 import tailwindcss from 'tailwindcss';
 import autoprefixer from 'autoprefixer';
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
@@ -16,14 +15,14 @@ export default defineConfig(async () => ({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 5173,
+    port: 15173,
     strictPort: true,
     host: host || '127.0.0.1',
     hmr: host
       ? {
           protocol: "ws",
           host,
-          port: 5174,
+          port: 15174,
         }
       : undefined,
     watch: {
