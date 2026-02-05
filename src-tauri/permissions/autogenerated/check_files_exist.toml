@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-files-exist"
+description = "Enables the check_files_exist command without any pre-configured scope."
+commands.allow = ["check_files_exist"]
+
+[[permission]]
+identifier = "deny-check-files-exist"
+description = "Denies the check_files_exist command without any pre-configured scope."
+commands.deny = ["check_files_exist"]

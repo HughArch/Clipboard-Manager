@@ -397,7 +397,14 @@ pub fn run() {
             commands::update_group,
             commands::delete_group,
             commands::add_item_to_group,
-            commands::delete_item
+            commands::delete_item,
+            // 文件剪贴板相关命令
+            commands::copy_files_to_clipboard,
+            commands::get_file_metadata,
+            commands::get_files_metadata,
+            commands::check_files_exist,
+            commands::get_file_icon,
+            commands::open_file_location
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

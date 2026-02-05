@@ -2165,3 +2165,378 @@ pub async fn add_item_to_group(app: AppHandle, item_id: i64, group_id: Option<i6
     }
 }
 
+// ===== 文件剪贴板相关命令 =====
+
+/// 文件元信息结构
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct FileMetadata {
+    pub path: String,
+    pub name: String,
+    pub extension: String,
+    pub size: u64,
+    pub exists: bool,
+    pub is_directory: bool,
+}
+
+/// 复制文件到剪贴板 (Windows CF_HDROP)
+#[tauri::command]
+pub async fn copy_files_to_clipboard(file_paths: Vec<String>) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    tracing::info!("复制文件到剪贴板: {:?}", file_paths);
+    
+    if file_paths.is_empty() {
+        return Err("文件路径列表为空".to_string());
+    }
+    
+    // 验证所有文件是否存在
+    for path_str in &file_paths {
+        let path = PathBuf::from(path_str);
+        if !path.exists() {
+            return Err(format!("文件不存在: {}", path_str));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use clipboard_win::{formats, Clipboard, Setter};
+        
+        let _clip = Clipboard::new_attempts(10)
+            .map_err(|e| format!("无法打开剪贴板: {}", e))?;
+            
+        // 设置文件列表 (CF_HDROP)
+        formats::FileList.write_clipboard(&file_paths)
+            .map_err(|e| format!("设置剪贴板文件失败: {}", e))?;
+            
+        tracing::info!("✅ 文件已写入剪贴板 (Windows CF_HDROP), 文件数: {}, 耗时: {:?}", 
+            file_paths.len(), start.elapsed());
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 其他平台暂不支持文件剪贴板
+        Err("文件剪贴板功能目前仅支持 Windows 平台".to_string())
+    }
+}
+
+/// 获取文件元信息
+#[tauri::command]
+pub async fn get_file_metadata(file_path: String) -> Result<FileMetadata, String> {
+    let path = PathBuf::from(&file_path);
+    
+    let name = path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+        
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_string();
+    
+    let exists = path.exists();
+    let is_directory = path.is_dir();
+    
+    let size = if exists && !is_directory {
+        std::fs::metadata(&path)
+            .map(|m| m.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    
+    Ok(FileMetadata {
+        path: file_path,
+        name,
+        extension,
+        size,
+        exists,
+        is_directory,
+    })
+}
+
+/// 批量获取文件元信息
+#[tauri::command]
+pub async fn get_files_metadata(file_paths: Vec<String>) -> Result<Vec<FileMetadata>, String> {
+    let mut results = Vec::with_capacity(file_paths.len());
+    
+    for file_path in file_paths {
+        let metadata = get_file_metadata(file_path).await?;
+        results.push(metadata);
+    }
+    
+    Ok(results)
+}
+
+/// 检查文件是否存在
+#[tauri::command]
+pub async fn check_files_exist(file_paths: Vec<String>) -> Result<Vec<bool>, String> {
+    let results: Vec<bool> = file_paths.iter()
+        .map(|p| PathBuf::from(p).exists())
+        .collect();
+    
+    Ok(results)
+}
+
+/// 获取文件图标 (Windows Shell API)
+#[tauri::command]
+pub async fn get_file_icon(file_path: String) -> Result<String, String> {
+    let path = PathBuf::from(&file_path);
+    
+    // 如果文件不存在，尝试根据扩展名获取图标
+    let extension = path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    
+    #[cfg(target_os = "windows")]
+    {
+        use std::ptr::null_mut;
+        use winapi::um::shellapi::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES};
+        use winapi::um::winuser::{DestroyIcon, GetIconInfo, ICONINFO};
+        use winapi::um::wingdi::{GetDIBits, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DeleteObject, GetObjectW, BITMAP};
+        use winapi::shared::windef::HBITMAP;
+        use winapi::um::winuser::GetDC;
+        use winapi::um::wingdi::CreateCompatibleDC;
+        use winapi::um::wingdi::SelectObject;
+        use winapi::um::wingdi::DeleteDC;
+        use winapi::um::winuser::ReleaseDC;
+        use winapi::shared::minwindef::DWORD;
+        
+        // 将路径转换为宽字符
+        let wide_path: Vec<u16> = file_path.encode_utf16().chain(std::iter::once(0)).collect();
+        
+        let mut shfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        
+        // 如果文件存在，直接获取图标；否则使用扩展名
+        let flags = if path.exists() {
+            SHGFI_ICON | SHGFI_SMALLICON
+        } else {
+            SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES
+        };
+        
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide_path.as_ptr(),
+                0x80, // FILE_ATTRIBUTE_NORMAL
+                &mut shfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                flags,
+            )
+        };
+        
+        if result == 0 || shfi.hIcon.is_null() {
+            // 返回默认图标占位符
+            return Ok(get_default_file_icon(extension));
+        }
+        
+        // 获取图标信息
+        let mut icon_info: ICONINFO = unsafe { std::mem::zeroed() };
+        let got_info = unsafe { GetIconInfo(shfi.hIcon, &mut icon_info) };
+        
+        if got_info == 0 {
+            unsafe { DestroyIcon(shfi.hIcon) };
+            return Ok(get_default_file_icon(extension));
+        }
+        
+        // 获取位图信息
+        let hbm_color = icon_info.hbmColor;
+        if hbm_color.is_null() {
+            unsafe {
+                if !icon_info.hbmMask.is_null() { DeleteObject(icon_info.hbmMask as _); }
+                DestroyIcon(shfi.hIcon);
+            }
+            return Ok(get_default_file_icon(extension));
+        }
+        
+        // 获取位图尺寸
+        let mut bm: BITMAP = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetObjectW(
+                hbm_color as _,
+                std::mem::size_of::<BITMAP>() as i32,
+                &mut bm as *mut _ as _,
+            );
+        }
+        
+        let width = bm.bmWidth as usize;
+        let height = bm.bmHeight as usize;
+        
+        if width == 0 || height == 0 {
+            unsafe {
+                if !icon_info.hbmMask.is_null() { DeleteObject(icon_info.hbmMask as _); }
+                DeleteObject(hbm_color as _);
+                DestroyIcon(shfi.hIcon);
+            }
+            return Ok(get_default_file_icon(extension));
+        }
+        
+        // 准备位图信息头
+        let mut bmi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bmi.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        bmi.bmiHeader.biWidth = width as i32;
+        bmi.bmiHeader.biHeight = -(height as i32); // 负数表示自上而下
+        bmi.bmiHeader.biPlanes = 1;
+        bmi.bmiHeader.biBitCount = 32;
+        bmi.bmiHeader.biCompression = BI_RGB;
+        
+        // 分配像素缓冲区
+        let mut pixels: Vec<u8> = vec![0u8; width * height * 4];
+        
+        // 获取设备上下文
+        let hdc_screen = unsafe { GetDC(null_mut()) };
+        let hdc_mem = unsafe { CreateCompatibleDC(hdc_screen) };
+        let old_bmp = unsafe { SelectObject(hdc_mem, hbm_color as _) };
+        
+        // 读取位图数据
+        unsafe {
+            GetDIBits(
+                hdc_mem,
+                hbm_color,
+                0,
+                height as u32,
+                pixels.as_mut_ptr() as _,
+                &mut bmi,
+                0, // DIB_RGB_COLORS
+            );
+        }
+        
+        // 清理资源
+        unsafe {
+            SelectObject(hdc_mem, old_bmp);
+            DeleteDC(hdc_mem);
+            ReleaseDC(null_mut(), hdc_screen);
+            if !icon_info.hbmMask.is_null() { DeleteObject(icon_info.hbmMask as _); }
+            DeleteObject(hbm_color as _);
+            DestroyIcon(shfi.hIcon);
+        }
+        
+        // BGRA -> RGBA 转换
+        for chunk in pixels.chunks_exact_mut(4) {
+            chunk.swap(0, 2); // B <-> R
+        }
+        
+        // 编码为 PNG
+        let png_data = encode_rgba_to_png(&pixels, width as u32, height as u32)?;
+        
+        // 转换为 base64 data URL
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_data);
+        let data_url = format!("data:image/png;base64,{}", b64);
+        
+        return Ok(data_url);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // 非 Windows 平台返回默认图标
+        Ok(get_default_file_icon(extension))
+    }
+}
+
+/// 根据扩展名返回默认图标（SVG data URL）
+fn get_default_file_icon(extension: &str) -> String {
+    // 使用简单的文件图标 SVG - 所有类型使用相同的基础图标，颜色不同
+    let (color, label) = match extension.to_lowercase().as_str() {
+        "pdf" => ("E53935", "PDF"),
+        "doc" | "docx" => ("1976D2", "DOC"),
+        "xls" | "xlsx" => ("388E3C", "XLS"),
+        "ppt" | "pptx" => ("D84315", "PPT"),
+        "zip" | "rar" | "7z" | "tar" | "gz" => ("FFA000", "ZIP"),
+        "mp3" | "wav" | "flac" | "aac" | "ogg" => ("7B1FA2", "♪"),
+        "mp4" | "avi" | "mkv" | "mov" | "wmv" => ("C62828", "▶"),
+        "exe" | "msi" => ("455A64", "EXE"),
+        "txt" | "md" | "log" => ("616161", "TXT"),
+        "js" | "ts" | "jsx" | "tsx" => ("F7DF1E", "JS"),
+        "py" => ("3776AB", "PY"),
+        "rs" => ("DEA584", "RS"),
+        "html" | "htm" => ("E34F26", "HTML"),
+        "css" | "scss" | "sass" => ("1572B6", "CSS"),
+        "json" => ("000000", "{ }"),
+        "xml" => ("F16529", "XML"),
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" => ("4CAF50", "IMG"),
+        _ => ("757575", "FILE"),
+    };
+    
+    // 构建简单的 SVG 文件图标
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#{}" d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/><text x="12" y="16" text-anchor="middle" font-size="4" fill="#{}">{}</text></svg>"##,
+        color, color, label
+    );
+    
+    let encoded = base64::engine::general_purpose::STANDARD.encode(svg.as_bytes());
+    format!("data:image/svg+xml;base64,{}", encoded)
+}
+
+/// 将 RGBA 像素数据编码为 PNG
+fn encode_rgba_to_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    use image::{ImageBuffer, RgbaImage, ImageEncoder, ColorType};
+    
+    let img: RgbaImage = ImageBuffer::from_raw(width, height, pixels.to_vec())
+        .ok_or_else(|| "无法创建图片缓冲区".to_string())?;
+    
+    let mut png_data = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
+    
+    encoder.write_image(
+        img.as_raw(),
+        width,
+        height,
+        ColorType::Rgba8,
+    ).map_err(|e| format!("PNG 编码失败: {}", e))?;
+    
+    Ok(png_data)
+}
+
+/// 打开文件所在文件夹并选中文件 (Windows Explorer)
+#[tauri::command]
+pub async fn open_file_location(file_path: String) -> Result<(), String> {
+    let path = PathBuf::from(&file_path);
+    
+    if !path.exists() {
+        return Err(format!("文件不存在: {}", file_path));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Windows: 使用 explorer /select, 命令
+        std::process::Command::new("explorer")
+            .args(["/select,", &file_path])
+            .spawn()
+            .map_err(|e| format!("打开文件位置失败: {}", e))?;
+        
+        tracing::info!("✅ 已打开文件位置: {}", file_path);
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: 使用 open -R 命令
+        std::process::Command::new("open")
+            .args(["-R", &file_path])
+            .spawn()
+            .map_err(|e| format!("打开文件位置失败: {}", e))?;
+        
+        tracing::info!("✅ 已打开文件位置: {}", file_path);
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Linux: 尝试使用 xdg-open 打开父目录
+        if let Some(parent) = path.parent() {
+            std::process::Command::new("xdg-open")
+                .arg(parent)
+                .spawn()
+                .map_err(|e| format!("打开文件位置失败: {}", e))?;
+            
+            tracing::info!("✅ 已打开文件位置: {}", file_path);
+            return Ok(());
+        }
+        return Err("无法获取文件父目录".to_string());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("不支持的操作系统".to_string())
+    }
+}
+

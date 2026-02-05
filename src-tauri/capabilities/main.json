@@ -191,6 +191,12 @@
     "allow-delete-group",
     "allow-add-item-to-group",
     "allow-delete-item",
-    "allow-copy-image-to-clipboard"
+    "allow-copy-image-to-clipboard",
+    "allow-copy-files-to-clipboard",
+    "allow-get-file-metadata",
+    "allow-get-files-metadata",
+    "allow-check-files-exist",
+    "allow-get-file-icon",
+    "allow-open-file-location"
   ]
-} 
+}

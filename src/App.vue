@@ -20,7 +20,8 @@ interface SourceAppInfo {
 import Database from '@tauri-apps/plugin-sql'
 import { 
   onTextUpdate, 
-  onImageUpdate, 
+  onImageUpdate,
+  onFilesUpdate,
   startListening,
   writeText
 } from 'tauri-plugin-clipboard-api'
@@ -186,6 +187,7 @@ const previousActiveApp = ref<SourceAppInfo | null>(null)
 // 事件监听器清理函数存储
 let unlistenClipboardText: (() => void) | null = null
 let unlistenClipboardImage: (() => void) | null = null
+let unlistenClipboardFiles: (() => void) | null = null
 let unlistenClipboard: (() => Promise<void>) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 let historyCleanupInterval: ReturnType<typeof setInterval> | null = null
@@ -194,6 +196,8 @@ let historyCleanupInterval: ReturnType<typeof setInterval> | null = null
 let lastImageProcessTime = 0
 let lastTextContent = '' // 新增：记录最后处理的文本内容
 let lastTextProcessTime = 0 // 新增：记录最后处理文本的时间
+let lastFilesContent = '' // 新增：记录最后处理的文件列表（JSON字符串）
+let lastFilesProcessTime = 0 // 新增：记录最后处理文件的时间
 let isProcessingClipboard = false // 新增：防止并发处理
 let isManualCopy = false // 新增：标记是否是主动复制操作（防止监听器误触发）
 
@@ -365,6 +369,84 @@ const getImageMetadataText = (item: any): string => {
   }
 
   return `${metadata.width}×${metadata.height} · ${formatFileSize(metadata.size)}`
+}
+
+// 解析文件元数据
+const parseFileMetadata = (metadata: any): { files: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean}>, file_count: number } | null => {
+  if (!metadata) return null
+
+  // 如果 metadata 是字符串，尝试解析为 JSON
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata)
+    } catch (e) {
+      return null
+    }
+  }
+
+  if (typeof metadata !== 'object' || !Array.isArray(metadata.files)) {
+    return null
+  }
+
+  return {
+    files: metadata.files,
+    file_count: metadata.file_count || metadata.files.length
+  }
+}
+
+// 获取文件名（从content或metadata中提取）
+const getFileName = (item: any): string => {
+  if (item.type !== 'file') return ''
+  
+  // 尝试从metadata获取
+  const metadata = parseFileMetadata(item.metadata)
+  if (metadata && metadata.files.length > 0) {
+    const firstFile = metadata.files[0]
+    if (metadata.file_count > 1) {
+      return `${firstFile.name} (+${metadata.file_count - 1} 个文件)`
+    }
+    return firstFile.name
+  }
+  
+  // 从content（路径）中提取文件名
+  const content = item.content || ''
+  const parts = content.split(/[/\\]/)
+  return parts[parts.length - 1] || 'Unknown'
+}
+
+// 获取文件信息（大小、扩展名等）
+const getFileInfo = (item: any): string => {
+  if (item.type !== 'file') return ''
+  
+  const metadata = parseFileMetadata(item.metadata)
+  if (metadata && metadata.files.length > 0) {
+    const firstFile = metadata.files[0]
+    const parts = []
+    
+    // 扩展名
+    if (firstFile.extension) {
+      parts.push(firstFile.extension.toUpperCase())
+    }
+    
+    // 大小
+    if (firstFile.size > 0) {
+      parts.push(formatFileSize(firstFile.size))
+    }
+    
+    // 文件数量
+    if (metadata.file_count > 1) {
+      parts.push(`共 ${metadata.file_count} 个`)
+    }
+    
+    // 失效状态
+    if (!firstFile.exists) {
+      parts.push('(已失效)')
+    }
+    
+    return parts.join(' · ')
+  }
+  
+  return ''
 }
 
 // 搜索框引用
@@ -712,10 +794,31 @@ const deleteItem = (item: any) => {
         logger.info('条目删除成功', { itemId: item.id, type: item.type })
       } catch (error) {
         showError('删除条目失败: ' + String(error))
-        logger.error('删除条目失败', { itemId: item.id, error: String(error) })
+    logger.error('删除条目失败', { itemId: item.id, error: String(error) })
       }
     }
   })
+}
+
+// 打开文件所在位置
+const openFileLocation = async (item: any) => {
+  if (item.type !== 'file') return
+
+  try {
+    const fileMetadata = parseFileMetadata(item.metadata)
+    if (!fileMetadata || !fileMetadata.files || fileMetadata.files.length === 0) {
+      showWarning('无法获取文件信息')
+      return
+    }
+
+    // 获取第一个文件的路径
+    const firstFile = fileMetadata.files[0]
+    await invoke('open_file_location', { filePath: firstFile.path })
+    logger.info('打开文件所在位置', { path: firstFile.path })
+  } catch (error) {
+    logger.error('打开文件位置失败', { error: String(error) })
+    showError('打开文件位置失败: ' + String(error))
+  }
 }
 
 // 备注管理功能
@@ -1163,13 +1266,16 @@ const handleContextMenuAction = (action: string) => {
     case 'copy':
       copyToClipboard(item)
       break
+    case 'open-location':
+      openFileLocation(item)
+      break
   }
-  
+
   hideContextMenu()
 }
 
 // 检查是否是重复内容，如果是则返回已有条目的ID
-const checkDuplicateContent = async (content: string, contentType: 'text' | 'image', hash?: string): Promise<number | null> => {
+const checkDuplicateContent = async (content: string, contentType: 'text' | 'image' | 'file', hash?: string): Promise<number | null> => {
   try {
     // 先检查内存中的历史记录
     const existingItem = clipboardHistory.value.find(item => {
@@ -1190,6 +1296,10 @@ const checkDuplicateContent = async (content: string, contentType: 'text' | 'ima
         }
         
         return false
+      }
+      // 文件类型：比较路径
+      if (item.type === 'file' && contentType === 'file') {
+        return item.content === content
       }
       return item.content === content && item.type === contentType
     })
@@ -1388,6 +1498,40 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
       (async () => {
         if (item.type === 'text') {
           await writeText(item.content)
+        } else if (item.type === 'file') {
+          // 文件处理：
+          const metadata = parseFileMetadata(item.metadata)
+          let filePaths: string[] = []
+          
+          if (metadata && metadata.files.length > 0) {
+            filePaths = metadata.files.map(f => f.path)
+          } else if (item.content) {
+            filePaths = [item.content]
+          }
+          
+          if (filePaths.length > 0) {
+            if (asPath) {
+              // 如果作为路径粘贴，直接写入路径文本到剪贴板
+              const pathText = filePaths.join('\n')
+              logger.debug('将文件路径作为文本复制', { paths: filePaths })
+              await writeText(pathText)
+            } else {
+              // 正常粘贴文件
+              try {
+                logger.debug('调用后端复制文件到剪贴板', { paths: filePaths })
+                await invoke('copy_files_to_clipboard', { filePaths })
+                logger.debug('文件写入剪贴板完成 (Rust)', { 
+                   time: `${(performance.now() - writeStart).toFixed(2)}ms`,
+                   fileCount: filePaths.length
+                })
+              } catch (e) {
+                logger.error('复制文件失败', { paths: filePaths, error: String(e) })
+                throw e
+              }
+            }
+          } else {
+            logger.warn('无效的文件路径，无法复制', { itemId: item.id })
+          }
         } else if (item.type === 'image') {
           // 图片处理：
           let imagePath = item.content
@@ -1804,30 +1948,33 @@ const searchFromDatabase = async () => {
       return
     }
     
-    // 构建SQL查询 - 只搜索文本类型的内容
+    // 构建SQL查询 - 搜索文本类型和文件类型
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
       FROM clipboard_history
-      WHERE type = 'text' AND LOWER(content) LIKE ?
+      WHERE type IN ('text', 'file')
     `
-    
-    const params = [`%${query}%`]
-    
+
+    const params: any[] = []
+
     // 根据不同标签页添加额外条件
     if (isTextTab) {
-      // 文本标签页：已经通过 type = 'text' 过滤了
+      // 文本标签页：只搜索文本类型
+      sql = sql.replace("type IN ('text', 'file')", "type = 'text'")
+      sql += ' AND LOWER(content) LIKE ?'
+      params.push(`%${query}%`)
     } else if (isFavoritesTab) {
-      // 收藏标签页：只搜索收藏的文本项目
+      // 收藏标签页：只搜索收藏的项目
       sql += ' AND is_favorite = 1'
     } else if (selectedTabIndex.value === 4 && selectedGroupId.value !== null) {
-      // 分组标签页：只搜索当前分组下的文本项目
+      // 分组标签页：只搜索当前分组下的项目
       sql += ' AND group_id = ?'
-      params.push(selectedGroupId.value as any)
+      params.push(selectedGroupId.value)
     }
-    // 全部标签页：搜索所有文本内容（无额外条件）
-    
+    // 全部标签页：搜索所有文本和文件内容
+
     sql += ' ORDER BY timestamp DESC LIMIT 500' // 限制最多返回500条结果
-    
+
     const rows = await db.select(sql, params)
     
     // 将搜索结果转换为前端格式，确保去重
@@ -1852,9 +1999,24 @@ const searchFromDatabase = async () => {
           return false
         }
         seenIds.add(item.id)
-        return true
+
+        // 根据类型进行搜索匹配
+        if (item.type === 'text') {
+          // 文本类型：匹配内容
+          return item.content?.toLowerCase().includes(query)
+        } else if (item.type === 'file') {
+          // 文件类型：匹配文件名（从metadata中提取）
+          const fileMetadata = parseFileMetadata(item.metadata)
+          if (fileMetadata && fileMetadata.files) {
+            return fileMetadata.files.some((file: any) =>
+              file.name?.toLowerCase().includes(query)
+            )
+          }
+          return false
+        }
+        return false
       })
-    
+
     // 更新内存中的历史记录为搜索结果
     clipboardHistory.value = searchResults
     
@@ -2476,6 +2638,165 @@ onMounted(async () => {
       }
     })
 
+    // 注册剪贴板文件变化监听器
+    unlistenClipboardFiles = await onFilesUpdate(async (files: string[]) => {
+      try {
+        logger.debug('检测到文件剪贴板变化', { fileCount: files.length, files: files.slice(0, 3) })
+
+        // 如果是主动复制操作，跳过监听器处理
+        if (isManualCopy) {
+          logger.debug('检测到主动复制操作，跳过文件监听器处理')
+          return
+        }
+
+        // 防止并发处理
+        if (isProcessingClipboard) {
+          logger.debug('正在处理其他剪贴板事件，跳过')
+          return
+        }
+
+        // 跳过空文件列表
+        if (!files || files.length === 0) {
+          logger.debug('文件列表为空，跳过')
+          return
+        }
+
+        // 时间窗口重复检测
+        const currentTime = Date.now()
+        const timeDiff = currentTime - lastFilesProcessTime
+        const filesContentStr = JSON.stringify(files.sort())
+        
+        if (timeDiff < 2000 && lastFilesContent === filesContentStr) {
+          logger.debug('检测到时间窗口内的重复文件事件，跳过')
+          return
+        }
+
+        // 设置处理标志
+        isProcessingClipboard = true
+        lastFilesContent = filesContentStr
+        lastFilesProcessTime = currentTime
+
+        try {
+          // 检查是否是重复内容（使用第一个文件路径作为标识）
+          const primaryFilePath = files[0]
+          const duplicateItemId = await checkDuplicateContent(primaryFilePath, 'file')
+          if (duplicateItemId) {
+            logger.debug('Duplicate file content detected, moving item to front', { itemId: duplicateItemId })
+            await moveItemToFront(duplicateItemId)
+            return
+          }
+        } catch (e) {
+          logger.error('检查文件重复失败', { error: String(e) })
+        }
+
+        // 获取文件元信息
+        let filesMetadata: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean}> = []
+        try {
+          filesMetadata = await invoke('get_files_metadata', { filePaths: files })
+        } catch (e) {
+          logger.error('获取文件元信息失败', { error: String(e) })
+          // 创建基本元信息
+          filesMetadata = files.map(f => ({
+            path: f,
+            name: f.split(/[/\\]/).pop() || 'unknown',
+            extension: (f.split('.').pop() || '').toLowerCase(),
+            size: 0,
+            exists: true,
+            is_directory: false
+          }))
+        }
+
+        // 获取第一个文件的图标
+        let fileIcon: string | null = null
+        try {
+          fileIcon = await invoke('get_file_icon', { filePath: files[0] })
+        } catch (e) {
+          logger.error('获取文件图标失败', { error: String(e) })
+        }
+
+        // 获取当前活动窗口信息
+        let sourceAppInfo: SourceAppInfo = {
+          name: 'Unknown',
+          icon: undefined,
+          bundle_id: undefined
+        }
+        
+        try {
+          const appInfo = await invoke('get_active_window_info_for_clipboard') as SourceAppInfo
+          sourceAppInfo = appInfo
+        } catch (error) {
+          logger.error('获取源应用信息失败', { error: String(error) })
+        }
+
+        // 构建文件元数据JSON
+        const metadata = JSON.stringify({
+          files: filesMetadata,
+          file_count: files.length
+        })
+
+        // 构建条目对象
+        const item = {
+          content: files[0], // 使用第一个文件路径作为主内容
+          type: 'file',
+          timestamp: new Date().toISOString(),
+          isFavorite: false,
+          imagePath: null,
+          sourceAppName: sourceAppInfo.name || 'Unknown',
+          sourceAppIcon: sourceAppInfo.icon || null,
+          thumbnailData: fileIcon, // 存储文件图标
+          metadata: metadata
+        }
+
+        // 插入新记录到数据库
+        try {
+          await db!.execute(
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.thumbnailData, item.metadata]
+          )
+          const rows = await db!.select(`SELECT last_insert_rowid() as id`)
+          const id = rows[0]?.id || Date.now()
+          
+          const newItem = Object.assign({ id }, item)
+          
+          // 检查内存中是否已存在相同ID的项目，避免重复
+          const existingIndex = clipboardHistory.value.findIndex((historyItem: any) => historyItem.id === id)
+          if (existingIndex === -1) {
+            // 添加到内存列表的开头
+            clipboardHistory.value.unshift(newItem)
+            triggerRef(clipboardHistory)
+            
+            // 新数据加入，需要失效缓存
+            if (allDataLoaded.value) {
+              allHistoryCache.value.unshift(newItem)
+              triggerRef(allHistoryCache)
+              logger.debug('更新全部数据缓存，添加新文件', { itemId: newItem.id, fileCount: files.length })
+            }
+            
+            // 如果在搜索模式下，也需要添加到原始数据
+            if (isInSearchMode) {
+              const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === id)
+              if (originalExistingIndex === -1) {
+                originalClipboardHistory.unshift(newItem)
+              }
+            }
+          }
+          
+          logger.info('文件记录已保存', { id, fileCount: files.length, primaryFile: files[0] })
+          
+          // 立即执行内存清理
+          trimMemoryHistory()
+        } catch (dbError) {
+          logger.error('数据库操作失败', { error: String(dbError) })
+        }
+      } catch (error) {
+        logger.error('处理剪贴板文件失败', { error: String(error) })
+      } finally {
+        // 确保在所有情况下都清除处理标志
+        isProcessingClipboard = false
+      }
+    })
+
     window.addEventListener('keydown', handleKeyDown)
     
     // 禁用浏览器原生右键菜单
@@ -2603,6 +2924,11 @@ onUnmounted(() => {
   if (unlistenClipboardImage) {
     unlistenClipboardImage()
     unlistenClipboardImage = null
+  }
+  
+  if (unlistenClipboardFiles) {
+    unlistenClipboardFiles()
+    unlistenClipboardFiles = null
   }
   
   if (unlistenClipboard) {
@@ -2911,8 +3237,8 @@ const checkDataConsistency = () => {
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between mb-0.5">
                           <div class="flex items-center space-x-1">
-                            <div class="badge badge-xs" :class="item.type === 'text' ? 'badge-success' : 'badge-secondary'">
-                              {{ item.type }}
+                            <div class="badge badge-xs" :class="item.type === 'text' ? 'badge-success' : item.type === 'file' ? 'badge-info' : 'badge-secondary'">
+                              {{ item.type === 'file' ? '文件' : item.type }}
                             </div>
                             <span class="text-xs opacity-60">
                               · {{ item.sourceAppName }}
@@ -2932,6 +3258,35 @@ const checkDataConsistency = () => {
                         <div v-if="item.type === 'text'" class="text-xs text-gray-900 leading-tight" :class="item.content.length > 50 ? 'line-clamp-2' : 'line-clamp-1'">
                           {{ item.content }}
                       </div>
+                        <div v-else-if="item.type === 'file'" class="mt-0.5 flex items-center space-x-2">
+                          <!-- 文件图标 -->
+                          <div class="flex-shrink-0">
+                            <img
+                              v-if="item.thumbnailData"
+                              :src="item.thumbnailData"
+                              alt="File icon"
+                              class="w-8 h-8 object-contain"
+                              loading="lazy"
+                            />
+                            <div
+                              v-else
+                              class="w-8 h-8 bg-gray-100 rounded flex items-center justify-center"
+                            >
+                              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                              </svg>
+                            </div>
+                          </div>
+                          <!-- 文件信息 -->
+                          <div class="flex-1 min-w-0">
+                            <div class="text-xs text-gray-900 truncate font-medium">
+                              {{ getFileName(item) }}
+                            </div>
+                            <div class="text-xs text-gray-500">
+                              {{ getFileInfo(item) }}
+                            </div>
+                          </div>
+                        </div>
                         <div v-else class="mt-0.5">
                           <img
                             v-if="resolveImage(item)"
@@ -3902,7 +4257,19 @@ const checkDataConsistency = () => {
         <span>复制</span>
       </button>
 
-  
+      <!-- 打开文件位置（仅文件类型显示） -->
+      <button
+        v-if="contextMenuItem?.type === 'file'"
+        @click="handleContextMenuAction('open-location')"
+        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-cyan-50 hover:to-sky-50 hover:text-cyan-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+      >
+        <svg class="w-3 h-3 text-gray-400 group-hover:text-cyan-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path>
+        </svg>
+        <span>打开文件位置</span>
+      </button>
+
+
       <!-- 收藏选项 -->
       <button
         @click="handleContextMenuAction('favorite')"
