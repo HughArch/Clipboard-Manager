@@ -201,6 +201,10 @@ let lastFilesProcessTime = 0 // 新增：记录最后处理文件的时间
 let isProcessingClipboard = false // 新增：防止并发处理
 let isManualCopy = false // 新增：标记是否是主动复制操作（防止监听器误触发）
 
+// 文件预览相关状态
+const filePreviewContent = ref<string>('')
+const isLoadingFilePreview = ref(false)
+
 // JSON格式化相关函数
 const isValidJSON = (str: string): boolean => {
   try {
@@ -372,7 +376,7 @@ const getImageMetadataText = (item: any): string => {
 }
 
 // 解析文件元数据
-const parseFileMetadata = (metadata: any): { files: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean}>, file_count: number } | null => {
+const parseFileMetadata = (metadata: any): { files: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean, modified_time?: string}>, file_count: number } | null => {
   if (!metadata) return null
 
   // 如果 metadata 是字符串，尝试解析为 JSON
@@ -448,6 +452,105 @@ const getFileInfo = (item: any): string => {
   
   return ''
 }
+
+// 文件预览相关函数
+const isImageFile = (extension: string): boolean => {
+  const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico']
+  return imageExts.includes(extension.toLowerCase())
+}
+
+const isPDFFile = (extension: string): boolean => {
+  return extension.toLowerCase() === 'pdf'
+}
+
+const isJsonFile = (extension: string): boolean => {
+  return extension.toLowerCase() === 'json'
+}
+
+const isTextFile = (extension: string): boolean => {
+  const textExts = ['txt', 'md', 'json', 'js', 'ts', 'vue', 'html', 'css', 'py', 'rs', 'java', 'cpp', 'c', 'h', 'hpp', 'yaml', 'yml', 'xml', 'sql', 'log', 'ini', 'conf', 'sh', 'bat', 'ps1', 'cmd']
+  return textExts.includes(extension.toLowerCase())
+}
+
+const isVideoFile = (extension: string): boolean => {
+  const videoExts = ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'webm', 'm4v', '3gp']
+  return videoExts.includes(extension.toLowerCase())
+}
+
+const isAudioFile = (extension: string): boolean => {
+  const audioExts = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma']
+  return audioExts.includes(extension.toLowerCase())
+}
+
+const isArchiveFile = (extension: string): boolean => {
+  const archiveExts = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz']
+  return archiveExts.includes(extension.toLowerCase())
+}
+
+const isCodeFile = (extension: string): boolean => {
+  const codeExts = ['js', 'ts', 'py', 'rs', 'java', 'c', 'cpp', 'h', 'hpp', 'go', 'rb', 'php', 'html', 'css', 'scss', 'vue', 'jsx', 'tsx', 'sql', 'sh', 'bat', 'ps1']
+  return codeExts.includes(extension.toLowerCase())
+}
+
+// 加载文件预览内容
+const loadFilePreview = async (item: any) => {
+  if (item.type !== 'file') return
+
+  const fileMetadata = parseFileMetadata(item.metadata)
+  if (!fileMetadata || !fileMetadata.files || fileMetadata.files.length === 0) return
+
+  const file = fileMetadata.files[0]
+
+  // 只预览第一个文件
+  if (file.is_directory) {
+    filePreviewContent.value = '[文件夹]'
+    return
+  }
+
+  // 图片文件 - 加载图片预览
+  if (isImageFile(file.extension)) {
+    try {
+      isLoadingFilePreview.value = true
+      const imageData = await invoke('load_image_file', { imagePath: file.path }) as string
+      filePreviewContent.value = imageData
+    } catch (error) {
+      logger.error('加载图片预览失败', { path: file.path, error: String(error) })
+      filePreviewContent.value = '[图片加载失败]'
+    } finally {
+      isLoadingFilePreview.value = false
+    }
+    return
+  }
+
+  // 文本文件 - 读取文本内容
+  if (isTextFile(file.extension)) {
+    try {
+      isLoadingFilePreview.value = true
+      const text = await invoke('read_text_file', { filePath: file.path }) as string
+      // 限制预览长度
+      filePreviewContent.value = text.length > 5000 ? text.substring(0, 5000) + '\n\n[内容过长，仅显示前5000字符]' : text
+    } catch (error) {
+      logger.error('加载文本预览失败', { path: file.path, error: String(error) })
+      filePreviewContent.value = '[文件读取失败: ' + String(error) + ']'
+    } finally {
+      isLoadingFilePreview.value = false
+    }
+    return
+  }
+
+  // 其他类型显示文件信息
+  filePreviewContent.value = `[${file.extension?.toUpperCase() || '未知'}文件]`
+}
+
+// 监听选中项变化，加载文件预览
+watch(selectedItem, async (newItem) => {
+  // 清理之前的文件预览
+  filePreviewContent.value = ''
+
+  if (newItem && newItem.type === 'file') {
+    await loadFilePreview(newItem)
+  }
+})
 
 // 搜索框引用
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -681,14 +784,28 @@ const filteredHistory = computed(() => {
     // 如果没有搜索查询，返回所有项目
     if (!query) return true
     
-    // 根据当前标签页决定搜索逻辑
+    // 如果在搜索模式下，searchFromDatabase 已经完成了正确的过滤，这里直接返回 true
+    if (isInSearchMode) {
+      return true
+    }
+    
+    // 根据当前标签页决定搜索逻辑（非搜索模式下的本地过滤）
     if (selectedTabIndex.value === 2) {
       // 图片标签页：图片内容不支持文本搜索，返回false（搜索时不显示任何图片）
       return false
     } else {
-      // 全部、文本、收藏和分组标签页：只搜索文本类型的内容
+      // 全部、文本、收藏和分组标签页：搜索文本和文件类型
       if (item.type === 'text') {
         return item.content?.toLowerCase().includes(query) || false
+      } else if (item.type === 'file') {
+        // 文件类型：匹配文件名
+        const fileMetadata = parseFileMetadata(item.metadata)
+        if (fileMetadata && fileMetadata.files) {
+          return fileMetadata.files.some((file: any) =>
+            file.name?.toLowerCase().includes(query)
+          )
+        }
+        return false
       }
       return false
     }
@@ -1952,18 +2069,28 @@ const searchFromDatabase = async () => {
     let sql = `
       SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
       FROM clipboard_history
-      WHERE type IN ('text', 'file')
+      WHERE 
     `
 
     const params: any[] = []
 
-    // 根据不同标签页添加额外条件
+    // 基础搜索条件
+    let searchCondition = ''
     if (isTextTab) {
       // 文本标签页：只搜索文本类型
-      sql = sql.replace("type IN ('text', 'file')", "type = 'text'")
-      sql += ' AND LOWER(content) LIKE ?'
+      searchCondition = "type = 'text' AND LOWER(content) LIKE ?"
       params.push(`%${query}%`)
-    } else if (isFavoritesTab) {
+    } else {
+      // 其他标签页：搜索文本内容 OR 文件类型(文件在前端过滤，以避免SQL中JSON转义字符匹配问题)
+      // 注意：这里放宽了对文件类型的SQL过滤，获取所有文件记录（受LIMIT限制），然后在前端进行精确匹配
+      searchCondition = "(type = 'text' AND LOWER(content) LIKE ?) OR (type = 'file')"
+      params.push(`%${query}%`)
+    }
+
+    sql += searchCondition
+
+    // 根据不同标签页添加额外条件
+    if (isFavoritesTab) {
       // 收藏标签页：只搜索收藏的项目
       sql += ' AND is_favorite = 1'
     } else if (selectedTabIndex.value === 4 && selectedGroupId.value !== null) {
@@ -1971,7 +2098,11 @@ const searchFromDatabase = async () => {
       sql += ' AND group_id = ?'
       params.push(selectedGroupId.value)
     }
-    // 全部标签页：搜索所有文本和文件内容
+    
+    // 如果不是文本标签页且不是收藏/分组，默认过滤 text 和 file 类型
+    if (!isTextTab && !isFavoritesTab && !(selectedTabIndex.value === 4)) {
+       sql += " AND type IN ('text', 'file')"
+    }
 
     sql += ' ORDER BY timestamp DESC LIMIT 500' // 限制最多返回500条结果
 
@@ -2690,7 +2821,7 @@ onMounted(async () => {
         }
 
         // 获取文件元信息
-        let filesMetadata: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean}> = []
+        let filesMetadata: Array<{path: string, name: string, extension: string, size: number, exists: boolean, is_directory: boolean, modified_time?: string}> = []
         try {
           filesMetadata = await invoke('get_files_metadata', { filePaths: files })
         } catch (e) {
@@ -2702,7 +2833,8 @@ onMounted(async () => {
             extension: (f.split('.').pop() || '').toLowerCase(),
             size: 0,
             exists: true,
-            is_directory: false
+            is_directory: false,
+            modified_time: ''
           }))
         }
 
@@ -3268,6 +3400,24 @@ const checkDataConsistency = () => {
                               class="w-8 h-8 object-contain"
                               loading="lazy"
                             />
+                            <!-- PDF图标 -->
+                            <div
+                              v-else-if="isPDFFile(parseFileMetadata(item.metadata)?.files?.[0]?.extension || '')"
+                              class="w-8 h-8 flex items-center justify-center"
+                            >
+                              <svg class="w-7 h-7" viewBox="0 0 48 48" fill="none">
+                                <path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" fill="#DC2626"/>
+                                <path d="M30 4L40 14H32C30.8954 14 30 13.1046 30 12V4Z" fill="#B91C1C"/>
+                                <text x="24" y="32" font-size="11" font-weight="bold" fill="white" text-anchor="middle">PDF</text>
+                              </svg>
+                            </div>
+                            <!-- JSON图标 -->
+                            <div
+                              v-else-if="isJsonFile(parseFileMetadata(item.metadata)?.files?.[0]?.extension || '')"
+                              class="w-8 h-8 flex items-center justify-center bg-yellow-50 rounded text-yellow-600 font-mono font-bold text-sm border border-yellow-200"
+                            >
+                              {}
+                            </div>
                             <div
                               v-else
                               class="w-8 h-8 bg-gray-100 rounded flex items-center justify-center"
@@ -3899,7 +4049,7 @@ const checkDataConsistency = () => {
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
               <h2 class="text-base font-semibold text-gray-900">
-                {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : '选择条目' }}
+                {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : selectedItem?.type === 'file' ? (isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '') ? 'PDF 文档' : '文件信息') : '选择条目' }}
               </h2>
             </div>
             <div class="flex items-center space-x-2">
@@ -3936,6 +4086,160 @@ const checkDataConsistency = () => {
               <template v-if="selectedItem.type === 'text'">
                 <div class="prose prose-sm max-w-none preview-content">
                   <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
+                </div>
+              </template>
+              <template v-else-if="selectedItem.type === 'file'">
+                <!-- 文件类型预览 -->
+                <div class="h-full flex flex-col">
+                  <!-- 加载状态 -->
+                  <div v-if="isLoadingFilePreview" class="flex flex-col items-center justify-center py-8">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
+                    <p class="text-gray-500 text-sm">加载预览中...</p>
+                  </div>
+
+                  <!-- 图片预览 -->
+                  <div v-else-if="isImageFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')"
+                       class="flex-1 flex flex-col items-center justify-center space-y-4">
+                    <img v-if="filePreviewContent && !filePreviewContent.startsWith('[')"
+                         :src="filePreviewContent"
+                         alt="Image preview"
+                         class="max-w-full max-h-96 object-contain rounded-lg shadow-lg"/>
+                    <div v-else class="text-gray-500">无法加载图片预览</div>
+                  </div>
+
+                  <!-- 文本预览 -->
+                  <div v-else-if="isTextFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')"
+                       class="flex-1 overflow-auto">
+                    <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal bg-white p-4 rounded-lg border border-gray-200">{{ filePreviewContent }}</pre>
+                  </div>
+
+                  <!-- PDF文件信息 -->
+                  <div v-else-if="isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')"
+                       class="flex-1 flex flex-col items-center justify-start pt-8 space-y-6">
+                    <!-- PDF大图标 -->
+                    <div class="w-32 h-40 bg-white rounded-lg shadow-lg border border-gray-200 flex flex-col items-center justify-center p-4">
+                      <svg class="w-20 h-20" viewBox="0 0 48 48" fill="none">
+                        <!-- 文件背景 -->
+                        <path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" fill="#DC2626"/>
+                        <!-- 文件折角 -->
+                        <path d="M30 4L40 14H32C30.8954 14 30 13.1046 30 12V4Z" fill="#B91C1C"/>
+                        <!-- PDF文字 -->
+                        <text x="24" y="32" font-size="10" font-weight="bold" fill="white" text-anchor="middle">PDF</text>
+                      </svg>
+                    </div>
+                    <!-- 文件信息 -->
+                    <div class="w-full max-w-sm bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                      <div class="flex items-center space-x-3">
+                        <svg class="w-5 h-5 text-red-500" viewBox="0 0 48 48" fill="none">
+                          <path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" fill="#DC2626"/>
+                          <path d="M30 4L40 14H32C30.8954 14 30 13.1046 30 12V4Z" fill="#B91C1C"/>
+                          <text x="24" y="32" font-size="10" font-weight="bold" fill="white" text-anchor="middle">PDF</text>
+                        </svg>
+                        <span class="text-sm font-medium text-gray-900 truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
+                      </div>
+                      <div class="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">类型</span>
+                          <span class="text-gray-900">PDF 文档</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">大小</span>
+                          <span class="text-gray-900">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">修改日期</span>
+                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">位置</span>
+                          <span class="text-gray-900 truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- 音视频和其他文件 - 统一显示文件信息卡片 -->
+                  <div v-else
+                       class="flex-1 flex flex-col items-center justify-start pt-8 space-y-6">
+                    <!-- 文件大图标 -->
+                    <div class="w-32 h-40 bg-white rounded-lg shadow-lg border border-gray-200 flex flex-col items-center justify-center p-4">
+                      <!-- 视频图标 -->
+                      <svg v-if="isVideoFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                      </svg>
+                      <!-- 音频图标 -->
+                      <svg v-else-if="isAudioFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                      </svg>
+                      <!-- 压缩包图标 -->
+                      <svg v-else-if="isArchiveFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                      </svg>
+                      <!-- 代码图标 -->
+                      <svg v-else-if="isCodeFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                      </svg>
+                      <!-- JSON图标 -->
+                      <div v-else-if="isJsonFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 flex items-center justify-center text-yellow-600 font-mono font-bold text-4xl">
+                        {}
+                      </div>
+                      <!-- 默认文件图标 -->
+                      <svg v-else class="w-20 h-20 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                      </svg>
+                      
+                      <!-- 扩展名显示 -->
+                      <div class="mt-2 text-xs font-bold uppercase text-gray-500 tracking-wider">
+                        {{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || 'FILE' }}
+                      </div>
+                    </div>
+
+                    <!-- 文件信息 -->
+                    <div class="w-full max-w-sm bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                      <div class="flex items-center space-x-3">
+                        <!-- 小图标 -->
+                        <svg v-if="isVideoFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                        <svg v-else-if="isAudioFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                        </svg>
+                        <svg v-else-if="isArchiveFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path>
+                        </svg>
+                        <svg v-else-if="isCodeFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                        </svg>
+                        <div v-else-if="isJsonFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 flex items-center justify-center text-yellow-600 font-mono font-bold text-xs">{}</div>
+                        <svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
+                        </svg>
+                        <span class="text-sm font-medium text-gray-900 truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
+                      </div>
+                      <div class="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">类型</span>
+                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension?.toUpperCase() || '未知' }} 文件</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">大小</span>
+                          <span class="text-gray-900">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">修改日期</span>
+                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
+                        </div>
+                        <div class="flex justify-between">
+                          <span class="text-gray-500">位置</span>
+                          <span class="text-gray-900 truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
+                        </div>
+                        <!-- 多文件提示 -->
+                        <div v-if="(parseFileMetadata(selectedItem.metadata)?.file_count || 0) > 1" class="pt-2 mt-2 border-t border-gray-100 text-center text-xs text-blue-600">
+                          包含 {{ parseFileMetadata(selectedItem.metadata)?.file_count }} 个文件
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </template>
               <template v-else>

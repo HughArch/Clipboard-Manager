@@ -197,6 +197,7 @@
     "allow-get-files-metadata",
     "allow-check-files-exist",
     "allow-get-file-icon",
-    "allow-open-file-location"
+    "allow-open-file-location",
+    "allow-read-text-file"
   ]
 }

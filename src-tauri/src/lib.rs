@@ -404,7 +404,8 @@ pub fn run() {
             commands::get_files_metadata,
             commands::check_files_exist,
             commands::get_file_icon,
-            commands::open_file_location
+            commands::open_file_location,
+            commands::read_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

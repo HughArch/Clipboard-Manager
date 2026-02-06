@@ -37,6 +37,7 @@ fn main() {
             "check_files_exist",
             "get_file_icon",
             "open_file_location",
+            "read_text_file",
         ]),
     ))
     .unwrap();

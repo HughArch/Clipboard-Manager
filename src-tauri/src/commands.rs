@@ -2176,6 +2176,7 @@ pub struct FileMetadata {
     pub size: u64,
     pub exists: bool,
     pub is_directory: bool,
+    pub modified_time: String, // ISO 8601 string
 }
 
 /// 复制文件到剪贴板 (Windows CF_HDROP)
@@ -2245,6 +2246,16 @@ pub async fn get_file_metadata(file_path: String) -> Result<FileMetadata, String
         0
     };
     
+    let modified_time = if exists {
+        std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|t| chrono::DateTime::<chrono::Local>::from(t).format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_else(|| "".to_string())
+    } else {
+        "".to_string()
+    };
+    
     Ok(FileMetadata {
         path: file_path,
         name,
@@ -2252,6 +2263,7 @@ pub async fn get_file_metadata(file_path: String) -> Result<FileMetadata, String
         size,
         exists,
         is_directory,
+        modified_time,
     })
 }
 
@@ -2538,5 +2550,40 @@ pub async fn open_file_location(file_path: String) -> Result<(), String> {
     {
         Err("不支持的操作系统".to_string())
     }
+}
+
+/// 读取文本文件内容
+#[tauri::command]
+pub async fn read_text_file(file_path: String) -> Result<String, String> {
+    let start = std::time::Instant::now();
+    tracing::info!("读取文本文件: {}", file_path);
+
+    // 验证文件存在
+    let path = std::path::PathBuf::from(&file_path);
+    if !path.exists() {
+        return Err(format!("文件不存在: {}", file_path));
+    }
+
+    // 验证是文件而不是目录
+    if path.is_dir() {
+        return Err("无法读取目录内容".to_string());
+    }
+
+    // 检查文件大小（限制为 10MB）
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("无法获取文件元数据: {}", e))?;
+    
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Err("文件过大（超过10MB），无法预览".to_string());
+    }
+
+    // 读取文件内容
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
+    tracing::info!("✅ 文本文件读取成功，大小: {} 字节，耗时: {:?}", 
+        content.len(), start.elapsed());
+    
+    Ok(content)
 }
 
