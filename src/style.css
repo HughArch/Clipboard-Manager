@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   Modern Flat Design System
+   - Style: Flat/iOS-like
+   - Transitions: 200ms
+   - Primary: Blue (#0284c7)
+   ============================================ */
+
 @layer base {
   html {
     @apply antialiased;
@@ -17,7 +24,7 @@
     -ms-user-select: none;
     user-select: none;
     -webkit-context-menu: none;
-    cursor: default !important; /* 强制使用默认箭头指针 */
+    cursor: default !important;
   }
   
   /* 允许输入框和文本区域选中文本 */
@@ -26,12 +33,12 @@
     -moz-user-select: text;
     -ms-user-select: text;
     user-select: text;
-    cursor: text !important; /* 输入框使用文本指针 */
+    cursor: text !important;
   }
   
   /* 为可交互元素恢复正确的指针样式 */
   button, [role="button"], a, [href] {
-    cursor: pointer !important; /* 按钮和链接使用手指 */
+    cursor: pointer !important;
   }
   
   /* 滚动条区域 */
@@ -68,16 +75,306 @@
 }
 
 @layer components {
+  /* ============================================
+     Button System - Flat Design
+     ============================================ */
   .btn {
-    @apply inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors;
+    @apply inline-flex items-center justify-center font-medium rounded-lg
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-offset-1
+           disabled:opacity-50 disabled:cursor-not-allowed
+           border-0;
   }
+  
+  /* Size variants */
+  .btn-xs {
+    @apply px-2 py-1 text-xs gap-1;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs gap-1.5;
+  }
+  .btn-md {
+    @apply px-4 py-2 text-sm gap-2;
+  }
+  
+  /* Color variants - Flat style */
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 focus:ring-primary-500;
+    @apply bg-primary-600 text-white 
+           hover:bg-primary-700 active:bg-primary-800
+           focus:ring-primary-500/50;
   }
+  
   .btn-secondary {
-    @apply bg-white text-gray-700 border-gray-300 hover:bg-gray-50 focus:ring-primary-500;
+    @apply bg-gray-100 text-gray-700 
+           hover:bg-gray-200 active:bg-gray-300
+           focus:ring-gray-400/50;
   }
+  
+  .btn-ghost {
+    @apply bg-transparent text-gray-600 
+           hover:bg-gray-100 active:bg-gray-200
+           focus:ring-gray-400/50;
+  }
+  
+  .btn-danger {
+    @apply bg-red-500 text-white 
+           hover:bg-red-600 active:bg-red-700
+           focus:ring-red-400/50;
+  }
+  
+  .btn-danger-ghost {
+    @apply bg-transparent text-red-600 
+           hover:bg-red-50 active:bg-red-100
+           focus:ring-red-400/50;
+  }
+  
+  .btn-success {
+    @apply bg-emerald-500 text-white 
+           hover:bg-emerald-600 active:bg-emerald-700
+           focus:ring-emerald-400/50;
+  }
+  
+  .btn-warning {
+    @apply bg-amber-500 text-white 
+           hover:bg-amber-600 active:bg-amber-700
+           focus:ring-amber-400/50;
+  }
+
+  /* ============================================
+     Form Controls - Modern Flat Style
+     ============================================ */
   .input {
-    @apply block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm;
+    @apply block w-full px-3 py-2 text-sm
+           bg-white border border-gray-200 rounded-lg
+           placeholder-gray-400
+           transition-all duration-200 ease-out
+           focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500;
   }
-} 
+  
+  .input-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  
+  /* Custom Checkbox - Flat style */
+  .checkbox-modern {
+    @apply w-4 h-4 rounded
+           border-2 border-gray-300
+           bg-white
+           transition-all duration-200 ease-out
+           checked:bg-primary-600 checked:border-primary-600
+           focus:ring-2 focus:ring-primary-500/20 focus:ring-offset-0
+           cursor-pointer;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  
+  .checkbox-modern:checked {
+    background-image: url("data:image/svg+xml,%3csvg viewBox='0 0 16 16' fill='white' xmlns='http://www.w3.org/2000/svg'%3e%3cpath d='M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z'/%3e%3c/svg%3e");
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+  
+  /* Toggle Switch - Modern style */
+  .toggle-modern {
+    @apply relative w-9 h-5 rounded-full
+           bg-gray-300
+           transition-all duration-200 ease-out
+           cursor-pointer;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  
+  .toggle-modern::after {
+    content: '';
+    @apply absolute top-0.5 left-0.5 w-4 h-4 rounded-full
+           bg-white shadow-sm
+           transition-all duration-200 ease-out;
+  }
+  
+  .toggle-modern:checked {
+    @apply bg-primary-600;
+  }
+  
+  .toggle-modern:checked::after {
+    transform: translateX(16px);
+  }
+
+  /* ============================================
+     Context Menu - Glassmorphism
+     ============================================ */
+  .context-menu {
+    @apply bg-white/90 backdrop-blur-xl
+           rounded-xl shadow-lg shadow-black/10
+           border border-gray-200/60
+           py-1 min-w-[160px]
+           overflow-hidden;
+  }
+  
+  .context-menu-item {
+    @apply w-full px-3 py-2
+           text-left text-sm text-gray-700
+           flex items-center gap-2.5
+           transition-colors duration-150 ease-out
+           hover:bg-gray-50;
+  }
+  
+  .context-menu-item-danger {
+    @apply text-red-600 hover:bg-red-50;
+  }
+  
+  .context-menu-item-icon {
+    @apply w-4 h-4 text-gray-400 flex-shrink-0;
+  }
+  
+  .context-menu-divider {
+    @apply border-t border-gray-100 my-1;
+  }
+
+  /* ============================================
+     Dialog / Modal - Clean Modern Style
+     ============================================ */
+  .dialog-overlay {
+    @apply fixed inset-0 bg-black/40 backdrop-blur-sm
+           flex items-center justify-center
+           z-[9998];
+  }
+  
+  .dialog-box {
+    @apply bg-white rounded-2xl shadow-xl shadow-black/10
+           w-full max-w-md
+           overflow-hidden
+           flex flex-col;
+  }
+  
+  .dialog-header {
+    @apply px-5 py-4 border-b border-gray-100
+           flex items-center gap-3;
+  }
+  
+  .dialog-title {
+    @apply text-base font-semibold text-gray-900;
+  }
+  
+  .dialog-content {
+    @apply px-5 py-4 flex-1 overflow-y-auto;
+  }
+  
+  .dialog-footer {
+    @apply px-5 py-3 bg-gray-50 border-t border-gray-100
+           flex items-center justify-end gap-2;
+  }
+
+  /* ============================================
+     Toast Notifications - Clean Style
+     ============================================ */
+  .toast-modern {
+    @apply bg-white rounded-xl shadow-lg shadow-black/10
+           border border-gray-100
+           p-4 w-80
+           flex items-start gap-3;
+  }
+  
+  .toast-icon {
+    @apply w-5 h-5 flex-shrink-0;
+  }
+  
+  .toast-success .toast-icon {
+    @apply text-emerald-500;
+  }
+  
+  .toast-error .toast-icon {
+    @apply text-red-500;
+  }
+  
+  .toast-warning .toast-icon {
+    @apply text-amber-500;
+  }
+  
+  .toast-info .toast-icon {
+    @apply text-blue-500;
+  }
+  
+  .toast-content {
+    @apply flex-1 min-w-0;
+  }
+  
+  .toast-title {
+    @apply text-sm font-medium text-gray-900;
+  }
+  
+  .toast-message {
+    @apply text-sm text-gray-500 mt-0.5;
+  }
+  
+  .toast-close {
+    @apply p-1 -m-1 rounded-lg text-gray-400
+           hover:text-gray-600 hover:bg-gray-100
+           transition-colors duration-150;
+  }
+
+  /* ============================================
+     List Items - Clean Hover States
+     ============================================ */
+  .list-item {
+    @apply px-3 py-2.5
+           rounded-lg
+           transition-colors duration-150 ease-out
+           hover:bg-gray-50
+           cursor-pointer;
+  }
+  
+  .list-item-active {
+    @apply bg-primary-50 hover:bg-primary-100;
+  }
+  
+  .list-item-selected {
+    @apply bg-primary-100 ring-1 ring-primary-200;
+  }
+
+  /* ============================================
+     Tab Navigation - Pill Style
+     ============================================ */
+  .tab-pill {
+    @apply px-3 py-1.5 text-xs font-medium rounded-lg
+           transition-all duration-200 ease-out
+           text-gray-600 hover:bg-gray-100;
+  }
+  
+  .tab-pill-active {
+    @apply bg-primary-600 text-white hover:bg-primary-700;
+  }
+
+  /* ============================================
+     Cards - Subtle Shadow
+     ============================================ */
+  .card-modern {
+    @apply bg-white rounded-xl
+           border border-gray-100
+           shadow-sm;
+  }
+
+  /* ============================================
+     Badge - Minimal Style
+     ============================================ */
+  .badge-modern {
+    @apply inline-flex items-center px-2 py-0.5
+           text-xs font-medium rounded-full;
+  }
+  
+  .badge-primary {
+    @apply bg-primary-100 text-primary-700;
+  }
+  
+  .badge-gray {
+    @apply bg-gray-100 text-gray-600;
+  }
+  
+  .badge-success {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+  
+  .badge-danger {
+    @apply bg-red-100 text-red-700;
+  }
+}

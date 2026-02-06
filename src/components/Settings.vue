@@ -307,189 +307,213 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <div v-if="show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9998] p-3">
-    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md transform transition-all duration-300 max-h-[90vh] flex flex-col">
-      <!-- Header -->
-      <div class="px-4 py-3 border-b border-gray-200 flex-shrink-0">
-        <div class="flex items-center space-x-2">
-          <div class="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-            </svg>
+  <Transition name="dialog">
+    <div v-if="show" class="dialog-overlay" @click.self="$emit('update:show', false)">
+      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 py-4 border-b border-gray-100 flex-shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+              </svg>
+            </div>
+            <h2 class="text-base font-semibold text-gray-900">设置</h2>
           </div>
-          <h2 class="text-lg font-semibold text-gray-900">设置</h2>
         </div>
-      </div>
-      <!-- Content -->
-      <div class="p-4 flex-1 overflow-y-auto">
-        <form @submit.prevent="handleSubmit" class="space-y-4" id="settings-form">
-          <!-- General Settings Section -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">通用设置</h3>
-            
-            <!-- 最大历史记录数和时间 - 一行两列 -->
-            <div class="grid grid-cols-2 gap-3">
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">最大历史记录数</label>
-            <input
-              v-model.number="settings.max_history_items"
-              type="number"
-              min="1"
-                  class="input input-bordered input-sm"
-            />
-          </div>
-              <div class="space-y-1">
-                <label class="block text-xs font-medium text-gray-700">最大历史记录时间（天）</label>
-            <input
-              v-model.number="settings.max_history_time"
-              type="number"
-              min="1"
-                  class="input input-bordered input-sm"
-            />
+
+        <!-- Content -->
+        <div class="p-5 flex-1 overflow-y-auto">
+          <form @submit.prevent="handleSubmit" class="space-y-6" id="settings-form">
+            <!-- General Settings Section -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">通用设置</h3>
+              
+              <!-- 最大历史记录数和时间 - 一行两列 -->
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">最大历史记录数</label>
+                  <input
+                    v-model.number="settings.max_history_items"
+                    type="number"
+                    min="1"
+                    class="input input-sm"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">历史保留天数</label>
+                  <input
+                    v-model.number="settings.max_history_time"
+                    type="number"
+                    min="1"
+                    class="input input-sm"
+                  />
+                </div>
               </div>
-          </div>
 
-          <!-- 快捷键 -->
-            <div class="space-y-1">
-              <label class="block text-xs font-medium text-gray-700">全局热键</label>
-            <div class="relative">
-              <input
-                ref="hotkeyInputRef"
-                v-model="settings.hotkey"
-                type="text"
-                  :placeholder="isRecording ? 'Press keys...' : `e.g. ${getDefaultModifierKey()}+Shift+V`"
-                :readonly="isRecording"
-                  class="input input-bordered input-sm pr-14"
-                :class="{
-                  'input-info': isRecording
-                }"
-                @keydown="handleKeyDown"
-                @keyup="handleKeyUp"
-                @blur="isRecording && stopRecording()"
-              />
-              <button
-                type="button"
-                @click="isRecording ? stopRecording() : startRecording()"
-                  class="btn btn-xs absolute right-1 top-1/2 transform -translate-y-1/2"
-                :class="{
-                  'btn-error': isRecording,
-                  'btn-primary': !isRecording
-                }"
-              >
-                {{ isRecording ? '停止录制' : '开始录制' }}
-              </button>
-            </div>
-              <p v-if="isRecording && getRecordingPreview()" class="text-xs text-info">
-                Preview: {{ getRecordingPreview() }}
-              </p>
-          </div>
-
-          <!-- 开机自启动 -->
-            <label class="label cursor-pointer bg-base-200 rounded-lg p-2 hover:bg-base-300 transition-colors">
-              <span class="label-text text-xs">开机自启动</span>
-              <input
-                v-model="settings.auto_start"
-                type="checkbox"
-                class="checkbox checkbox-sm checkbox-primary"
-              />
-            </label>
-          </div>
-
-          <!-- Log Management Section -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">日志管理</h3>
-            
-            <div class="grid grid-cols-2 gap-2">
-              <!-- Open Log Folder -->
-              <button
-                type="button"
-                @click="openLogFolder"
-                class="btn btn-sm btn-success btn-outline gap-1"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z"></path>
-                </svg>
-                <span class="text-xs font-medium text-green-700">打开日志文件夹</span>
-              </button>
-
-              <!-- Delete All Logs -->
-              <button
-                type="button"
-                @click="deleteAllLogs"
-                class="btn btn-sm btn-error btn-outline gap-1"
-              >
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-                <span class="text-xs font-medium text-red-700">删除所有日志</span>
-              </button>
-            </div>
-            
-            <div class="p-2 bg-blue-50 border border-blue-200 rounded-md">
-              <div class="flex items-start space-x-2">
-                <svg class="w-3 h-3 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <p class="text-xs text-blue-800">日志文件用于诊断问题。每天会自动轮换并在30天后清理。</p>
+              <!-- 快捷键 -->
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-700">全局热键</label>
+                <div class="relative">
+                  <input
+                    ref="hotkeyInputRef"
+                    v-model="settings.hotkey"
+                    type="text"
+                    :placeholder="isRecording ? 'Press keys...' : `e.g. ${getDefaultModifierKey()}+Shift+V`"
+                    :readonly="isRecording"
+                    class="input input-sm pr-20"
+                    :class="{ 'ring-2 ring-primary-500/20 border-primary-500': isRecording }"
+                    @keydown="handleKeyDown"
+                    @keyup="handleKeyUp"
+                    @blur="isRecording && stopRecording()"
+                  />
+                  <button
+                    type="button"
+                    @click="isRecording ? stopRecording() : startRecording()"
+                    :class="[
+                      'btn btn-xs absolute right-1.5 top-1/2 -translate-y-1/2',
+                      isRecording ? 'btn-danger' : 'btn-secondary'
+                    ]"
+                  >
+                    {{ isRecording ? '停止' : '录制' }}
+                  </button>
+                </div>
+                <p v-if="isRecording && getRecordingPreview()" class="text-xs text-primary-600">
+                  预览: {{ getRecordingPreview() }}
+                </p>
               </div>
-            </div>
-          </div>
 
-          <!-- 版本信息 -->
-          <div class="space-y-3">
-            <h3 class="text-sm font-medium text-gray-900 border-b border-gray-100 pb-1">版本信息</h3>
-            
-            <div class="p-3 bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-md">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                  <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <!-- 开机自启动 -->
+              <label class="flex items-center justify-between p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors duration-200">
+                <span class="text-sm font-medium text-gray-700">开机自启动</span>
+                <input
+                  v-model="settings.auto_start"
+                  type="checkbox"
+                  class="toggle-modern"
+                />
+              </label>
+            </div>
+
+            <!-- Log Management Section -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">日志管理</h3>
+              
+              <div class="grid grid-cols-2 gap-3">
+                <!-- Open Log Folder -->
+                <button
+                  type="button"
+                  @click="openLogFolder"
+                  class="btn btn-sm btn-secondary gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-5l-2-2H5a2 2 0 00-2 2z"></path>
+                  </svg>
+                  打开文件夹
+                </button>
+
+                <!-- Delete All Logs -->
+                <button
+                  type="button"
+                  @click="deleteAllLogs"
+                  class="btn btn-sm btn-danger-ghost gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                  </svg>
+                  删除日志
+                </button>
+              </div>
+              
+              <div class="p-3 bg-primary-50 rounded-xl">
+                <div class="flex items-start gap-2">
+                  <svg class="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                   </svg>
-                  <span class="text-sm font-medium text-gray-700">剪贴板管理器</span>
+                  <p class="text-xs text-primary-700">日志文件用于诊断问题。每天会自动轮换并在30天后清理。</p>
                 </div>
-                <div class="flex items-center space-x-2">
-                   <span class="text-xs text-gray-500">版本</span>
-                   <span class="px-2 py-1 text-xs font-mono font-medium text-blue-700 bg-blue-100 rounded-md">
-                     {{ appVersion }}
-                   </span>
-                 </div>
-               </div>
-             </div>
-          </div>
-        </form>
-      </div>
+              </div>
+            </div>
 
-      <!-- 按钮组 - 固定在底部 -->
-      <div class="flex justify-end space-x-2 px-4 py-3 border-t border-gray-200 bg-gray-50 flex-shrink-0">
-        <button
-          type="button"
-          class="px-3 py-1.5 text-xs font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-all duration-200"
-          @click="$emit('update:show', false)"
-        >
-          取消
-        </button>
-        <button
-          type="submit"
-          form="settings-form"
-          class="px-4 py-1.5 text-xs font-medium text-white bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-md transition-all duration-200 shadow-sm hover:shadow-md"
-        >
-          保存设置
-        </button>
+            <!-- 版本信息 -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">关于</h3>
+              
+              <div class="p-4 bg-gray-50 rounded-xl">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
+                      <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="text-sm font-medium text-gray-900">剪贴板管理器</p>
+                      <p class="text-xs text-gray-500">版本 {{ appVersion }}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            @click="$emit('update:show', false)"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            form="settings-form"
+            class="btn btn-sm btn-primary"
+          >
+            保存设置
+          </button>
+        </div>
       </div>
     </div>
-  </div>
+  </Transition>
 
   <!-- 确认删除弹窗 -->
   <ConfirmDialog
     v-model:show="showConfirmDialog"
     type="danger"
-    title="Delete All Log Files"
+    title="删除所有日志"
     message="确定要删除所有日志文件吗？
 
 此操作不可恢复！"
-    confirm-text="Delete All"
-    cancel-text="Cancel"
+    confirm-text="删除"
+    cancel-text="取消"
     @confirm="confirmDeleteLogs"
   />
 </template>
+
+<style scoped>
+/* Dialog transition */
+.dialog-enter-active,
+.dialog-leave-active {
+  transition: all 0.2s ease-out;
+}
+
+.dialog-enter-from,
+.dialog-leave-to {
+  opacity: 0;
+}
+
+.dialog-enter-from > div,
+.dialog-leave-to > div {
+  transform: scale(0.95);
+  opacity: 0;
+}
+
+.dialog-enter-to > div,
+.dialog-leave-from > div {
+  transform: scale(1);
+  opacity: 1;
+}
+</style>

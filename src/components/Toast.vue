@@ -28,17 +28,15 @@ const getIcon = (type: string) => {
   }
 }
 
-const getAlertClass = (type: string) => {
+const getIconClass = (type: string) => {
   switch (type) {
-    case 'success': return 'alert-success'
-    case 'error': return 'alert-error'
-    case 'warning': return 'alert-warning'
-    case 'info': return 'alert-info'
-    default: return 'alert-info'
+    case 'success': return 'text-emerald-500'
+    case 'error': return 'text-red-500'
+    case 'warning': return 'text-amber-500'
+    case 'info': return 'text-primary-500'
+    default: return 'text-primary-500'
   }
 }
-
-
 
 const removeToast = (id: string) => {
   emit('remove', id)
@@ -50,54 +48,43 @@ watch(() => props.messages, (newMessages) => {
     if (message.duration !== 0) { // duration为0表示不自动移除
       setTimeout(() => {
         removeToast(message.id)
-      }, message.duration || 5000)
+      }, message.duration || 4000)
     }
   })
 }, { immediate: true, deep: true })
 </script>
 
 <template>
-  <div class="toast toast-top toast-end z-[9999]">
+  <div class="fixed top-4 right-4 z-[9999] flex flex-col gap-2">
     <TransitionGroup
       name="toast"
       tag="div"
-      class="space-y-2"
+      class="flex flex-col gap-2"
     >
       <div
         v-for="toast in messages"
         :key="toast.id"
-        :class="[
-          'alert w-80 shadow-lg',
-          getAlertClass(toast.type)
-        ]"
+        class="toast-modern"
       >
-        <div class="flex items-start space-x-3">
-          <div class="flex-shrink-0">
-            <component 
-              :is="getIcon(toast.type)" 
-              class="h-5 w-5"
-            />
-          </div>
-          <div class="flex-1">
-            <p class="text-sm font-medium leading-tight">
-              {{ toast.title }}
-            </p>
-            <p 
-              v-if="toast.message" 
-              class="mt-1 text-sm leading-relaxed opacity-80"
-            >
-              {{ toast.message }}
-            </p>
-          </div>
-          <div class="ml-2 flex-shrink-0 flex">
-            <button
-              @click="removeToast(toast.id)"
-              class="btn btn-sm btn-circle btn-ghost"
-            >
-              <XMarkIcon class="h-3 w-3" />
-            </button>
-          </div>
+        <component 
+          :is="getIcon(toast.type)" 
+          :class="['toast-icon', getIconClass(toast.type)]"
+        />
+        <div class="toast-content">
+          <p class="toast-title">{{ toast.title }}</p>
+          <p 
+            v-if="toast.message" 
+            class="toast-message"
+          >
+            {{ toast.message }}
+          </p>
         </div>
+        <button
+          @click="removeToast(toast.id)"
+          class="toast-close"
+        >
+          <XMarkIcon class="w-4 h-4" />
+        </button>
       </div>
     </TransitionGroup>
   </div>
@@ -106,20 +93,20 @@ watch(() => props.messages, (newMessages) => {
 <style scoped>
 .toast-enter-active,
 .toast-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.2s ease-out;
 }
 
 .toast-enter-from {
   opacity: 0;
-  transform: translateX(100%) scale(0.95);
+  transform: translateX(100%);
 }
 
 .toast-leave-to {
   opacity: 0;
-  transform: translateX(100%) scale(0.95);
+  transform: translateX(100%);
 }
 
 .toast-move {
-  transition: transform 0.3s ease;
+  transition: transform 0.2s ease-out;
 }
 </style>

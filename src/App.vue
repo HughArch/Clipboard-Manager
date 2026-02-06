@@ -3291,19 +3291,19 @@ const checkDataConsistency = () => {
                 <ul 
                   v-if="availableGroups.length > 0"
                   tabindex="0"
-                  class="dropdown-content menu bg-base-100 rounded-box z-50 w-52 p-2 shadow"
+                  class="dropdown-content z-50 w-52 py-1 bg-white/90 backdrop-blur-xl rounded-xl shadow-lg shadow-black/10 border border-gray-200/60"
                 >
                 <li v-for="group in availableGroups" :key="group.id">
                     <button
                       @click="switchToGroup(group.id)"
-                      class="flex items-center space-x-2 text-xs"
+                      class="w-full px-3 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150"
                     >
                       <div 
                         class="w-2.5 h-2.5 rounded-full flex-shrink-0"
                         :style="{ backgroundColor: group.color }"
                       ></div>
                       <span class="truncate">{{ group.name }}</span>
-                      <span class="opacity-50 text-xs ml-auto">({{ group.item_count }})</span>
+                      <span class="text-xs text-gray-400 ml-auto">({{ group.item_count }})</span>
                     </button>
                   </li>
           </ul>
@@ -4504,7 +4504,7 @@ const checkDataConsistency = () => {
       @show-toast="handleShowToast"
     />
     
-    <!-- 右键菜单 -->
+    <!-- 右键菜单 - Modern Flat Design -->
     <div
       v-if="showContextMenu"
       :style="{
@@ -4513,15 +4513,15 @@ const checkDataConsistency = () => {
         top: contextMenuPosition.y + 'px',
         zIndex: 9999
       }"
-      class="bg-white/95 backdrop-blur-xl rounded-lg shadow-xl border border-gray-200/60 py-0.5 min-w-32 overflow-hidden"
+      class="context-menu"
       @click.stop
     >
       <!-- 备注选项 -->
       <button
         @click="handleContextMenuAction('note')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 hover:text-blue-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-blue-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
         </svg>
         <span>备注</span>
@@ -4530,9 +4530,9 @@ const checkDataConsistency = () => {
       <!-- 分组选项 -->
       <button
         @click="handleContextMenuAction('group')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-emerald-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path>
         </svg>
         <span>分组</span>
@@ -4542,20 +4542,22 @@ const checkDataConsistency = () => {
       <button
         v-if="currentTabInfo.isGroupMode"
         @click="handleContextMenuAction('remove-group')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-orange-50 hover:to-amber-50 hover:text-orange-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-orange-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
         </svg>
         <span>移除分组</span>
       </button>
 
+      <div class="context-menu-divider"></div>
+
       <!-- 复制选项 -->
       <button
         @click="handleContextMenuAction('copy')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 hover:text-purple-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-purple-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path>
         </svg>
         <span>复制</span>
@@ -4565,70 +4567,71 @@ const checkDataConsistency = () => {
       <button
         v-if="contextMenuItem?.type === 'file'"
         @click="handleContextMenuAction('open-location')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-cyan-50 hover:to-sky-50 hover:text-cyan-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-cyan-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path>
         </svg>
         <span>打开文件位置</span>
       </button>
 
-
       <!-- 收藏选项 -->
       <button
         @click="handleContextMenuAction('favorite')"
-        class="w-full px-3 py-1 text-left text-xs text-gray-700 hover:bg-gradient-to-r hover:from-yellow-50 hover:to-amber-50 hover:text-yellow-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item"
       >
-        <svg class="w-3 h-3 text-gray-400 group-hover:text-yellow-500 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
         </svg>
         <span>{{ contextMenuItem?.is_favorite ? '取消收藏' : '收藏' }}</span>
       </button>
 
+      <div class="context-menu-divider"></div>
+
       <!-- 删除选项 -->
       <button
         @click="handleContextMenuAction('delete')"
-        class="w-full px-3 py-1 text-left text-xs text-red-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-rose-50 hover:text-red-700 transition-all duration-200 ease-in-out flex items-center space-x-2 group"
+        class="context-menu-item context-menu-item-danger"
       >
-        <svg class="w-3 h-3 text-red-500 group-hover:text-red-600 transition-colors duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
         </svg>
         <span>删除</span>
       </button>
     </div>
 
-    <!-- 备注编辑对话框 -->
+    <!-- 备注编辑对话框 - Modern Flat Design -->
     <div 
       v-if="showNoteDialog"
-      class="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
+      class="dialog-overlay"
       @click="closeNoteDialog"
     >
       <div 
-        class="bg-white rounded shadow-lg p-4 w-80 max-w-[90vw]"
+        class="bg-white rounded-xl shadow-xl shadow-black/10 p-5 w-80 max-w-[90vw]"
         @click.stop
       >
-        <h3 class="text-sm font-medium text-gray-900 mb-3">
+        <h3 class="text-sm font-semibold text-gray-900 mb-4">
           {{ editingNoteItem?.note ? '编辑备注' : '添加备注' }}
         </h3>
         <input
           v-model="noteText"
           type="text"
           placeholder="请输入备注内容..."
-          class="w-full p-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-transparent"
+          class="input input-sm"
           @keydown.esc="closeNoteDialog"
           @keydown.enter="saveNote"
           ref="noteInputRef"
         />
-        <div class="flex justify-end space-x-2 mt-3">
+        <div class="flex justify-end gap-2 mt-4">
           <button
             @click="closeNoteDialog"
-            class="px-3 py-1 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors duration-100"
+            class="btn btn-sm btn-ghost"
           >
             取消
           </button>
           <button
             @click="saveNote"
-            class="px-3 py-1 text-xs text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors duration-100"
+            class="btn btn-sm btn-primary"
           >
             保存
           </button>

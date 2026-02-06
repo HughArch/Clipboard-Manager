@@ -41,20 +41,20 @@ const getTypeConfig = () => {
   switch (props.type) {
     case 'danger':
       return {
-        iconColor: 'text-red-600',
-        bgColor: 'bg-red-100',
-        confirmButtonClass: 'btn-error'
+        iconColor: 'text-red-500',
+        bgColor: 'bg-red-50',
+        confirmButtonClass: 'btn-danger'
       }
     case 'info':
       return {
-        iconColor: 'text-blue-600',
-        bgColor: 'bg-blue-100',
-        confirmButtonClass: 'btn-info'
+        iconColor: 'text-primary-500',
+        bgColor: 'bg-primary-50',
+        confirmButtonClass: 'btn-primary'
       }
     default: // warning
       return {
-        iconColor: 'text-amber-600',
-        bgColor: 'bg-amber-100',
+        iconColor: 'text-amber-500',
+        bgColor: 'bg-amber-50',
         confirmButtonClass: 'btn-warning'
       }
   }
@@ -62,100 +62,101 @@ const getTypeConfig = () => {
 </script>
 
 <template>
-  <dialog 
-    :id="`confirm-dialog-${Math.random().toString(36).substr(2, 9)}`"
-    :class="['modal', { 'modal-open': show }]"
-  >
-    <div class="modal-box w-80 max-w-xs">
-      <!-- Header with Icon -->
-      <div class="flex items-center space-x-3 mb-4">
-        <div :class="['w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0', getTypeConfig().bgColor]">
-          <!-- Danger Icon -->
-          <svg 
-            v-if="type === 'danger'" 
-            :class="getTypeConfig().iconColor" 
-            class="w-4 h-4" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-          </svg>
-          
-          <!-- Info Icon -->
-          <svg 
-            v-else-if="type === 'info'" 
-            :class="getTypeConfig().iconColor" 
-            class="w-4 h-4" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-          </svg>
-          
-          <!-- Warning Icon (default) -->
-          <svg 
-            v-else 
-            :class="getTypeConfig().iconColor" 
-            class="w-4 h-4" 
-            fill="none" 
-            stroke="currentColor" 
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
-          </svg>
+  <Transition name="dialog">
+    <div 
+      v-if="show"
+      class="dialog-overlay"
+      @click="handleBackdropClick"
+    >
+      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-80 max-w-[90vw] overflow-hidden">
+        <!-- Header with Icon -->
+        <div class="px-5 pt-5 pb-4">
+          <div class="flex items-start gap-4">
+            <div :class="['w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', getTypeConfig().bgColor]">
+              <!-- Danger Icon -->
+              <svg 
+                v-if="type === 'danger'" 
+                :class="getTypeConfig().iconColor" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+              </svg>
+              
+              <!-- Info Icon -->
+              <svg 
+                v-else-if="type === 'info'" 
+                :class="getTypeConfig().iconColor" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+              </svg>
+              
+              <!-- Warning Icon (default) -->
+              <svg 
+                v-else 
+                :class="getTypeConfig().iconColor" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+              </svg>
+            </div>
+            <div class="flex-1 pt-1">
+              <h3 class="text-sm font-semibold text-gray-900">{{ title }}</h3>
+              <p class="mt-2 text-sm text-gray-500 leading-relaxed whitespace-pre-line">{{ message }}</p>
+            </div>
+          </div>
         </div>
-        <div class="flex-1">
-          <h3 class="text-sm font-semibold">{{ title }}</h3>
+        
+        <!-- Actions -->
+        <div class="px-5 py-4 bg-gray-50 flex justify-end gap-2">
+          <button
+            @click="handleCancel"
+            class="btn btn-sm btn-ghost"
+          >
+            {{ cancelText }}
+          </button>
+          <button
+            @click="handleConfirm"
+            :class="['btn btn-sm', getTypeConfig().confirmButtonClass]"
+          >
+            {{ confirmText }}
+          </button>
         </div>
-      </div>
-      
-      <!-- Content -->
-      <div class="mb-4">
-        <p class="text-xs leading-relaxed whitespace-pre-line opacity-80">{{ message }}</p>
-      </div>
-      
-      <!-- Actions -->
-      <div class="modal-action">
-        <button
-          @click="handleCancel"
-          class="btn btn-sm btn-ghost"
-        >
-          {{ cancelText }}
-        </button>
-        <button
-          @click="handleConfirm"
-          :class="[
-            'btn btn-sm',
-            getTypeConfig().confirmButtonClass
-          ]"
-        >
-          {{ confirmText }}
-        </button>
       </div>
     </div>
-    
-    <!-- Modal backdrop -->
-    <form method="dialog" class="modal-backdrop" @click="handleBackdropClick">
-      <button type="button">close</button>
-    </form>
-  </dialog>
+  </Transition>
 </template>
 
 <style scoped>
-/* 入场动画 */
-.v-enter-active, .v-leave-active {
-  transition: all 0.3s ease;
+/* Dialog transition */
+.dialog-enter-active,
+.dialog-leave-active {
+  transition: all 0.2s ease-out;
 }
 
-.v-enter-from, .v-leave-to {
+.dialog-enter-from,
+.dialog-leave-to {
   opacity: 0;
-  transform: scale(0.95);
 }
 
-.v-enter-to, .v-leave-from {
-  opacity: 1;
+.dialog-enter-from > div,
+.dialog-leave-to > div {
+  transform: scale(0.95);
+  opacity: 0;
+}
+
+.dialog-enter-to > div,
+.dialog-leave-from > div {
   transform: scale(1);
+  opacity: 1;
 }
 </style>
