@@ -12,6 +12,30 @@ pub struct AppSettings {
     pub max_history_time: u64,
     pub hotkey: String,
     pub auto_start: bool,
+    #[serde(default = "default_lan_queue_role")]
+    pub lan_queue_role: String,
+    #[serde(default)]
+    pub lan_queue_host: String,
+    #[serde(default = "default_lan_queue_port")]
+    pub lan_queue_port: u16,
+    #[serde(default)]
+    pub lan_queue_password: String,
+    #[serde(default = "default_lan_queue_name")]
+    pub lan_queue_name: String,
+    #[serde(default)]
+    pub lan_queue_member_name: String,
+}
+
+fn default_lan_queue_role() -> String {
+    "off".to_string()
+}
+
+fn default_lan_queue_port() -> u16 {
+    21991
+}
+
+fn default_lan_queue_name() -> String {
+    "LAN Queue".to_string()
 }
 
 #[derive(Debug, Serialize, Clone)]

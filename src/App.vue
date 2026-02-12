@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, triggerRef } from 'vue'
 import { MagnifyingGlassIcon, StarIcon, Cog6ToothIcon, TrashIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
@@ -9,6 +9,7 @@ import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
 // import { useImageCache } from './composables/useImageCache' // 暂时注释掉未使用的导入
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
 // 定义类型接口
@@ -41,6 +42,30 @@ interface AppSettings {
   max_history_time: number
   hotkey: string
   auto_start: boolean
+  lan_queue_role: string
+  lan_queue_host: string
+  lan_queue_port: number
+  lan_queue_password: string
+  lan_queue_name: string
+  lan_queue_member_name: string
+}
+
+interface LanClipboardItem {
+  id: string
+  kind: string
+  payload: string
+  timestamp: string
+  origin: string
+  sender_name?: string | null
+}
+
+interface LanQueueStatus {
+  role: string
+  connected: boolean
+  host?: string | null
+  port?: number | null
+  self_id: string
+  self_name?: string | null
 }
 
 // 内存中的历史记录限制 - 更严格的限制
@@ -48,6 +73,7 @@ const MAX_MEMORY_ITEMS = 300
 const MAX_IMAGE_PREVIEW_SIZE = 5 * 1024 * 1024
 const MEMORY_CLEAN_INTERVAL = 30* 60 * 1000
 const HISTORY_CLEAN_INTERVAL = 60 * 60 * 1000
+const LAN_MESSAGE_CACHE_CAPACITY = 512
 
 // 保存设置的函数
 const saveSettings = async (settings: AppSettings) => {
@@ -189,6 +215,7 @@ let unlistenClipboardText: (() => void) | null = null
 let unlistenClipboardImage: (() => void) | null = null
 let unlistenClipboardFiles: (() => void) | null = null
 let unlistenClipboard: (() => Promise<void>) | null = null
+let unlistenLanClipboard: (() => void) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 let historyCleanupInterval: ReturnType<typeof setInterval> | null = null
 
@@ -230,6 +257,181 @@ const calculateHash = async (text: string): Promise<string> => {
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer)
   const hashArray = Array.from(new Uint8Array(hashBuffer))
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+const lanMessageOrder: string[] = []
+const lanMessageSet = new Set<string>()
+
+const hasLanMessageId = (id: string): boolean => lanMessageSet.has(id)
+
+const recordLanMessageId = (id: string) => {
+  if (!id || lanMessageSet.has(id)) return
+  lanMessageSet.add(id)
+  lanMessageOrder.push(id)
+  while (lanMessageOrder.length > LAN_MESSAGE_CACHE_CAPACITY) {
+    const oldest = lanMessageOrder.shift()
+    if (oldest) {
+      lanMessageSet.delete(oldest)
+    }
+  }
+}
+
+const buildLanMetadataObject = (item: LanClipboardItem) => ({
+  lan_origin: item.origin,
+  lan_sender: item.sender_name ?? null,
+  lan_message_id: item.id,
+  lan_kind: item.kind
+})
+
+const buildLanMetadata = (item: LanClipboardItem): string => {
+  return JSON.stringify(buildLanMetadataObject(item))
+}
+
+const mergeMetadata = (base: unknown, extra: Record<string, unknown>): string => {
+  let baseObject: Record<string, unknown> = {}
+  if (base && typeof base === 'string') {
+    try {
+      const parsed = JSON.parse(base)
+      if (parsed && typeof parsed === 'object') {
+        baseObject = parsed as Record<string, unknown>
+      }
+    } catch {
+      baseObject = {}
+    }
+  } else if (base && typeof base === 'object') {
+    baseObject = base as Record<string, unknown>
+  }
+  return JSON.stringify({ ...baseObject, ...extra })
+}
+
+const createLanItemId = (): string => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const buildLanClipboardItem = (kind: string, payload: string): LanClipboardItem => ({
+  id: createLanItemId(),
+  kind,
+  payload,
+  timestamp: new Date().toISOString(),
+  origin: '',
+  sender_name: null
+})
+
+const addHistoryItemToMemory = (newItem: any) => {
+  const existingIndex = clipboardHistory.value.findIndex((historyItem: any) => historyItem.id === newItem.id)
+  if (existingIndex === -1) {
+    clipboardHistory.value.unshift(newItem)
+    triggerRef(clipboardHistory)
+    if (allDataLoaded.value) {
+      allHistoryCache.value.unshift(newItem)
+      triggerRef(allHistoryCache)
+      logger.debug('更新全部数据缓存，添加新条目', { itemId: newItem.id })
+    }
+    if (isInSearchMode) {
+      const originalExistingIndex = originalClipboardHistory.findIndex((origItem: any) => origItem.id === newItem.id)
+      if (originalExistingIndex === -1) {
+        originalClipboardHistory.unshift(newItem)
+      }
+    }
+  }
+  trimMemoryHistory()
+}
+
+const sendLanClipboardItem = async (item: LanClipboardItem) => {
+  try {
+    const status = await invoke<LanQueueStatus>('lan_queue_status')
+    if (!status.connected || status.role === 'off') {
+      return
+    }
+    recordLanMessageId(item.id)
+    await invoke('lan_queue_send', { item })
+  } catch (error) {
+    logger.debug('LAN 队列发送失败或未连接', { error: String(error) })
+  }
+}
+
+const handleLanClipboardItem = async (item: LanClipboardItem) => {
+  if (!item || !item.id || !db) return
+  if (hasLanMessageId(item.id)) return
+  recordLanMessageId(item.id)
+
+  if (item.kind === 'text') {
+    if (!item.payload) return
+    const lanMetadata = buildLanMetadata(item)
+    const entry = {
+      content: item.payload,
+      type: 'text',
+      timestamp: item.timestamp || new Date().toISOString(),
+      isFavorite: false,
+      imagePath: null,
+      sourceAppName: item.sender_name || 'LAN',
+      sourceAppIcon: null,
+      metadata: lanMetadata
+    }
+    try {
+      await db.execute(
+        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.content, entry.type, entry.timestamp, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.metadata]
+      )
+      const rows = await db.select(`SELECT last_insert_rowid() as id`)
+      const id = rows[0]?.id || Date.now()
+      addHistoryItemToMemory(Object.assign({ id }, entry))
+    } catch (error) {
+      logger.error('LAN 文本写入失败', { error: String(error) })
+    }
+    return
+  }
+
+  if (item.kind === 'image') {
+    const rawPayload = item.payload?.startsWith('data:')
+      ? item.payload.split(',')[1] || ''
+      : item.payload
+    if (!rawPayload) return
+
+    let savedImagePath: string | null = null
+    let imageMetadata: any = null
+    try {
+      const resultStr = await invoke('save_clipboard_image', { base64Data: rawPayload }) as string
+      const result = JSON.parse(resultStr)
+      savedImagePath = result.path
+      imageMetadata = result.metadata
+    } catch (error) {
+      logger.error('LAN 图片保存失败', { error: String(error) })
+      return
+    }
+
+    if (!savedImagePath) return
+    const imageHash = await calculateHash(rawPayload)
+    const mergedMetadata = mergeMetadata(imageMetadata, buildLanMetadataObject(item))
+    const entry = {
+      content: savedImagePath,
+      type: 'image',
+      timestamp: item.timestamp || new Date().toISOString(),
+      isFavorite: false,
+      imagePath: savedImagePath,
+      sourceAppName: item.sender_name || 'LAN',
+      sourceAppIcon: null,
+      dataHash: imageHash,
+      metadata: mergedMetadata
+    }
+
+    try {
+      await db.execute(
+        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.content, entry.type, entry.timestamp, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.dataHash, entry.metadata]
+      )
+      const rows = await db.select(`SELECT last_insert_rowid() as id`)
+      const id = rows[0]?.id || Date.now()
+      addHistoryItemToMemory(Object.assign({ id }, entry))
+    } catch (error) {
+      logger.error('LAN 图片写入失败', { error: String(error) })
+    }
+  }
 }
 
 // 计算属性：获取格式化后的预览内容
@@ -2491,6 +2693,11 @@ onMounted(async () => {
     unlistenClipboard = await startListening()
     logger.info('剪贴板监听器已启动（无内存泄漏版本）')
 
+    // 监听 LAN 剪贴板广播
+    unlistenLanClipboard = await listen<LanClipboardItem>('lan-clipboard-item', async (event) => {
+      await handleLanClipboardItem(event.payload)
+    })
+
     // 注册剪贴板文本变化监听器
     unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
@@ -2608,6 +2815,9 @@ onMounted(async () => {
           
           // 立即执行内存清理
           trimMemoryHistory()
+
+          const lanItem = buildLanClipboardItem('text', item.content)
+          await sendLanClipboardItem(lanItem)
         } catch (dbError) {
           logger.error('数据库操作失败', { error: String(dbError) })
         }
@@ -2756,11 +2966,14 @@ onMounted(async () => {
             }
           }
           
-          // 立即执行内存清理
-          trimMemoryHistory()
-        } catch (dbError) {
-          logger.error('数据库操作失败', { error: String(dbError) })
-        }
+            // 立即执行内存清理
+            trimMemoryHistory()
+
+            const lanItem = buildLanClipboardItem('image', base64Image)
+            await sendLanClipboardItem(lanItem)
+          } catch (dbError) {
+            logger.error('数据库操作失败', { error: String(dbError) })
+          }
       } catch (error) {
         logger.error('处理剪贴板图片失败', { error: String(error) })
       } finally {
@@ -3066,6 +3279,11 @@ onUnmounted(() => {
   if (unlistenClipboard) {
     unlistenClipboard()
     unlistenClipboard = null
+  }
+
+  if (unlistenLanClipboard) {
+    unlistenLanClipboard()
+    unlistenLanClipboard = null
   }
   
   // 清理定期内存清理定时器
@@ -4955,3 +5173,4 @@ button {
 }
 
 </style>
+

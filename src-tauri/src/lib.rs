@@ -5,6 +5,7 @@ mod icon_cache;
 mod window_info;
 mod commands;
 mod logging;
+mod lan_queue;
 
 // macOS 专用粘贴模块
 #[cfg(target_os = "macos")]
@@ -260,6 +261,7 @@ pub fn run() {
             
             // 将剪贴板监听器的停止控制保存到应用状态
             app.manage(ClipboardWatcherState { should_stop: should_stop.clone() });
+            app.manage(Arc::new(Mutex::new(lan_queue::LanQueueState::default())));
 
             // macOS 专用：初始化 NSPanel 以支持全屏弹窗
             #[cfg(target_os = "macos")]
@@ -405,7 +407,12 @@ pub fn run() {
             commands::check_files_exist,
             commands::get_file_icon,
             commands::open_file_location,
-            commands::read_text_file
+            commands::read_text_file,
+            lan_queue::lan_queue_start_host,
+            lan_queue::lan_queue_join,
+            lan_queue::lan_queue_leave,
+            lan_queue::lan_queue_send,
+            lan_queue::lan_queue_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

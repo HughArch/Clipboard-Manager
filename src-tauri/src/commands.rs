@@ -1060,6 +1060,12 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
         max_history_time: 30,
         hotkey: "Ctrl+Shift+V".to_string(),
         auto_start: false,
+        lan_queue_role: "off".to_string(),
+        lan_queue_host: String::new(),
+        lan_queue_port: 21991,
+        lan_queue_password: String::new(),
+        lan_queue_name: "LAN Queue".to_string(),
+        lan_queue_member_name: String::new(),
     });
     
     cleanup_expired_data(&app, &settings).await
@@ -2586,4 +2592,3 @@ pub async fn read_text_file(file_path: String) -> Result<String, String> {
     
     Ok(content)
 }
-

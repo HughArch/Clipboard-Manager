@@ -146,6 +146,31 @@
       "commands": ["get_item_note"]
     },
     {
+      "identifier": "allow-lan-queue-start-host",
+      "description": "Allows starting a LAN clipboard queue host",
+      "commands": ["lan_queue_start_host"]
+    },
+    {
+      "identifier": "allow-lan-queue-join",
+      "description": "Allows joining a LAN clipboard queue",
+      "commands": ["lan_queue_join"]
+    },
+    {
+      "identifier": "allow-lan-queue-leave",
+      "description": "Allows leaving a LAN clipboard queue",
+      "commands": ["lan_queue_leave"]
+    },
+    {
+      "identifier": "allow-lan-queue-send",
+      "description": "Allows sending LAN clipboard items",
+      "commands": ["lan_queue_send"]
+    },
+    {
+      "identifier": "allow-lan-queue-status",
+      "description": "Allows reading LAN clipboard queue status",
+      "commands": ["lan_queue_status"]
+    },
+    {
       "identifier": "fs:allow-write-file",
       "allow": [{ "path": "$CONFIG/*" }]
     },

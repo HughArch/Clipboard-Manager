@@ -1,6 +1,7 @@
-<script setup lang="ts">
-import { ref, onMounted } from 'vue'
+﻿<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { logger } from '../composables/useLogger'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { getFormattedVersion } from '../config/version'
@@ -13,6 +14,27 @@ interface AppSettings {
   max_history_time: number
   hotkey: string
   auto_start: boolean
+  lan_queue_role: string
+  lan_queue_host: string
+  lan_queue_port: number
+  lan_queue_password: string
+  lan_queue_name: string
+  lan_queue_member_name: string
+}
+
+interface LanQueueStatus {
+  role: string
+  connected: boolean
+  host?: string | null
+  port?: number | null
+  self_id: string
+  self_name?: string | null
+}
+
+interface LanQueueMember {
+  id: string
+  name?: string | null
+  is_self: boolean
 }
 
 defineProps<{
@@ -29,8 +51,21 @@ const settings = ref<AppSettings>({
   max_history_items: 100,
   max_history_time: 30,
   hotkey: 'Ctrl+Shift+V',
-  auto_start: false
+  auto_start: false,
+  lan_queue_role: 'off',
+  lan_queue_host: '',
+  lan_queue_port: 21991,
+  lan_queue_password: '',
+  lan_queue_name: '',
+  lan_queue_member_name: ''
 })
+
+const lanStatus = ref<LanQueueStatus | null>(null)
+const lanMembers = ref<LanQueueMember[]>([])
+const lanBusy = ref(false)
+
+let unlistenLanStatus: (() => void) | null = null
+let unlistenLanMembers: (() => void) | null = null
 
 // 键盘录制状态
 const isRecording = ref(false)
@@ -231,6 +266,31 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to load settings:', error)
   }
+
+  try {
+    lanStatus.value = await invoke<LanQueueStatus>('lan_queue_status')
+  } catch (error) {
+    logger.warn('获取 LAN 队列状态失败', { error: String(error) })
+  }
+
+  unlistenLanStatus = await listen<LanQueueStatus>('lan-queue-status', (event) => {
+    lanStatus.value = event.payload
+  })
+
+  unlistenLanMembers = await listen<LanQueueMember[]>('lan-queue-members', (event) => {
+    lanMembers.value = event.payload || []
+  })
+})
+
+onUnmounted(() => {
+  if (unlistenLanStatus) {
+    unlistenLanStatus()
+    unlistenLanStatus = null
+  }
+  if (unlistenLanMembers) {
+    unlistenLanMembers()
+    unlistenLanMembers = null
+  }
 })
 
 // 解析快捷键冲突错误
@@ -302,6 +362,54 @@ const handleSubmit = async () => {
       message: '设置无法保存，请重试。',
       duration: 5000
     })
+  }
+}
+
+const startLanHost = async () => {
+  lanBusy.value = true
+  try {
+    lanStatus.value = await invoke<LanQueueStatus>('lan_queue_start_host', {
+      port: settings.value.lan_queue_port,
+      password: settings.value.lan_queue_password,
+      queue_name: settings.value.lan_queue_name || null,
+      member_name: settings.value.lan_queue_member_name || null
+    })
+    emit('show-toast', { type: 'success', title: '队列已创建', message: '主机监听已启动', duration: 3000 })
+  } catch (error) {
+    emit('show-toast', { type: 'error', title: '创建失败', message: String(error), duration: 5000 })
+  } finally {
+    lanBusy.value = false
+  }
+}
+
+const joinLanQueue = async () => {
+  lanBusy.value = true
+  try {
+    lanStatus.value = await invoke<LanQueueStatus>('lan_queue_join', {
+      host: settings.value.lan_queue_host,
+      port: settings.value.lan_queue_port,
+      password: settings.value.lan_queue_password,
+      member_name: settings.value.lan_queue_member_name || null
+    })
+    emit('show-toast', { type: 'success', title: '加入成功', message: '已加入局域网队列', duration: 3000 })
+  } catch (error) {
+    emit('show-toast', { type: 'error', title: '加入失败', message: String(error), duration: 5000 })
+  } finally {
+    lanBusy.value = false
+  }
+}
+
+const leaveLanQueue = async () => {
+  lanBusy.value = true
+  try {
+    await invoke('lan_queue_leave')
+    lanStatus.value = await invoke<LanQueueStatus>('lan_queue_status')
+    lanMembers.value = []
+    emit('show-toast', { type: 'success', title: '已退出队列', message: 'LAN 队列已断开', duration: 3000 })
+  } catch (error) {
+    emit('show-toast', { type: 'error', title: '退出失败', message: String(error), duration: 5000 })
+  } finally {
+    lanBusy.value = false
   }
 }
 </script>
@@ -393,6 +501,105 @@ const handleSubmit = async () => {
                   class="toggle-modern"
                 />
               </label>
+            </div>
+
+            <!-- LAN Queue Section -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">局域网队列</h3>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">队列名称（主机）</label>
+                  <input
+                    v-model="settings.lan_queue_name"
+                    type="text"
+                    placeholder="例如：设计组"
+                    class="input input-sm"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">成员名称</label>
+                  <input
+                    v-model="settings.lan_queue_member_name"
+                    type="text"
+                    placeholder="例如：Alice"
+                    class="input input-sm"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">主机地址</label>
+                  <input
+                    v-model="settings.lan_queue_host"
+                    type="text"
+                    placeholder="192.168.1.2"
+                    class="input input-sm"
+                  />
+                </div>
+                <div class="space-y-1.5">
+                  <label class="block text-sm font-medium text-gray-700">端口</label>
+                  <input
+                    v-model.number="settings.lan_queue_port"
+                    type="number"
+                    min="1"
+                    max="65535"
+                    class="input input-sm"
+                  />
+                </div>
+              </div>
+
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-gray-700">队列密码</label>
+                <input
+                  v-model="settings.lan_queue_password"
+                  type="password"
+                  placeholder="加入队列需要密码"
+                  class="input input-sm"
+                />
+              </div>
+
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm btn-primary" :disabled="lanBusy" @click="startLanHost">
+                  创建队列
+                </button>
+                <button type="button" class="btn btn-sm btn-secondary" :disabled="lanBusy" @click="joinLanQueue">
+                  加入队列
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" :disabled="lanBusy" @click="leaveLanQueue">
+                  退出队列
+                </button>
+              </div>
+
+              <div class="p-3 bg-gray-50 rounded-xl">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-gray-700">状态</p>
+                    <p class="text-xs text-gray-500">
+                      {{ lanStatus?.connected ? '已连接' : '未连接' }}
+                      <span v-if="lanStatus?.role">· {{ lanStatus?.role }}</span>
+                      <span v-if="lanStatus?.host && lanStatus?.port">· {{ lanStatus.host }}:{{ lanStatus.port }}</span>
+                    </p>
+                  </div>
+                  <span v-if="lanBusy" class="text-xs text-primary-600">处理中…</span>
+                </div>
+              </div>
+
+              <div class="space-y-2">
+                <p class="text-sm font-medium text-gray-700">成员列表</p>
+                <div v-if="lanMembers.length === 0" class="text-xs text-gray-500">暂无成员</div>
+                <div v-else class="space-y-1">
+                  <div
+                    v-for="member in lanMembers"
+                    :key="member.id"
+                    class="flex items-center justify-between text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-1.5"
+                  >
+                    <span>{{ member.name || member.id }}</span>
+                    <span v-if="member.is_self" class="text-xs text-primary-600">我</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <!-- Log Management Section -->
@@ -517,3 +724,4 @@ const handleSubmit = async () => {
   opacity: 1;
 }
 </style>
+
