@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{timeout, Duration};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use uuid::Uuid;
 use sha2::{Digest, Sha256};
 
@@ -34,6 +35,7 @@ pub struct LanQueueStatus {
 pub struct LanQueueMember {
     pub id: String,
     pub name: Option<String>,
+    pub addr: Option<String>,
     pub is_self: bool,
 }
 
@@ -105,6 +107,7 @@ impl DedupCache {
 struct PeerHandle {
     sender: mpsc::UnboundedSender<Vec<u8>>,
     name: Option<String>,
+    addr: Option<String>,
 }
 
 #[derive(Debug)]
@@ -116,7 +119,9 @@ pub struct LanQueueState {
     self_name: Option<String>,
     password_hash: Option<String>,
     host_listener: Option<tokio::task::JoinHandle<()>>,
+    host_shutdown: Option<broadcast::Sender<()>>,
     client_task: Option<tokio::task::JoinHandle<()>>,
+    client_write_task: Option<tokio::task::JoinHandle<()>>,
     client_sender: Option<mpsc::UnboundedSender<Vec<u8>>>,
     peers: HashMap<String, PeerHandle>,
     dedup: DedupCache,
@@ -132,7 +137,9 @@ impl Default for LanQueueState {
             self_name: None,
             password_hash: None,
             host_listener: None,
+            host_shutdown: None,
             client_task: None,
+            client_write_task: None,
             client_sender: None,
             peers: HashMap::new(),
             dedup: DedupCache::new(DEDUP_CAPACITY),
@@ -145,6 +152,17 @@ fn hash_password(password: &str) -> String {
     hasher.update(password.as_bytes());
     let digest = hasher.finalize();
     hex::encode(digest)
+}
+
+fn normalize_name(name: Option<String>) -> Option<String> {
+    name.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 fn current_status(state: &LanQueueState) -> LanQueueStatus {
@@ -167,12 +185,14 @@ fn make_members(state: &LanQueueState) -> Vec<LanQueueMember> {
     members.push(LanQueueMember {
         id: state.self_id.clone(),
         name: state.self_name.clone(),
+        addr: None,
         is_self: true,
     });
     for (id, peer) in &state.peers {
         members.push(LanQueueMember {
             id: id.clone(),
             name: peer.name.clone(),
+            addr: peer.addr.clone(),
             is_self: false,
         });
     }
@@ -230,7 +250,9 @@ async fn handle_host_connection(
     app: AppHandle,
     state: Arc<Mutex<LanQueueState>>,
     mut stream: TcpStream,
+    mut shutdown_rx: broadcast::Receiver<()>,
 ) {
+    let peer_addr = stream.peer_addr().ok().map(|addr| addr.to_string());
     let auth_payload = match read_frame(&mut stream).await {
         Ok(payload) => payload,
         Err(_) => return,
@@ -249,7 +271,7 @@ async fn handle_host_connection(
             let hash = hash_password(&password);
             let state_guard = state.lock().await;
             let ok = state_guard.password_hash.as_deref() == Some(hash.as_str());
-            (client_id, client_name, ok)
+            (client_id, normalize_name(client_name), ok)
         }
         _ => return,
     };
@@ -280,6 +302,7 @@ async fn handle_host_connection(
             PeerHandle {
                 sender: tx,
                 name: client_name.clone(),
+                addr: peer_addr.clone(),
             },
         );
         broadcast_members_to_peers(&mut state_guard).await;
@@ -288,9 +311,16 @@ async fn handle_host_connection(
 
     let mut read_half = read_half;
     loop {
-        let payload = match read_frame(&mut read_half).await {
-            Ok(payload) => payload,
-            Err(_) => break,
+        let payload = tokio::select! {
+            result = read_frame(&mut read_half) => {
+                match result {
+                    Ok(payload) => payload,
+                    Err(_) => break,
+                }
+            }
+            _ = shutdown_rx.recv() => {
+                break;
+            }
         };
         let envelope: LanQueueEnvelope = match serde_json::from_slice(&payload) {
             Ok(value) => value,
@@ -358,8 +388,10 @@ async fn handle_client_stream(
 
     let mut state_guard = state.lock().await;
     state_guard.client_sender = None;
+    state_guard.client_write_task = None;
     state_guard.role = LanQueueRole::Off;
     let _ = app.emit("lan-queue-status", current_status(&state_guard));
+    let _ = app.emit("lan-queue-members", Vec::<LanQueueMember>::new());
 }
 
 #[tauri::command]
@@ -376,7 +408,13 @@ pub async fn lan_queue_start_host(
     if let Some(handle) = state_guard.host_listener.take() {
         handle.abort();
     }
+    if let Some(shutdown) = state_guard.host_shutdown.take() {
+        let _ = shutdown.send(());
+    }
     if let Some(handle) = state_guard.client_task.take() {
+        handle.abort();
+    }
+    if let Some(handle) = state_guard.client_write_task.take() {
         handle.abort();
     }
     state_guard.client_sender = None;
@@ -384,7 +422,7 @@ pub async fn lan_queue_start_host(
     state_guard.role = LanQueueRole::Host;
     state_guard.host = Some("0.0.0.0".to_string());
     state_guard.port = Some(port);
-    state_guard.self_name = member_name.clone().or(queue_name);
+    state_guard.self_name = normalize_name(member_name.clone().or(queue_name));
     state_guard.password_hash = Some(hash_password(&password));
 
     let listener = TcpListener::bind(("0.0.0.0", port))
@@ -393,13 +431,16 @@ pub async fn lan_queue_start_host(
 
     let app_handle = app.clone();
     let state_arc = state.inner().clone();
+    let (shutdown_tx, _) = broadcast::channel(1);
+    state_guard.host_shutdown = Some(shutdown_tx.clone());
     let listener_handle = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {
                     let app_handle = app_handle.clone();
                     let state_clone = Arc::clone(&state_arc);
-                    tokio::spawn(handle_host_connection(app_handle, state_clone, stream));
+                    let shutdown_rx = shutdown_tx.subscribe();
+                    tokio::spawn(handle_host_connection(app_handle, state_clone, stream, shutdown_rx));
                 }
                 Err(_) => break,
             }
@@ -427,7 +468,13 @@ pub async fn lan_queue_join(
     if let Some(handle) = state_guard.host_listener.take() {
         handle.abort();
     }
+    if let Some(shutdown) = state_guard.host_shutdown.take() {
+        let _ = shutdown.send(());
+    }
     if let Some(handle) = state_guard.client_task.take() {
+        handle.abort();
+    }
+    if let Some(handle) = state_guard.client_write_task.take() {
         handle.abort();
     }
     state_guard.client_sender = None;
@@ -435,12 +482,14 @@ pub async fn lan_queue_join(
     state_guard.role = LanQueueRole::Client;
     state_guard.host = Some(host.clone());
     state_guard.port = Some(port);
-    state_guard.self_name = member_name;
+    state_guard.self_name = normalize_name(member_name);
     state_guard.password_hash = None;
 
-    let mut stream = TcpStream::connect((host.as_str(), port))
-        .await
-        .map_err(|e| format!("Failed to connect: {}", e))?;
+    let mut stream = match timeout(Duration::from_secs(3), TcpStream::connect((host.as_str(), port))).await {
+        Ok(Ok(stream)) => stream,
+        Ok(Err(e)) => return Err(format!("Failed to connect: {}", e)),
+        Err(_) => return Err("Connection timeout (3s)".to_string()),
+    };
 
     let auth = LanQueueEnvelope::AuthRequest {
         password,
@@ -448,9 +497,14 @@ pub async fn lan_queue_join(
         client_name: state_guard.self_name.clone(),
     };
     let auth_payload = serde_json::to_vec(&auth).map_err(|e| e.to_string())?;
-    stream.write_all(&build_frame(&auth_payload)).await.map_err(|e| e.to_string())?;
+    timeout(Duration::from_secs(3), stream.write_all(&build_frame(&auth_payload)))
+        .await
+        .map_err(|_| "Connection timeout (3s)".to_string())?
+        .map_err(|e| e.to_string())?;
 
-    let response_payload = read_frame(&mut stream).await?;
+    let response_payload = timeout(Duration::from_secs(3), read_frame(&mut stream))
+        .await
+        .map_err(|_| "Connection timeout (3s)".to_string())??;
     let response: LanQueueEnvelope = serde_json::from_slice(&response_payload).map_err(|e| e.to_string())?;
     match response {
         LanQueueEnvelope::AuthResponse { ok, reason } => {
@@ -463,8 +517,9 @@ pub async fn lan_queue_join(
 
     let (read_half, write_half) = stream.into_split();
     let (tx, rx) = mpsc::unbounded_channel();
-    tokio::spawn(write_frames(write_half, rx));
+    let write_handle = tokio::spawn(write_frames(write_half, rx));
     state_guard.client_sender = Some(tx);
+    state_guard.client_write_task = Some(write_handle);
 
     let app_handle = app.clone();
     let state_arc = state.inner().clone();
@@ -484,7 +539,13 @@ pub async fn lan_queue_leave(app: AppHandle) -> Result<(), String> {
     if let Some(handle) = state_guard.host_listener.take() {
         handle.abort();
     }
+    if let Some(shutdown) = state_guard.host_shutdown.take() {
+        let _ = shutdown.send(());
+    }
     if let Some(handle) = state_guard.client_task.take() {
+        handle.abort();
+    }
+    if let Some(handle) = state_guard.client_write_task.take() {
         handle.abort();
     }
     state_guard.client_sender = None;

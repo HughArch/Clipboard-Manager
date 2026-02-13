@@ -350,6 +350,10 @@ pub fn run() {
                                 toggle_window_visibility(app);
                             }
                             "quit" => {
+                                let app_handle = app.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = lan_queue::lan_queue_leave(app_handle).await;
+                                });
                                 // 停止剪贴板监听器
                                 should_stop_clone.store(true, Ordering::Relaxed);
                                 tracing::info!("正在停止剪贴板监听器...");
@@ -367,6 +371,14 @@ pub fn run() {
                 .build(app)?;
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let app_handle = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = lan_queue::lan_queue_leave(app_handle).await;
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet,

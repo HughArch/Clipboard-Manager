@@ -5,6 +5,7 @@ import { StarIcon as StarIconSolid } from '@heroicons/vue/24/solid'
 import Settings from './components/Settings.vue'
 import Toast from './components/Toast.vue'
 import ConfirmDialog from './components/ConfirmDialog.vue'
+import LanQueueManager from './components/LanQueueManager.vue'
 import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
 // import { useImageCache } from './composables/useImageCache' // 暂时注释掉未使用的导入
@@ -120,6 +121,7 @@ const clipboardHistory = shallowRef<any[]>([])
 const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
+const showLanQueueManager = ref(false)
 const selectedTabIndex = ref(0)
 const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
 const showGroupDropdown = ref(false) // 是否显示分组下拉菜单
@@ -431,6 +433,46 @@ const handleLanClipboardItem = async (item: LanClipboardItem) => {
     } catch (error) {
       logger.error('LAN 图片写入失败', { error: String(error) })
     }
+  }
+}
+
+const restoreLanQueueOnStartup = async () => {
+  try {
+    const settings = await invoke<AppSettings>('load_settings')
+    const role = settings.lan_queue_role
+    const memberName = settings.lan_queue_member_name?.trim() || null
+
+    if (role === 'host') {
+      if (!settings.lan_queue_password) {
+        logger.warn('启动恢复 LAN 主机跳过：缺少密码')
+        return
+      }
+      await invoke('lan_queue_start_host', {
+        port: settings.lan_queue_port || 21991,
+        password: settings.lan_queue_password,
+        queueName: null,
+        memberName
+      })
+      logger.info('启动恢复 LAN 主机成功')
+      return
+    }
+
+    if (role === 'client') {
+      if (!settings.lan_queue_host || !settings.lan_queue_password) {
+        logger.warn('启动恢复 LAN 客户端跳过：缺少主机或密码')
+        return
+      }
+      await invoke('lan_queue_join', {
+        host: settings.lan_queue_host,
+        port: settings.lan_queue_port || 21991,
+        password: settings.lan_queue_password,
+        memberName
+      })
+      logger.info('启动恢复 LAN 客户端成功')
+    }
+  } catch (error) {
+    logger.warn('启动恢复 LAN 队列失败', { error: String(error) })
+    showWarning('LAN 队列恢复失败', String(error), 4000)
   }
 }
 
@@ -2698,6 +2740,9 @@ onMounted(async () => {
       await handleLanClipboardItem(event.payload)
     })
 
+    // 启动后按上次状态自动恢复 LAN 队列（主机/客户端）
+    await restoreLanQueueOnStartup()
+
     // 注册剪贴板文本变化监听器
     unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
@@ -4719,6 +4764,12 @@ const checkDataConsistency = () => {
     <Settings 
       v-model:show="showSettings" 
       @save-settings="handleSaveSettings"
+      @show-toast="handleShowToast"
+      @open-lan-queue="showLanQueueManager = true"
+    />
+
+    <LanQueueManager
+      v-model:show="showLanQueueManager"
       @show-toast="handleShowToast"
     />
     
