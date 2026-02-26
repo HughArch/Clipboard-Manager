@@ -2092,20 +2092,25 @@ const loadTabData = async (tabIndex: number) => {
   const isFavoritesTab = tabIndex === 3
   const isAllTab = tabIndex === 0
   
-  // 如果是“全部”标签页，或者还没有加载过全部数据，则从数据库加载
-  if (isAllTab || !allDataLoaded.value) {
-    logger.info('从数据库加载数据', { 
-      reason: isAllTab ? '全部标签页' : '未加载过全部数据',
-      tabIndex 
-    })
-    await loadRecentHistory()
-    
-    // 如果是“全部”标签页，缓存数据
-    if (isAllTab) {
+  // “全部”标签页优先走内存缓存，避免每次切换都查库导致可见卡顿
+  if (isAllTab) {
+    if (!allDataLoaded.value) {
+      logger.info('首次进入全部标签页，从数据库加载', { tabIndex })
+      await loadRecentHistory()
       allHistoryCache.value = [...clipboardHistory.value]
       allDataLoaded.value = true
       logger.info('已缓存全部数据', { count: allHistoryCache.value.length })
+    } else {
+      logger.info('全部标签页使用内存缓存', { cacheSize: allHistoryCache.value.length })
+      clipboardHistory.value = [...allHistoryCache.value]
+      triggerRef(clipboardHistory)
+      currentOffset.value = clipboardHistory.value.length
+      hasMoreData.value = false
+      selectedItem.value = null
     }
+  } else if (!allDataLoaded.value) {
+    logger.info('未加载过全部数据，从数据库加载', { tabIndex })
+    await loadRecentHistory()
   } else {
     // 收藏标签页改为使用数据库查询，确保展示数据库中的所有收藏并支持分页
     if (isFavoritesTab) {
