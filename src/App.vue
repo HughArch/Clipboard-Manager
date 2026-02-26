@@ -3656,8 +3656,17 @@ const checkDataConsistency = () => {
                         <div v-else-if="item.type === 'file'" class="mt-0.5 flex items-center space-x-2">
                           <!-- 文件图标 -->
                           <div class="flex-shrink-0">
+                            <!-- 图片文件图标：优先于系统文件图标 -->
+                            <div
+                              v-if="isImageFile(parseFileMetadata(item.metadata)?.files?.[0]?.extension || '')"
+                              class="w-8 h-8 bg-blue-50 rounded flex items-center justify-center border border-blue-100"
+                            >
+                              <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16l4.586-4.586a2 2 0 012.828 0L15 16m-2-2l1.586-1.586a2 2 0 012.828 0L21 14m-6-8h.01M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                              </svg>
+                            </div>
                             <img
-                              v-if="item.thumbnailData"
+                              v-else-if="item.thumbnailData"
                               :src="item.thumbnailData"
                               alt="File icon"
                               class="w-8 h-8 object-contain"
