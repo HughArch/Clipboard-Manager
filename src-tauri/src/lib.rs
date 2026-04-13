@@ -255,6 +255,7 @@ pub fn run() {
             })
             .build()
         )
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_handle = app.handle().clone();
             let should_stop = start_clipboard_watcher(app_handle.clone());
@@ -424,7 +425,10 @@ pub fn run() {
             lan_queue::lan_queue_join,
             lan_queue::lan_queue_leave,
             lan_queue::lan_queue_send,
-            lan_queue::lan_queue_status
+            lan_queue::lan_queue_status,
+            // 数据导入导出命令
+            commands::export_data,
+            commands::import_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

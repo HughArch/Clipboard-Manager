@@ -1,6 +1,7 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { save, open } from '@tauri-apps/plugin-dialog'
 import { logger } from '../composables/useLogger'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { getFormattedVersion } from '../config/version'
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   (e: 'save-settings', settings: AppSettings): void
   (e: 'show-toast', toast: { type: 'success' | 'error' | 'warning' | 'info', title: string, message?: string, duration?: number }): void
   (e: 'open-lan-queue'): void
+  (e: 'data-imported'): void
 }>()
 
 const settings = ref<AppSettings>({
@@ -52,6 +54,76 @@ const hotkeyInputRef = ref<HTMLInputElement | null>(null)
 
 // 确认弹窗状态
 const showConfirmDialog = ref(false)
+
+// 导入导出状态
+const isExporting = ref(false)
+const isImporting = ref(false)
+const showImportModeDialog = ref(false)
+const showExportConfirmDialog = ref(false)
+
+// 导出数据
+const handleExport = () => {
+  showExportConfirmDialog.value = true
+}
+
+const confirmExport = async () => {
+  try {
+    const date = new Date().toISOString().slice(0, 10)
+    const filePath = await save({
+      defaultPath: `clipboard_backup_${date}.zip`,
+      filters: [{ name: 'ZIP', extensions: ['zip'] }]
+    })
+
+    if (!filePath) return
+
+    isExporting.value = true
+    await invoke('export_data', { exportPath: filePath })
+    emit('show-toast', { type: 'success', title: '导出成功', message: '数据已成功导出', duration: 3000 })
+  } catch (error: any) {
+    if (String(error).includes('用户取消')) return
+    logger.error('导出数据失败', { error: String(error) })
+    emit('show-toast', { type: 'error', title: '导出失败', message: String(error), duration: 5000 })
+  } finally {
+    isExporting.value = false
+  }
+}
+
+// 导入数据 - 先选择文件
+const handleImport = async () => {
+  try {
+    const filePath = await open({
+      filters: [{ name: 'ZIP', extensions: ['zip'] }],
+      multiple: false
+    })
+
+    if (!filePath) return
+
+    // 保存选择的文件路径，然后弹出模式选择对话框
+    selectedImportPath.value = filePath as string
+    showImportModeDialog.value = true
+  } catch (error: any) {
+    if (String(error).includes('用户取消')) return
+    logger.error('选择导入文件失败', { error: String(error) })
+  }
+}
+
+const selectedImportPath = ref('')
+
+// 执行导入
+const doImport = async (mode: string) => {
+  showImportModeDialog.value = false
+  try {
+    isImporting.value = true
+    await invoke('import_data', { importPath: selectedImportPath.value, mode })
+    emit('show-toast', { type: 'success', title: '导入成功', message: '数据已成功导入', duration: 3000 })
+    emit('data-imported')
+  } catch (error: any) {
+    logger.error('导入数据失败', { error: String(error) })
+    emit('show-toast', { type: 'error', title: '导入失败', message: String(error), duration: 5000 })
+  } finally {
+    isImporting.value = false
+  }
+}
 
 // 打开日志文件夹
 const openLogFolder = async () => {
@@ -427,6 +499,48 @@ const handleSubmit = async () => {
               </div>
             </div>
 
+            <!-- 数据管理 Section -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">数据管理</h3>
+
+              <div class="grid grid-cols-2 gap-3">
+                <!-- 导出按钮 -->
+                <button
+                  type="button"
+                  @click="handleExport"
+                  :disabled="isExporting"
+                  class="btn btn-sm btn-secondary gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                  </svg>
+                  {{ isExporting ? '导出中...' : '导出数据' }}
+                </button>
+
+                <!-- 导入按钮 -->
+                <button
+                  type="button"
+                  @click="handleImport"
+                  :disabled="isImporting"
+                  class="btn btn-sm btn-secondary gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                  </svg>
+                  {{ isImporting ? '导入中...' : '导入数据' }}
+                </button>
+              </div>
+
+              <div class="p-3 bg-primary-50 rounded-xl">
+                <div class="flex items-start gap-2">
+                  <svg class="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                  </svg>
+                  <p class="text-xs text-primary-700">导出数据将包含所有历史记录、分组、收藏和图片。可用于在不同电脑之间迁移数据。</p>
+                </div>
+              </div>
+            </div>
+
             <!-- Log Management Section -->
             <div class="space-y-4">
               <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">日志管理</h3>
@@ -523,6 +637,86 @@ const handleSubmit = async () => {
     cancel-text="取消"
     @confirm="confirmDeleteLogs"
   />
+
+  <!-- 导出确认弹窗 -->
+  <ConfirmDialog
+    v-model:show="showExportConfirmDialog"
+    type="info"
+    title="导出数据"
+    message="将导出所有剪贴板历史记录、分组和图片数据为 ZIP 文件。
+
+导出可能需要一些时间，取决于数据量。"
+    confirm-text="导出"
+    cancel-text="取消"
+    @confirm="confirmExport"
+  />
+
+  <!-- 导入模式选择弹窗 -->
+  <Transition name="dialog">
+    <div v-if="showImportModeDialog" class="dialog-overlay" @click.self="showImportModeDialog = false">
+      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-80 max-w-[90vw] overflow-hidden">
+        <!-- Header -->
+        <div class="px-5 pt-5 pb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+              </svg>
+            </div>
+            <h3 class="text-base font-semibold text-gray-900">导入数据</h3>
+          </div>
+          <p class="mt-3 text-sm text-gray-600">请选择导入方式：</p>
+        </div>
+
+        <!-- Options -->
+        <div class="px-5 pb-5 space-y-3">
+          <button
+            @click="doImport('merge')"
+            class="w-full p-3 text-left rounded-xl border-2 border-gray-100 hover:border-primary-300 hover:bg-primary-50 transition-all duration-200"
+          >
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                </svg>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-gray-900">合并数据</p>
+                <p class="text-xs text-gray-500">保留现有数据，自动跳过重复项</p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            @click="doImport('replace')"
+            class="w-full p-3 text-left rounded-xl border-2 border-gray-100 hover:border-red-300 hover:bg-red-50 transition-all duration-200"
+          >
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+              </div>
+              <div>
+                <p class="text-sm font-medium text-gray-900">替换数据</p>
+                <p class="text-xs text-gray-500">清空现有数据，使用导入数据</p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        <!-- Cancel -->
+        <div class="px-5 py-3 bg-gray-50 border-t border-gray-100">
+          <button
+            @click="showImportModeDialog = false"
+            class="btn btn-sm btn-ghost w-full"
+          >
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>

@@ -1,6 +1,6 @@
 [package]
 name = "Clipboard-Manager"
-version = "1.1.16"
+version = "1.1.17"
 description = "A app record clipboard history"
 authors = ["Hugh"]
 edition = "2024"
@@ -48,6 +48,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time",
 tracing-appender = "0.2"
 backtrace = "0.3"
 arboard = "3.6.1"
+zip = "2"
+tempfile = "3"
+tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = [

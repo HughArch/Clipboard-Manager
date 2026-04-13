@@ -116,6 +116,21 @@ const handleShowToast = (toast: { type: 'success' | 'error' | 'warning' | 'info'
   }
 }
 
+// 处理数据导入完成
+const handleDataImported = async () => {
+  try {
+    // 重置缓存
+    allHistoryCache.value = []
+    allDataLoaded.value = false
+    // 重新加载数据
+    await loadRecentHistory()
+    await loadGroups()
+    logger.info('数据导入后刷新完成')
+  } catch (error) {
+    logger.error('数据导入后刷新失败', { error: String(error) })
+  }
+}
+
 // Mock data - 使用 shallowRef 优化大量数据的性能
 const clipboardHistory = shallowRef<any[]>([])
 const searchQuery = ref('')
@@ -815,10 +830,22 @@ const resetToDefault = async () => {
 
   // 清理搜索框内容
   searchQuery.value = ''
-  
+
+  // 记住当前是否在非"全部"标签页，用于决定是否需要重新加载数据
+  const needReloadData = selectedTabIndex.value !== 0 || selectedGroupId.value !== null
+
+  // 重置标签页到"全部"
+  if (needReloadData) {
+    selectedTabIndex.value = 0
+    selectedGroupId.value = null
+  }
+
   // 如果在搜索模式，退出搜索模式
   if (isInSearchMode) {
     await exitSearchMode()
+  } else if (needReloadData) {
+    // 从其他标签页切回"全部"时，需要重新加载数据
+    await loadTabData(0)
   }
 
   // 强制滚动容器到顶部
@@ -4775,11 +4802,12 @@ const checkDataConsistency = () => {
     </div>
 
     <!-- Settings Modal -->
-    <Settings 
-      v-model:show="showSettings" 
+    <Settings
+      v-model:show="showSettings"
       @save-settings="handleSaveSettings"
       @show-toast="handleShowToast"
       @open-lan-queue="showLanQueueManager = true"
+      @data-imported="handleDataImported"
     />
 
     <LanQueueManager

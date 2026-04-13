@@ -1,8 +1,9 @@
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Emitter};
 use crate::types::{AppSettings, DatabaseState};
 use crate::logging;
 use std::fs;
 use std::path::PathBuf;
+use std::io::{Write, Read};
 use dirs_next::config_dir;
 use base64::{engine::general_purpose, Engine as _};
 use tauri_plugin_global_shortcut::{self, GlobalShortcutExt, Shortcut};
@@ -12,6 +13,7 @@ use tokio;
 use tokio::sync::Mutex;
 use sqlx::{self, Row};
 use image::{ImageFormat, imageops::FilterType};
+use zip::{ZipWriter, ZipArchive, write::SimpleFileOptions};
 // enigo 导入将在具体使用处声明
 
 
@@ -2587,8 +2589,349 @@ pub async fn read_text_file(file_path: String) -> Result<String, String> {
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("读取文件失败: {}", e))?;
 
-    tracing::info!("✅ 文本文件读取成功，大小: {} 字节，耗时: {:?}", 
+    tracing::info!("✅ 文本文件读取成功，大小: {} 字节，耗时: {:?}",
         content.len(), start.elapsed());
-    
+
     Ok(content)
+}
+
+// ==================== 数据导入导出 ====================
+
+#[tauri::command]
+pub async fn export_data(app: AppHandle, export_path: String) -> Result<(), String> {
+    tracing::info!("开始导出数据到: {}", export_path);
+
+    let export_path = PathBuf::from(&export_path);
+    let file = fs::File::create(&export_path)
+        .map_err(|e| format!("无法创建导出文件: {}", e))?;
+
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // 1. 写入数据库文件
+    let app_data_dir = app.path().app_data_dir()
+        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    let db_path = app_data_dir.join("clipboard.db");
+
+    if db_path.exists() {
+        let db_bytes = fs::read(&db_path)
+            .map_err(|e| format!("无法读取数据库文件: {}", e))?;
+        zip.start_file("clipboard.db", options)
+            .map_err(|e| format!("写入数据库到zip失败: {}", e))?;
+        zip.write_all(&db_bytes)
+            .map_err(|e| format!("写入数据库数据失败: {}", e))?;
+        tracing::info!("已写入数据库文件 ({} 字节)", db_bytes.len());
+    } else {
+        return Err("数据库文件不存在".to_string());
+    }
+
+    // 2. 写入图片文件 - 从数据库查询所有图片路径
+    if let Some(db_state) = app.try_state::<Mutex<DatabaseState>>() {
+        let db_guard = db_state.lock().await;
+        let pool = &db_guard.pool;
+
+        let image_rows = sqlx::query("SELECT DISTINCT image_path FROM clipboard_history WHERE image_path IS NOT NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
+        let mut image_count = 0u64;
+        let mut image_size = 0u64;
+
+        for row in &image_rows {
+            if let Ok(Some(image_path)) = row.try_get::<Option<String>, &str>("image_path") {
+                let path = PathBuf::from(&image_path);
+                if path.exists() && path.is_file() {
+                    if let Some(filename) = path.file_name() {
+                        let zip_path = format!("images/{}", filename.to_string_lossy());
+                        match fs::read(&path) {
+                            Ok(file_bytes) => {
+                                if let Err(e) = zip.start_file(&zip_path, options) {
+                                    tracing::warn!("写入图片到zip失败: {}", e);
+                                    continue;
+                                }
+                                if let Err(e) = zip.write_all(&file_bytes) {
+                                    tracing::warn!("写入图片数据失败: {}", e);
+                                    continue;
+                                }
+                                image_count += 1;
+                                image_size += file_bytes.len() as u64;
+                            }
+                            Err(e) => {
+                                tracing::warn!("无法读取图片 {}: {}", image_path, e);
+                            }
+                        }
+                    }
+                } else {
+                    tracing::warn!("图片文件不存在，跳过: {}", image_path);
+                }
+            }
+        }
+        drop(db_guard);
+        tracing::info!("已写入 {} 个图片文件 ({} 字节)", image_count, image_size);
+    } else {
+        tracing::warn!("无法获取数据库状态，跳过图片导出");
+    }
+
+    zip.finish().map_err(|e| format!("完成zip写入失败: {}", e))?;
+
+    tracing::info!("✅ 数据导出完成");
+    Ok(())
+}
+
+/// 从 zip 中同步提取所有需要的数据（避免 ZipFile 跨 await 的 Send 问题）
+struct ExtractedZipData {
+    db_bytes: Vec<u8>,
+    images: Vec<(String, Vec<u8>)>, // (filename, bytes)
+}
+
+fn extract_zip_data(import_path: &PathBuf) -> Result<ExtractedZipData, String> {
+    let file = fs::File::open(import_path)
+        .map_err(|e| format!("无法打开导入文件: {}", e))?;
+    let mut archive = ZipArchive::new(file)
+        .map_err(|e| format!("无法读取zip文件: {}", e))?;
+
+    // 提取数据库文件
+    let mut db_file = archive.by_name("clipboard.db")
+        .map_err(|e| format!("zip中未找到数据库文件: {}", e))?;
+    let mut db_bytes = Vec::new();
+    std::io::Read::read_to_end(&mut db_file, &mut db_bytes)
+        .map_err(|e| format!("无法读取数据库数据: {}", e))?;
+    drop(db_file);
+
+    // 提取所有图片文件
+    let mut images = Vec::new();
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)
+            .map_err(|e| format!("读取zip条目失败: {}", e))?;
+        let entry_path = entry.name().to_string();
+
+        if entry_path.starts_with("images/") && !entry.is_dir() {
+            if let Some(filename) = std::path::Path::new(&entry_path).file_name() {
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut buf)
+                    .map_err(|e| format!("无法读取图片 {}: {}", entry_path, e))?;
+                images.push((filename.to_string_lossy().to_string(), buf));
+            }
+        }
+    }
+
+    Ok(ExtractedZipData { db_bytes, images })
+}
+
+#[tauri::command]
+pub async fn import_data(app: AppHandle, import_path: String, mode: String) -> Result<(), String> {
+    tracing::info!("开始导入数据: {} (模式: {})", import_path, mode);
+
+    let import_path = PathBuf::from(&import_path);
+
+    // 第一步：同步提取所有 zip 数据（不跨 await）
+    let zip_data = tokio::task::spawn_blocking(move || extract_zip_data(&import_path))
+        .await
+        .map_err(|e| format!("提取zip数据失败: {}", e))??;
+
+    // 第二步：写入临时数据库文件
+    let temp_dir = tempfile::tempdir()
+        .map_err(|e| format!("无法创建临时目录: {}", e))?;
+    let temp_db_path = temp_dir.path().join("import.db");
+    fs::write(&temp_db_path, &zip_data.db_bytes)
+        .map_err(|e| format!("无法写入临时数据库文件: {}", e))?;
+
+    // 第三步：连接临时数据库并读取数据
+    let temp_options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&temp_db_path)
+        .read_only(true);
+    let temp_pool = sqlx::SqlitePool::connect_with(temp_options)
+        .await
+        .map_err(|e| format!("无法连接临时数据库: {}", e))?;
+
+    // 获取当前数据库连接
+    let db_state = app.try_state::<Mutex<DatabaseState>>()
+        .ok_or("无法访问数据库状态")?;
+    let db_guard = db_state.lock().await;
+    let pool = &db_guard.pool;
+
+    let new_images_dir = get_app_images_dir()?;
+    let new_images_dir_str = new_images_dir.to_string_lossy().to_string();
+
+    if mode == "replace" {
+        // 替换模式：清空现有数据
+        if new_images_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&new_images_dir) {
+                for entry in entries.flatten() {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+
+        sqlx::query("DELETE FROM clipboard_history").execute(pool).await
+            .map_err(|e| format!("清空历史记录失败: {}", e))?;
+        sqlx::query("DELETE FROM groups").execute(pool).await
+            .map_err(|e| format!("清空分组失败: {}", e))?;
+        sqlx::query("DELETE FROM sqlite_sequence WHERE name IN ('clipboard_history', 'groups')").execute(pool).await
+            .ok();
+
+        tracing::info!("替换模式：已清空现有数据");
+    }
+
+    // === 导入分组 ===
+    let old_groups: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT id, name, color, created_at FROM groups ORDER BY id"
+    )
+    .fetch_all(&temp_pool)
+    .await
+    .map_err(|e| format!("读取导入分组失败: {}", e))?;
+
+    let mut group_id_map: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+
+    for (old_id, name, color, created_at) in &old_groups {
+        let existing: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM groups WHERE name = ?"
+        )
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("查询分组失败: {}", e))?;
+
+        if let Some((existing_id,)) = existing {
+            group_id_map.insert(*old_id, existing_id);
+        } else {
+            let result: (i64,) = sqlx::query_as(
+                "INSERT INTO groups (name, color, created_at, item_count) VALUES (?, ?, ?, 0) RETURNING id"
+            )
+            .bind(name)
+            .bind(color)
+            .bind(created_at)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| format!("创建分组失败: {}", e))?;
+
+            group_id_map.insert(*old_id, result.0);
+        }
+    }
+    tracing::info!("分组映射完成: {} 个分组", group_id_map.len());
+
+    // === 导入剪贴板记录 ===
+    let old_records = sqlx::query(
+        "SELECT content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata FROM clipboard_history ORDER BY id"
+    )
+    .fetch_all(&temp_pool)
+    .await
+    .map_err(|e| format!("读取导入记录失败: {}", e))?;
+
+    let mut imported_count = 0u64;
+    let mut skipped_count = 0u64;
+
+    for record in &old_records {
+        let content: String = record.try_get("content").unwrap_or_default();
+        let record_type: String = record.try_get("type").unwrap_or_default();
+        let timestamp: String = record.try_get("timestamp").unwrap_or_default();
+        let is_favorite: i64 = record.try_get("is_favorite").unwrap_or(0);
+        let old_image_path: Option<String> = record.try_get("image_path").ok().flatten();
+        let source_app_name: Option<String> = record.try_get("source_app_name").ok().flatten();
+        let source_app_icon: Option<String> = record.try_get("source_app_icon").ok().flatten();
+        let thumbnail_data: Option<String> = record.try_get("thumbnail_data").ok().flatten();
+        let note: Option<String> = record.try_get("note").ok().flatten();
+        let old_group_id: Option<i64> = record.try_get("group_id").ok().flatten();
+        let data_hash: Option<String> = record.try_get("data_hash").ok().flatten();
+        let metadata: Option<String> = record.try_get("metadata").ok().flatten();
+
+        let new_image_path = old_image_path.as_ref().and_then(|p| {
+            std::path::Path::new(p).file_name().map(|f| {
+                format!("{}/{}", new_images_dir_str, f.to_string_lossy())
+            })
+        });
+
+        let new_group_id = old_group_id.and_then(|gid| group_id_map.get(&gid).copied());
+
+        // 去重检查
+        let is_duplicate = if let Some(ref hash) = data_hash {
+            if !hash.is_empty() {
+                let existing: Option<(i64,)> = sqlx::query_as(
+                    "SELECT id FROM clipboard_history WHERE data_hash = ?"
+                )
+                .bind(hash)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| format!("去重查询失败: {}", e))?;
+                existing.is_some()
+            } else {
+                false
+            }
+        } else {
+            let existing: Option<(i64,)> = sqlx::query_as(
+                "SELECT id FROM clipboard_history WHERE content = ? AND type = ?"
+            )
+            .bind(&content)
+            .bind(&record_type)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| format!("去重查询失败: {}", e))?;
+            existing.is_some()
+        };
+
+        if is_duplicate {
+            skipped_count += 1;
+            continue;
+        }
+
+        sqlx::query(
+            "INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(&content)
+        .bind(&record_type)
+        .bind(&timestamp)
+        .bind(is_favorite)
+        .bind(&new_image_path)
+        .bind(&source_app_name)
+        .bind(&source_app_icon)
+        .bind(&thumbnail_data)
+        .bind(&note)
+        .bind(new_group_id)
+        .bind(&data_hash)
+        .bind(&metadata)
+        .execute(pool)
+        .await
+        .map_err(|e| format!("插入记录失败: {}", e))?;
+
+        imported_count += 1;
+    }
+
+    tracing::info!("记录导入完成: 导入 {} 条, 跳过 {} 条(重复)", imported_count, skipped_count);
+
+    // 更新分组的 item_count
+    for (_, new_gid) in &group_id_map {
+        let _ = sqlx::query("UPDATE groups SET item_count = (SELECT COUNT(*) FROM clipboard_history WHERE group_id = ?) WHERE id = ?")
+            .bind(new_gid)
+            .bind(new_gid)
+            .execute(pool)
+            .await;
+    }
+
+    // 关闭临时数据库连接
+    temp_pool.close().await;
+    drop(db_guard); // 释放数据库锁
+
+    // 第四步：写入图片文件（纯同步操作）
+    fs::create_dir_all(&new_images_dir)
+        .map_err(|e| format!("无法创建图片目录: {}", e))?;
+
+    let mut image_count = 0u64;
+    for (filename, data) in &zip_data.images {
+        let dest_path = new_images_dir.join(filename);
+        if !dest_path.exists() {
+            fs::write(&dest_path, data)
+                .map_err(|e| format!("无法写入图片文件 {}: {}", filename, e))?;
+            image_count += 1;
+        }
+    }
+
+    tracing::info!("图片文件提取完成: {} 个新文件", image_count);
+    tracing::info!("✅ 数据导入完成");
+
+    let _ = app.emit("data-imported", ());
+
+    Ok(())
 }

@@ -1,7 +1,7 @@
 {
   "name": "clipboard-manager",
   "private": true,
-  "version": "1.1.16",
+  "version": "1.1.17",
   "type": "module",
   "scripts": {
     "dev": "cross-env DEV=true vite",
@@ -21,6 +21,7 @@
     "@headlessui/vue": "^1.7.23",
     "@heroicons/vue": "^2.2.0",
     "@tauri-apps/api": "^2.0.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-sql": "^2.2.0",
     "@vueuse/core": "^13.1.0",

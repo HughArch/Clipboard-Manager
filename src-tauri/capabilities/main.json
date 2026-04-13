@@ -223,6 +223,10 @@
     "allow-check-files-exist",
     "allow-get-file-icon",
     "allow-open-file-location",
-    "allow-read-text-file"
+    "allow-read-text-file",
+    "allow-export-data",
+    "allow-import-data",
+    "dialog:allow-open",
+    "dialog:allow-save"
   ]
 }
