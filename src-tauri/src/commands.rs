@@ -1522,13 +1522,18 @@ pub async fn copy_image_to_clipboard(image_path: String) -> Result<(), String> {
         // Windows 优化：使用文件复制 (CF_HDROP) 代替图片数据写入
         // 这避免了昂贵的解码和位图转换操作，耗时通常 < 10ms
         use clipboard_win::{formats, Clipboard, Setter};
-        
+
         let _clip = Clipboard::new_attempts(10)
             .map_err(|e| format!("无法打开剪贴板: {}", e))?;
-            
+
+        // 清空剪贴板，确保之前的文本等内容被清除
+        // clipboard_win 的 set_file_list 默认使用 NoClear，不会自动清空
+        clipboard_win::raw::empty()
+            .map_err(|e| format!("清空剪贴板失败: {}", e))?;
+
         // 设置文件列表 (CF_HDROP)
         let paths = vec![image_path.clone()];
-        
+
         // 使用 formats::FileList
         formats::FileList.write_clipboard(&paths)
             .map_err(|e| format!("设置剪贴板文件失败: {}", e))?;
@@ -2208,15 +2213,19 @@ pub async fn copy_files_to_clipboard(file_paths: Vec<String>) -> Result<(), Stri
     #[cfg(target_os = "windows")]
     {
         use clipboard_win::{formats, Clipboard, Setter};
-        
+
         let _clip = Clipboard::new_attempts(10)
             .map_err(|e| format!("无法打开剪贴板: {}", e))?;
-            
+
+        // 清空剪贴板，确保之前的内容被清除
+        clipboard_win::raw::empty()
+            .map_err(|e| format!("清空剪贴板失败: {}", e))?;
+
         // 设置文件列表 (CF_HDROP)
         formats::FileList.write_clipboard(&file_paths)
             .map_err(|e| format!("设置剪贴板文件失败: {}", e))?;
-            
-        tracing::info!("✅ 文件已写入剪贴板 (Windows CF_HDROP), 文件数: {}, 耗时: {:?}", 
+
+        tracing::info!("✅ 文件已写入剪贴板 (Windows CF_HDROP), 文件数: {}, 耗时: {:?}",
             file_paths.len(), start.elapsed());
         return Ok(());
     }
