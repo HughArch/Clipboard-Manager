@@ -42,19 +42,19 @@ const getTypeConfig = () => {
     case 'danger':
       return {
         iconColor: 'text-red-500',
-        bgColor: 'bg-red-50',
+        bgColor: 'bg-red-50 dark:bg-red-900/30',
         confirmButtonClass: 'btn-danger'
       }
     case 'info':
       return {
         iconColor: 'text-primary-500',
-        bgColor: 'bg-primary-50',
+        bgColor: 'bg-primary-50 dark:bg-primary-900/30',
         confirmButtonClass: 'btn-primary'
       }
     default: // warning
       return {
         iconColor: 'text-amber-500',
-        bgColor: 'bg-amber-50',
+        bgColor: 'bg-amber-50 dark:bg-amber-900/30',
         confirmButtonClass: 'btn-warning'
       }
   }
@@ -68,7 +68,7 @@ const getTypeConfig = () => {
       class="dialog-overlay"
       @click="handleBackdropClick"
     >
-      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-80 max-w-[90vw] overflow-hidden">
+      <div class="dialog-box w-80 max-w-[90vw]">
         <!-- Header with Icon -->
         <div class="px-5 pt-5 pb-4">
           <div class="flex items-start gap-3">
@@ -110,14 +110,14 @@ const getTypeConfig = () => {
               </svg>
             </div>
             <div class="flex-1 min-w-0">
-              <h3 class="text-sm font-semibold text-gray-900">{{ title }}</h3>
-              <p class="mt-1.5 text-sm text-gray-500 leading-relaxed whitespace-pre-line">{{ message }}</p>
+              <h3 class="dialog-title text-sm">{{ title }}</h3>
+              <p class="mt-1.5 text-sm text-base-content/60 leading-relaxed whitespace-pre-line">{{ message }}</p>
             </div>
           </div>
         </div>
-        
+
         <!-- Actions -->
-        <div class="px-5 py-4 bg-gray-50 flex justify-end gap-2">
+        <div class="dialog-footer">
           <button
             @click="handleCancel"
             class="btn btn-sm btn-ghost"

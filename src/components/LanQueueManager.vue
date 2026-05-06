@@ -216,24 +216,24 @@ const leaveLanQueue = async () => {
 <template>
   <Transition name="dialog">
     <div v-if="show" class="dialog-overlay" @click.self="$emit('update:show', false)">
-      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
-        <div class="px-5 py-4 border-b border-gray-100 flex-shrink-0">
+      <div class="dialog-box w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden">
+        <div class="px-5 py-4 border-b border-base-300 flex-shrink-0">
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center">
-              <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 17l4 4 4-4m-4-5V3m-7 7h14"></path>
               </svg>
             </div>
-            <h2 class="text-base font-semibold text-gray-900">局域网队列管理</h2>
+            <h2 class="text-base font-semibold text-base-content">局域网队列管理</h2>
           </div>
         </div>
 
         <div class="p-5 flex-1 overflow-y-auto space-y-4">
-          <div v-if="isConnected" class="p-3 bg-gray-50 rounded-xl">
+          <div v-if="isConnected" class="p-3 bg-base-200 rounded-xl">
             <div class="flex items-center justify-between">
               <div>
-                <p class="text-sm font-medium text-gray-700">已加入队列</p>
-                <p class="text-xs text-gray-500">
+                <p class="text-sm font-medium text-base-content">已加入队列</p>
+                <p class="text-xs text-base-content/60">
                   {{ isHost ? '主机' : '客户端' }}
                   <span v-if="queueInfo">· {{ queueInfo }}</span>
                 </p>
@@ -245,7 +245,7 @@ const leaveLanQueue = async () => {
           <div v-if="!isConnected" class="space-y-4">
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-1.5 col-span-2">
-                <label class="block text-sm font-medium text-gray-700">成员名称</label>
+                <label class="block text-sm font-medium text-base-content">成员名称</label>
                 <input
                   v-model="settings.lan_queue_member_name"
                   type="text"
@@ -257,7 +257,7 @@ const leaveLanQueue = async () => {
 
             <div class="grid grid-cols-2 gap-4">
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-700">主机地址</label>
+                <label class="block text-sm font-medium text-base-content">主机地址</label>
                 <input
                   v-model="settings.lan_queue_host"
                   type="text"
@@ -266,7 +266,7 @@ const leaveLanQueue = async () => {
                 />
               </div>
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-700">端口</label>
+                <label class="block text-sm font-medium text-base-content">端口</label>
                 <input
                   v-model.number="settings.lan_queue_port"
                   type="number"
@@ -278,7 +278,7 @@ const leaveLanQueue = async () => {
             </div>
 
             <div class="space-y-1.5">
-              <label class="block text-sm font-medium text-gray-700">队列密码</label>
+              <label class="block text-sm font-medium text-base-content">队列密码</label>
               <input
                 v-model="settings.lan_queue_password"
                 type="password"
@@ -319,17 +319,17 @@ const leaveLanQueue = async () => {
           </div>
 
           <div class="space-y-2">
-            <p class="text-sm font-medium text-gray-700">成员列表</p>
-            <div v-if="lanMembers.length === 0" class="text-xs text-gray-500">暂无成员</div>
+            <p class="text-sm font-medium text-base-content">成员列表</p>
+            <div v-if="lanMembers.length === 0" class="text-xs text-base-content/60">暂无成员</div>
             <div v-else class="space-y-1">
               <div
                 v-for="member in lanMembers"
                 :key="member.id"
-                class="flex items-center justify-between text-sm text-gray-700 bg-gray-50 rounded-lg px-3 py-2"
+                class="flex items-center justify-between text-sm text-base-content bg-base-200 rounded-lg px-3 py-2"
               >
                 <div class="flex flex-col">
                   <span class="font-medium">{{ formatMemberName(member) }}</span>
-                  <span class="text-xs text-gray-500">{{ formatMemberAddr(member) }}</span>
+                  <span class="text-xs text-base-content/60">{{ formatMemberAddr(member) }}</span>
                 </div>
                 <span v-if="member.id === lanStatus?.self_id" class="text-xs text-primary-600">我</span>
               </div>
@@ -337,7 +337,7 @@ const leaveLanQueue = async () => {
           </div>
         </div>
 
-        <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+        <div class="px-5 py-4 bg-base-200 border-t border-base-300 flex justify-end gap-2 flex-shrink-0">
           <button
             type="button"
             class="btn btn-sm btn-ghost"

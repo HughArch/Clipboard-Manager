@@ -16,6 +16,12 @@
   body {
     @apply bg-gray-50 text-gray-900;
   }
+
+  /* 暗色主题基础样式 */
+  .dark body,
+  [data-theme="dark"] body {
+    @apply bg-gray-900 text-gray-100;
+  }
   
   /* 禁用浏览器原生右键菜单和文本选中 */
   * {
@@ -378,3 +384,304 @@
     @apply bg-red-100 text-red-700;
   }
 }
+
+/* ============================================
+   Dark Theme Overrides
+   ============================================ */
+
+/* 使用 [data-theme="dark"] 选择器支持 DaisyUI 主题切换 */
+[data-theme="dark"] {
+  /* Button System - Dark Mode */
+  .btn-secondary {
+    @apply bg-gray-700 text-gray-200
+           hover:bg-gray-600 active:bg-gray-500;
+  }
+
+  .btn-ghost {
+    @apply text-gray-300
+           hover:bg-gray-700 active:bg-gray-600;
+  }
+
+  .btn-danger-ghost {
+    @apply text-red-400
+           hover:bg-red-900/30 active:bg-red-900/50;
+  }
+
+  /* Form Controls - Dark Mode */
+  .input {
+    @apply bg-gray-800 border-gray-600 text-gray-100
+           placeholder-gray-500
+           focus:border-primary-400;
+  }
+
+  .checkbox-modern {
+    @apply border-gray-500 bg-gray-700;
+  }
+
+  .toggle-modern {
+    @apply bg-gray-600;
+  }
+
+  /* Context Menu - Dark Mode */
+  .context-menu {
+    @apply bg-gray-800/95 border-gray-700/60;
+  }
+
+  .context-menu-item {
+    @apply text-gray-200 hover:bg-gray-700;
+  }
+
+  .context-menu-item-danger {
+    @apply text-red-400 hover:bg-red-900/30;
+  }
+
+  .context-menu-item-icon {
+    @apply text-gray-500;
+  }
+
+  .context-menu-divider {
+    @apply border-gray-700;
+  }
+
+  /* Dialog / Modal - Dark Mode */
+  .dialog-overlay {
+    @apply bg-black/60;
+  }
+
+  .dialog-box {
+    @apply bg-gray-800;
+  }
+
+  .dialog-header {
+    @apply border-gray-700;
+  }
+
+  .dialog-title {
+    @apply text-gray-100;
+  }
+
+  .dialog-footer {
+    @apply bg-gray-900 border-gray-700;
+  }
+
+  /* Toast Notifications - Dark Mode */
+  .toast-modern {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .toast-title {
+    @apply text-gray-100;
+  }
+
+  .toast-message {
+    @apply text-gray-400;
+  }
+
+  .toast-close {
+    @apply text-gray-500 hover:text-gray-300 hover:bg-gray-700;
+  }
+
+  /* List Items - Dark Mode */
+  .list-item {
+    @apply hover:bg-gray-800;
+  }
+
+  .list-item-active {
+    @apply bg-primary-900/30 hover:bg-primary-900/50;
+  }
+
+  .list-item-selected {
+    @apply bg-primary-900/40 ring-primary-700;
+  }
+
+  /* Tab Navigation - Dark Mode */
+  .tab-pill {
+    @apply text-gray-400 hover:bg-gray-700;
+  }
+
+  .tab-pill-active {
+    @apply bg-primary-600 text-white hover:bg-primary-700;
+  }
+
+  /* Cards - Dark Mode */
+  .card-modern {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  /* Badge - Dark Mode */
+  .badge-primary {
+    @apply bg-primary-900/50 text-primary-300;
+  }
+
+  .badge-gray {
+    @apply bg-gray-700 text-gray-300;
+  }
+
+  .badge-success {
+    @apply bg-emerald-900/50 text-emerald-300;
+  }
+
+  .badge-danger {
+    @apply bg-red-900/50 text-red-300;
+  }
+}
+
+/* 同时支持 class="dark" 的方式 */
+.dark {
+  /* Button System - Dark Mode */
+  .btn-secondary {
+    @apply bg-gray-700 text-gray-200
+           hover:bg-gray-600 active:bg-gray-500;
+  }
+
+  .btn-ghost {
+    @apply text-gray-300
+           hover:bg-gray-700 active:bg-gray-600;
+  }
+
+  .btn-danger-ghost {
+    @apply text-red-400
+           hover:bg-red-900/30 active:bg-red-900/50;
+  }
+
+  /* Form Controls - Dark Mode */
+  .input {
+    @apply bg-gray-800 border-gray-600 text-gray-100
+           placeholder-gray-500
+           focus:border-primary-400;
+  }
+
+  .checkbox-modern {
+    @apply border-gray-500 bg-gray-700;
+  }
+
+  .toggle-modern {
+    @apply bg-gray-600;
+  }
+
+  /* Context Menu - Dark Mode */
+  .context-menu {
+    @apply bg-gray-800/95 border-gray-700/60;
+  }
+
+  .context-menu-item {
+    @apply text-gray-200 hover:bg-gray-700;
+  }
+
+  .context-menu-item-danger {
+    @apply text-red-400 hover:bg-red-900/30;
+  }
+
+  .context-menu-item-icon {
+    @apply text-gray-500;
+  }
+
+  .context-menu-divider {
+    @apply border-gray-700;
+  }
+
+  /* Dialog / Modal - Dark Mode */
+  .dialog-overlay {
+    @apply bg-black/60;
+  }
+
+  .dialog-box {
+    @apply bg-gray-800;
+  }
+
+  .dialog-header {
+    @apply border-gray-700;
+  }
+
+  .dialog-title {
+    @apply text-gray-100;
+  }
+
+  .dialog-footer {
+    @apply bg-gray-900 border-gray-700;
+  }
+
+  /* Toast Notifications - Dark Mode */
+  .toast-modern {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  .toast-title {
+    @apply text-gray-100;
+  }
+
+  .toast-message {
+    @apply text-gray-400;
+  }
+
+  .toast-close {
+    @apply text-gray-500 hover:text-gray-300 hover:bg-gray-700;
+  }
+
+  /* List Items - Dark Mode */
+  .list-item {
+    @apply hover:bg-gray-800;
+  }
+
+  .list-item-active {
+    @apply bg-primary-900/30 hover:bg-primary-900/50;
+  }
+
+  .list-item-selected {
+    @apply bg-primary-900/40 ring-primary-700;
+  }
+
+  /* Tab Navigation - Dark Mode */
+  .tab-pill {
+    @apply text-gray-400 hover:bg-gray-700;
+  }
+
+  .tab-pill-active {
+    @apply bg-primary-600 text-white hover:bg-primary-700;
+  }
+
+  /* Cards - Dark Mode */
+  .card-modern {
+    @apply bg-gray-800 border-gray-700;
+  }
+
+  /* Badge - Dark Mode */
+  .badge-primary {
+    @apply bg-primary-900/50 text-primary-300;
+  }
+
+  .badge-gray {
+    @apply bg-gray-700 text-gray-300;
+  }
+
+  .badge-success {
+    @apply bg-emerald-900/50 text-emerald-300;
+  }
+
+  .badge-danger {
+    @apply bg-red-900/50 text-red-300;
+  }
+}
+
+/* 滚动条暗色主题支持 */
+[data-theme="dark"] ::-webkit-scrollbar,
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-track,
+.dark ::-webkit-scrollbar-track {
+  @apply bg-gray-800;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb,
+.dark ::-webkit-scrollbar-thumb {
+  @apply bg-gray-600 rounded-full;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover,
+.dark ::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500;
+}
+

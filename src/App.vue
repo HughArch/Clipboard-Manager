@@ -8,6 +8,7 @@ import ConfirmDialog from './components/ConfirmDialog.vue'
 import LanQueueManager from './components/LanQueueManager.vue'
 import { useToast } from './composables/useToast'
 import { logger } from './composables/useLogger'
+import { useTheme, type Theme } from './composables/useTheme'
 // import { useImageCache } from './composables/useImageCache' // 暂时注释掉未使用的导入
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -34,6 +35,9 @@ import {
 // Toast 消息系统
 const { toastMessages, removeToast, showSuccess, showError, showWarning, showInfo } = useToast()
 
+// 主题管理
+const { initTheme, setTheme } = useTheme()
+
 // 图片缓存系统
 // const imageCache = useImageCache() // 暂时注释掉未使用的变量
 
@@ -49,6 +53,7 @@ interface AppSettings {
   lan_queue_password: string
   lan_queue_name: string
   lan_queue_member_name: string
+  theme: string
 }
 
 interface LanClipboardItem {
@@ -2750,6 +2755,9 @@ const loadRecentHistory = async () => {
 
 onMounted(async () => {
   try {
+    // 初始化主题（从 localStorage 读取，立即应用避免闪烁）
+    initTheme()
+
     // 初始化日志系统
     logger.info('应用程序启动', { timestamp: new Date().toISOString() })
     
@@ -2759,9 +2767,20 @@ onMounted(async () => {
     
     // 初始加载最近的历史记录
     await loadRecentHistory()
-    
+
     // 初始加载分组数据
     await loadGroups()
+
+    // 从设置中加载并应用主题
+    try {
+      const savedSettings = await invoke<AppSettings>('load_settings')
+      if (savedSettings.theme) {
+        setTheme(savedSettings.theme as Theme)
+        logger.info('已加载主题设置', { theme: savedSettings.theme })
+      }
+    } catch (error) {
+      logger.warn('加载主题设置失败，使用默认主题', { error: String(error) })
+    }
 
     // 启动新的剪贴板监听器（使用tauri-plugin-clipboard）
     unlistenClipboard = await startListening()
@@ -3586,19 +3605,19 @@ const checkDataConsistency = () => {
                 <ul 
                   v-if="availableGroups.length > 0"
                   tabindex="0"
-                  class="dropdown-content z-50 w-52 py-1 bg-white/90 backdrop-blur-xl rounded-xl shadow-lg shadow-black/10 border border-gray-200/60"
+                  class="dropdown-content z-50 w-52 py-1 bg-base-100/90 backdrop-blur-xl rounded-xl shadow-lg shadow-black/10 border border-base-300/60"
                 >
                 <li v-for="group in availableGroups" :key="group.id">
                     <button
                       @click="switchToGroup(group.id)"
-                      class="w-full px-3 py-2 flex items-center gap-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors duration-150"
+                      class="w-full px-3 py-2 flex items-center gap-2 text-sm text-base-content hover:bg-base-200 transition-colors duration-150"
                     >
                       <div 
                         class="w-2.5 h-2.5 rounded-full flex-shrink-0"
                         :style="{ backgroundColor: group.color }"
                       ></div>
                       <span class="truncate">{{ group.name }}</span>
-                      <span class="text-xs text-gray-400 ml-auto">({{ group.item_count }})</span>
+                      <span class="text-xs text-base-content/40 ml-auto">({{ group.item_count }})</span>
                     </button>
                   </li>
           </ul>
@@ -3654,7 +3673,7 @@ const checkDataConsistency = () => {
                             class="w-3 h-3 rounded bg-base-300 flex items-center justify-center"
                             :title="item.sourceAppName"
                           >
-                            <svg class="w-2 h-2 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                            <svg class="w-2 h-2 text-base-content/50" fill="currentColor" viewBox="0 0 20 20">
                               <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
                             </svg>
                           </div>
@@ -3682,7 +3701,7 @@ const checkDataConsistency = () => {
                           <div class="flex items-center space-x-1">
                           </div>
                         </div>
-                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 leading-tight" :class="item.content.length > 50 ? 'line-clamp-2' : 'line-clamp-1'">
+                        <div v-if="item.type === 'text'" class="text-xs text-base-content leading-tight" :class="item.content.length > 50 ? 'line-clamp-2' : 'line-clamp-1'">
                           {{ item.content }}
                       </div>
                         <div v-else-if="item.type === 'file'" class="mt-0.5 flex items-center space-x-2">
@@ -3724,19 +3743,19 @@ const checkDataConsistency = () => {
                             </div>
                             <div
                               v-else
-                              class="w-8 h-8 bg-gray-100 rounded flex items-center justify-center"
+                              class="w-8 h-8 bg-base-200 rounded flex items-center justify-center"
                             >
-                              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg class="w-5 h-5 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
                               </svg>
                             </div>
                           </div>
                           <!-- 文件信息 -->
                           <div class="flex-1 min-w-0">
-                            <div class="text-xs text-gray-900 truncate font-medium">
+                            <div class="text-xs text-base-content truncate font-medium">
                               {{ getFileName(item) }}
                             </div>
-                            <div class="text-xs text-gray-500">
+                            <div class="text-xs text-base-content/60">
                               {{ getFileInfo(item) }}
                             </div>
                           </div>
@@ -3752,14 +3771,14 @@ const checkDataConsistency = () => {
                           />
                           <div
                             v-else
-                            class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                            class="w-16 h-12 bg-base-200 rounded border flex items-center justify-center"
                           >
-                            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-5 h-5 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
                           </div>
                           <!-- 图片元数据显示 -->
-                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-base-content/60 mt-0.5 truncate">
                             {{ getImageMetadataText(item) }}
                           </div>
                         </div>
@@ -3779,7 +3798,7 @@ const checkDataConsistency = () => {
                       <!-- 收藏按钮 -->
                     <button
                       class="w-3 h-3 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
-                      :class="item.isFavorite ? 'bg-yellow-100 text-yellow-600 border-yellow-300' : 'bg-gray-50 text-gray-600 border-gray-200'"
+                      :class="item.isFavorite ? 'bg-yellow-100 text-yellow-600 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-600' : 'bg-base-200 text-base-content/60 border-base-300'"
                       @click.stop="toggleFavorite(item)"
                         title="收藏"
                     >
@@ -3796,10 +3815,10 @@ const checkDataConsistency = () => {
                 
                 <!-- Empty state -->
                 <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
-                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                    <MagnifyingGlassIcon class="w-6 h-6 text-gray-400" />
+                  <div class="w-12 h-12 bg-base-200 rounded-full flex items-center justify-center mb-3">
+                    <MagnifyingGlassIcon class="w-6 h-6 text-base-content/40" />
                   </div>
-                  <p class="text-gray-500 text-xs text-center">
+                  <p class="text-base-content/60 text-xs text-center">
                     {{ searchQuery ? 'No items match your search' : currentTabInfo.emptyMessage }}
                   </p>
                 </div>
@@ -3807,13 +3826,13 @@ const checkDataConsistency = () => {
                 <!-- 加载更多提示 -->
                 <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
                   <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
-                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span class="text-xs text-gray-500">Loading more...</span>
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span class="text-xs text-base-content/60">Loading more...</span>
                   </div>
-                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                  <div v-else-if="!hasMoreData" class="text-xs text-base-content/40">
                     No more items
                   </div>
-                  <div v-else class="text-xs text-gray-400">
+                  <div v-else class="text-xs text-base-content/40">
                     Scroll to load more
                   </div>
                 </div>
@@ -3828,10 +3847,10 @@ const checkDataConsistency = () => {
                                 :key="item.id"
                                 :data-item-id="item.id"
                                 :title="item.note || ''"
-                                class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
+                                class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                                 :class="{
                                   'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                                  'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                                  'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                                 }"
                                 @click="selectedItem = item"
                                 @dblclick="handleDoubleClick($event, item)"
@@ -3848,10 +3867,10 @@ const checkDataConsistency = () => {
                         />
                         <div 
                           v-else 
-                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          class="w-6 h-6 rounded bg-base-300 flex items-center justify-center"
                           :title="item.sourceAppName"
                         >
-                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                          <svg class="w-3 h-3 text-base-content/50" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
                           </svg>
                         </div>
@@ -3863,14 +3882,14 @@ const checkDataConsistency = () => {
                             <div 
                               class="w-1.5 h-1.5 rounded-full bg-green-400"
                             ></div>
-                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            <span class="text-xs font-medium text-base-content/50 uppercase tracking-wide">
                               {{ item.type }}
                             </span>
-                            <span class="text-xs text-gray-400">
+                            <span class="text-xs text-base-content/40">
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                            <span class="text-xs text-gray-400">
+                            <span class="text-xs text-base-content/40">
                               {{ formatTime(item.timestamp) }}
                             </span>
                             <!-- 备注指示器 -->
@@ -3879,7 +3898,7 @@ const checkDataConsistency = () => {
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
                             ></div>
                           </div>
-                        <p class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                        <p class="text-xs text-base-content line-clamp-2 leading-snug">
                           {{ item.type === 'text' ? item.content : '文本内容' }}
                         </p>
                       </div>
@@ -3887,7 +3906,7 @@ const checkDataConsistency = () => {
                     <div class="flex items-center space-x-1">
                       <!-- 删除按钮 -->
                       <button
-                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                         @click.stop="deleteItem(item)"
                         title="删除"
                       >
@@ -3895,7 +3914,7 @@ const checkDataConsistency = () => {
                       </button>
                       <!-- 收藏按钮 -->
                       <button
-                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                         :class="{ 'opacity-100': item.isFavorite }"
                         @click.stop="toggleFavorite(item)"
                         title="收藏"
@@ -3909,12 +3928,12 @@ const checkDataConsistency = () => {
 
                 <!-- Empty state for text -->
                 <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
-                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-12 h-12 bg-base-200 rounded-full flex items-center justify-center mb-3">
+                    <svg class="w-6 h-6 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                     </svg>
                   </div>
-                  <p class="text-gray-500 text-xs text-center">
+                  <p class="text-base-content/60 text-xs text-center">
                     {{ searchQuery ? 'No text matches your search' : 'No text content yet' }}
                   </p>
                 </div>
@@ -3922,13 +3941,13 @@ const checkDataConsistency = () => {
                 <!-- 加载更多提示 -->
                 <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
                   <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
-                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span class="text-xs text-gray-500">Loading more...</span>
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span class="text-xs text-base-content/60">Loading more...</span>
                   </div>
-                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                  <div v-else-if="!hasMoreData" class="text-xs text-base-content/40">
                     No more items
                   </div>
-                  <div v-else class="text-xs text-gray-400">
+                  <div v-else class="text-xs text-base-content/40">
                     Scroll to load more
                   </div>
                 </div>
@@ -3943,10 +3962,10 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
+                  class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick($event, item)"
@@ -3964,10 +3983,10 @@ const checkDataConsistency = () => {
                         />
                         <div 
                           v-else 
-                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          class="w-6 h-6 rounded bg-base-300 flex items-center justify-center"
                           :title="item.sourceAppName"
                         >
-                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                          <svg class="w-3 h-3 text-base-content/50" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
                           </svg>
                         </div>
@@ -3979,14 +3998,14 @@ const checkDataConsistency = () => {
                             <div 
                               class="w-1.5 h-1.5 rounded-full bg-purple-400"
                             ></div>
-                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            <span class="text-xs font-medium text-base-content/50 uppercase tracking-wide">
                               {{ item.type }}
                             </span>
-                            <span class="text-xs text-gray-400">
+                            <span class="text-xs text-base-content/40">
                             · {{ item.sourceAppName }}
                           </span>
                         </div>
-                            <span class="text-xs text-gray-400">
+                            <span class="text-xs text-base-content/40">
                               {{ formatTime(item.timestamp) }}
                             </span>
                             <!-- 备注指示器 -->
@@ -4006,14 +4025,14 @@ const checkDataConsistency = () => {
                         />
                         <div
                           v-else
-                          class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                          class="w-16 h-12 bg-base-200 rounded border flex items-center justify-center"
                         >
-                          <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg class="w-6 h-6 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                           </svg>
                         </div>
                         <!-- 图片元数据显示 -->
-                        <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                        <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-base-content/60 mt-0.5 truncate">
                           {{ getImageMetadataText(item) }}
                         </div>
                       </div>
@@ -4022,7 +4041,7 @@ const checkDataConsistency = () => {
                   <div class="flex items-center space-x-1">
                     <!-- 删除按钮 -->
                     <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                       @click.stop="deleteItem(item)"
                       title="删除"
                     >
@@ -4030,7 +4049,7 @@ const checkDataConsistency = () => {
                     </button>
                     <!-- 收藏按钮 -->
                     <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                         :class="{ 'opacity-100': item.isFavorite }"
                         @click.stop="toggleFavorite(item)"
                         title="收藏"
@@ -4044,12 +4063,12 @@ const checkDataConsistency = () => {
                 
                 <!-- Empty state for images -->
                 <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
-                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                    <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div class="w-12 h-12 bg-base-200 rounded-full flex items-center justify-center mb-3">
+                    <svg class="w-6 h-6 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                     </svg>
                   </div>
-                  <p class="text-gray-500 text-xs text-center">
+                  <p class="text-base-content/60 text-xs text-center">
                     {{ searchQuery ? 'No images match your search' : 'No images yet' }}
                   </p>
                 </div>
@@ -4057,13 +4076,13 @@ const checkDataConsistency = () => {
                 <!-- 加载更多提示 -->
                 <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
                   <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
-                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span class="text-xs text-gray-500">Loading more...</span>
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span class="text-xs text-base-content/60">Loading more...</span>
                   </div>
-                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                  <div v-else-if="!hasMoreData" class="text-xs text-base-content/40">
                     No more items
                   </div>
-                  <div v-else class="text-xs text-gray-400">
+                  <div v-else class="text-xs text-base-content/40">
                     Scroll to load more
                   </div>
                 </div>
@@ -4078,10 +4097,10 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
+                  class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @dblclick="handleDoubleClick($event, item)"
@@ -4099,10 +4118,10 @@ const checkDataConsistency = () => {
                         />
                         <div 
                           v-else 
-                          class="w-6 h-6 rounded bg-gray-200 flex items-center justify-center"
+                          class="w-6 h-6 rounded bg-base-300 flex items-center justify-center"
                           :title="item.sourceAppName"
                         >
-                          <svg class="w-3 h-3 text-gray-500" fill="currentColor" viewBox="0 0 20 20">
+                          <svg class="w-3 h-3 text-base-content/50" fill="currentColor" viewBox="0 0 20 20">
                             <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h12a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 2a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
                           </svg>
                         </div>
@@ -4115,14 +4134,14 @@ const checkDataConsistency = () => {
                               class="w-1.5 h-1.5 rounded-full"
                               :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
                             ></div>
-                            <span class="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                            <span class="text-xs font-medium text-base-content/50 uppercase tracking-wide">
                               {{ item.type }}
                             </span>
-                            <span class="text-xs text-gray-400">
+                            <span class="text-xs text-base-content/40">
                               · {{ item.sourceAppName }}
                             </span>
                           </div>
-                          <span class="text-xs text-gray-400">
+                          <span class="text-xs text-base-content/40">
                             {{ formatTime(item.timestamp) }}
                           </span>
                             <!-- 备注指示器 -->
@@ -4131,7 +4150,7 @@ const checkDataConsistency = () => {
                               class="w-1.5 h-1.5 bg-blue-400 rounded-full"
                             ></div>
                         </div>
-                        <div v-if="item.type === 'text'" class="text-xs text-gray-900 line-clamp-2 leading-snug">
+                        <div v-if="item.type === 'text'" class="text-xs text-base-content line-clamp-2 leading-snug">
                           {{ item.content }}
                       </div>
                         <div v-else class="mt-1">
@@ -4145,14 +4164,14 @@ const checkDataConsistency = () => {
                           />
                           <div
                             v-else
-                            class="w-16 h-12 bg-gray-100 rounded border flex items-center justify-center"
+                            class="w-16 h-12 bg-base-200 rounded border flex items-center justify-center"
                           >
-                            <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg class="w-6 h-6 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                             </svg>
                           </div>
                           <!-- 图片元数据显示 -->
-                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-gray-500 mt-0.5 truncate">
+                          <div v-if="item.type === 'image' && getImageMetadataText(item)" class="text-xs text-base-content/60 mt-0.5 truncate">
                             {{ getImageMetadataText(item) }}
                           </div>
                         </div>
@@ -4161,7 +4180,7 @@ const checkDataConsistency = () => {
                     <div class="flex items-center space-x-1">
                       <!-- 删除按钮 -->
                       <button
-                        class="flex-shrink-0 p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200"
                         @click.stop="deleteItem(item)"
                         title="删除"
                       >
@@ -4169,7 +4188,7 @@ const checkDataConsistency = () => {
                       </button>
                       <!-- 收藏按钮 -->
                     <button
-                      class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-gray-400 transition-colors duration-200"
+                      class="flex-shrink-0 p-0.5 text-yellow-500 hover:text-base-content/40 transition-colors duration-200"
                       @click.stop="toggleFavorite(item)"
                         title="取消收藏"
                     >
@@ -4181,13 +4200,13 @@ const checkDataConsistency = () => {
                 
                 <!-- Empty state for favorites -->
                 <div v-if="filteredHistory.length === 0" class="flex flex-col items-center justify-center py-8 px-3">
-                  <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mb-3">
-                    <StarIcon class="w-6 h-6 text-gray-400" />
+                  <div class="w-12 h-12 bg-base-200 rounded-full flex items-center justify-center mb-3">
+                    <StarIcon class="w-6 h-6 text-base-content/40" />
                   </div>
-                  <p class="text-gray-500 text-xs text-center">
+                  <p class="text-base-content/60 text-xs text-center">
                     {{ searchQuery ? 'No favorites match your search' : 'No favorites yet' }}
                   </p>
-                  <p class="text-gray-400 text-xs text-center mt-1">
+                  <p class="text-base-content/40 text-xs text-center mt-1">
                     Click the star icon to add items to favorites
                   </p>
                 </div>
@@ -4195,13 +4214,13 @@ const checkDataConsistency = () => {
                 <!-- 加载更多提示 -->
                 <div v-if="filteredHistory.length > 0 && !searchQuery" class="py-4 px-3 text-center">
                   <div v-if="isLoadingMore" class="flex items-center justify-center space-x-2">
-                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span class="text-xs text-gray-500">Loading more...</span>
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span class="text-xs text-base-content/60">Loading more...</span>
                   </div>
-                  <div v-else-if="!hasMoreData" class="text-xs text-gray-400">
+                  <div v-else-if="!hasMoreData" class="text-xs text-base-content/40">
                     No more items
                   </div>
-                  <div v-else class="text-xs text-gray-400">
+                  <div v-else class="text-xs text-base-content/40">
                     Scroll to load more
                   </div>
                 </div>
@@ -4229,10 +4248,10 @@ const checkDataConsistency = () => {
                   :key="item.id"
                   :data-item-id="item.id"
                   :title="item.note || ''"
-                  class="group px-3 py-2 border-b border-gray-50 hover:bg-blue-50 cursor-pointer"
+                  class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
-                    'hover:bg-gray-50': selectedItem?.id !== item.id || selectedItem?.id === undefined
+                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
                   @contextmenu="showItemContextMenu($event, item)"
@@ -4247,8 +4266,8 @@ const checkDataConsistency = () => {
                           :alt="item.sourceAppName"
                           class="w-full h-full object-contain"
                         />
-                        <div v-else class="w-full h-full bg-gray-100 rounded flex items-center justify-center">
-                          <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div v-else class="w-full h-full bg-base-200 rounded flex items-center justify-center">
+                          <svg class="w-3 h-3 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                           </svg>
                         </div>
@@ -4261,19 +4280,19 @@ const checkDataConsistency = () => {
                               class="w-2 h-2 rounded-full"
                               :class="item.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
                             ></div>
-                            <span class="text-xs text-gray-400">{{ item.sourceAppName }}</span>
+                            <span class="text-xs text-base-content/40">{{ item.sourceAppName }}</span>
                             <span v-if="item.note" class="text-xs text-orange-500" title="有备注">📝</span>
                           </div>
-                          <span class="text-xs text-gray-400 flex-shrink-0">{{ formatTime(item.timestamp) }}</span>
+                          <span class="text-xs text-base-content/40 flex-shrink-0">{{ formatTime(item.timestamp) }}</span>
                         </div>
                         
                         <div class="content-preview">
                           <template v-if="item.type === 'text'">
-                            <p class="text-sm text-gray-900 line-clamp-2 break-words">{{ item.content }}</p>
+                            <p class="text-sm text-base-content line-clamp-2 break-words">{{ item.content }}</p>
                           </template>
                           <template v-else>
                             <div class="flex items-center space-x-2">
-                              <div class="w-12 h-12 border border-gray-200 rounded overflow-hidden bg-gray-50 flex-shrink-0">
+                              <div class="w-12 h-12 border border-base-300 rounded overflow-hidden bg-base-200 flex-shrink-0">
                                 <img
                                   v-if="resolveImage(item)"
                                   :src="resolveImage(item)"
@@ -4281,14 +4300,14 @@ const checkDataConsistency = () => {
                                   class="w-full h-full object-cover"
                                 />
                                 <div v-else class="w-full h-full flex items-center justify-center">
-                                  <svg class="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <svg class="w-3 h-3 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
                                   </svg>
                                 </div>
                               </div>
                               <div class="flex flex-col">
-                                <p class="text-sm text-gray-500">图片</p>
-                                <p v-if="getImageMetadataText(item)" class="text-xs text-gray-400">{{ getImageMetadataText(item) }}</p>
+                                <p class="text-sm text-base-content/60">图片</p>
+                                <p v-if="getImageMetadataText(item)" class="text-xs text-base-content/40">{{ getImageMetadataText(item) }}</p>
                               </div>
                             </div>
                           </template>
@@ -4300,14 +4319,14 @@ const checkDataConsistency = () => {
                       <!-- 删除按钮 -->
                       <button
                         @click.stop="deleteItem(item)"
-                        class="p-0.5 text-gray-400 hover:text-red-500 transition-colors duration-200"
+                        class="p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200"
                         title="删除"
                       >
                         <TrashIcon class="w-3.5 h-3.5" />
                       </button>
                       <!-- 收藏按钮 -->
                     <button
-                      class="flex-shrink-0 p-0.5 text-gray-400 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-yellow-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
                       :class="{ 'opacity-100': item.isFavorite }"
                       @click.stop="toggleFavorite(item)"
                         title="收藏"
@@ -4322,13 +4341,13 @@ const checkDataConsistency = () => {
                 <!-- Loading states -->
                 <div v-if="isLoadingMore" class="p-4 text-center">
                   <div class="flex items-center justify-center space-x-2">
-                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                    <span class="text-xs text-gray-500">Loading more...</span>
+                    <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span class="text-xs text-base-content/60">Loading more...</span>
                   </div>
                 </div>
                 
-                <div v-if="clipboardHistory.length === 0 && !isLoadingMore" class="p-8 text-center text-gray-400">
-                  <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <div v-if="clipboardHistory.length === 0 && !isLoadingMore" class="p-8 text-center text-base-content/40">
+                  <div class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center mx-auto mb-3">
                     <!-- 空分组图标：文件夹 -->
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
@@ -4343,25 +4362,25 @@ const checkDataConsistency = () => {
       </div>
 
       <!-- Right Content -->
-      <div class="flex-1 flex flex-col min-h-0 bg-white">
-        <div class="px-4 py-3 border-b border-gray-200 flex-shrink-0" data-tauri-drag-region>
+      <div class="flex-1 flex flex-col min-h-0 bg-base-100">
+        <div class="px-4 py-3 border-b border-base-200 flex-shrink-0" data-tauri-drag-region>
           <div class="flex items-center justify-between" data-tauri-drag-region>
             <div class="flex items-center space-x-2" data-tauri-drag-region>
-              <div 
+              <div
                 v-if="selectedItem"
                 class="w-2.5 h-2.5 rounded-full"
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
-              <h2 class="text-base font-semibold text-gray-900">
+              <h2 class="text-base font-semibold text-base-content">
                 {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : selectedItem?.type === 'file' ? (isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '') ? 'PDF 文档' : '文件信息') : '选择条目' }}
               </h2>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="text-xs text-gray-500" v-if="selectedItem" data-tauri-drag-region>
+              <span class="text-xs text-base-content/60" v-if="selectedItem" data-tauri-drag-region>
               {{ formatTime(selectedItem.timestamp) }}
             </span>
-              <button 
-                class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200"
+              <button
+                class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded-md transition-colors duration-200"
                 @click="showGroupManager = !showGroupManager"
                 title="分组管理"
               >
@@ -4373,8 +4392,8 @@ const checkDataConsistency = () => {
                   <circle cx="16" cy="4" r="1" fill="currentColor"></circle>
                 </svg>
               </button>
-              <button 
-                class="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md transition-colors duration-200"
+              <button
+                class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded-md transition-colors duration-200"
                 @click="showSettings = !showSettings"
                 title="设置"
               >
@@ -4386,10 +4405,10 @@ const checkDataConsistency = () => {
         
         <div class="flex-1 p-4 overflow-y-auto min-h-0">
           <div v-if="selectedItem" class="h-full">
-            <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 min-h-full preview-container">
+            <div class="bg-base-200 rounded-lg border border-base-300 p-4 min-h-full preview-container">
               <template v-if="selectedItem.type === 'text'">
                 <div class="prose prose-sm max-w-none preview-content">
-                  <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
+                  <pre class="whitespace-pre-wrap break-words text-base-content font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
                 </div>
               </template>
               <template v-else-if="selectedItem.type === 'file'">
@@ -4397,8 +4416,8 @@ const checkDataConsistency = () => {
                 <div class="h-full flex flex-col">
                   <!-- 加载状态 -->
                   <div v-if="isLoadingFilePreview" class="flex flex-col items-center justify-center py-8">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-                    <p class="text-gray-500 text-sm">加载预览中...</p>
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                    <p class="text-base-content/60 text-sm">加载预览中...</p>
                   </div>
 
                   <!-- 图片预览 -->
@@ -4408,20 +4427,20 @@ const checkDataConsistency = () => {
                          :src="filePreviewContent"
                          alt="Image preview"
                          class="max-w-full max-h-96 object-contain rounded-lg shadow-lg"/>
-                    <div v-else class="text-gray-500">无法加载图片预览</div>
+                    <div v-else class="text-base-content/60">无法加载图片预览</div>
                   </div>
 
                   <!-- 文本预览 -->
                   <div v-else-if="isTextFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')"
                        class="flex-1 overflow-auto">
-                    <pre class="whitespace-pre-wrap break-words text-gray-900 font-mono text-xs leading-normal bg-white p-4 rounded-lg border border-gray-200">{{ filePreviewContent }}</pre>
+                    <pre class="whitespace-pre-wrap break-words text-base-content font-mono text-xs leading-normal bg-base-100 p-4 rounded-lg border border-base-300">{{ filePreviewContent }}</pre>
                   </div>
 
                   <!-- PDF文件信息 -->
                   <div v-else-if="isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')"
                        class="flex-1 flex flex-col items-center justify-start pt-8 space-y-6">
                     <!-- PDF大图标 -->
-                    <div class="w-32 h-40 bg-white rounded-lg shadow-lg border border-gray-200 flex flex-col items-center justify-center p-4">
+                    <div class="w-32 h-40 bg-base-100 rounded-lg shadow-lg border border-base-300 flex flex-col items-center justify-center p-4">
                       <svg class="w-20 h-20" viewBox="0 0 48 48" fill="none">
                         <!-- 文件背景 -->
                         <path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" fill="#DC2626"/>
@@ -4432,31 +4451,31 @@ const checkDataConsistency = () => {
                       </svg>
                     </div>
                     <!-- 文件信息 -->
-                    <div class="w-full max-w-sm bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                    <div class="w-full max-w-sm bg-base-100 rounded-lg border border-base-300 p-4 space-y-3">
                       <div class="flex items-center space-x-3">
                         <svg class="w-5 h-5 text-red-500" viewBox="0 0 48 48" fill="none">
                           <path d="M8 6C8 4.89543 8.89543 4 10 4H30L40 14V42C40 43.1046 39.1046 44 38 44H10C8.89543 44 8 43.1046 8 42V6Z" fill="#DC2626"/>
                           <path d="M30 4L40 14H32C30.8954 14 30 13.1046 30 12V4Z" fill="#B91C1C"/>
                           <text x="24" y="32" font-size="10" font-weight="bold" fill="white" text-anchor="middle">PDF</text>
                         </svg>
-                        <span class="text-sm font-medium text-gray-900 truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
+                        <span class="text-sm font-medium text-base-content truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
                       </div>
-                      <div class="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                      <div class="border-t border-base-200 pt-3 space-y-2 text-sm">
                         <div class="flex justify-between">
-                          <span class="text-gray-500">类型</span>
-                          <span class="text-gray-900">PDF 文档</span>
+                          <span class="text-base-content/60">类型</span>
+                          <span class="text-base-content">PDF 文档</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">大小</span>
-                          <span class="text-gray-900">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
+                          <span class="text-base-content/60">大小</span>
+                          <span class="text-base-content">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">修改日期</span>
-                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
+                          <span class="text-base-content/60">修改日期</span>
+                          <span class="text-base-content">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">位置</span>
-                          <span class="text-gray-900 truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
+                          <span class="text-base-content/60">位置</span>
+                          <span class="text-base-content truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
                         </div>
                       </div>
                     </div>
@@ -4466,7 +4485,7 @@ const checkDataConsistency = () => {
                   <div v-else
                        class="flex-1 flex flex-col items-center justify-start pt-8 space-y-6">
                     <!-- 文件大图标 -->
-                    <div class="w-32 h-40 bg-white rounded-lg shadow-lg border border-gray-200 flex flex-col items-center justify-center p-4">
+                    <div class="w-32 h-40 bg-base-100 rounded-lg shadow-lg border border-base-300 flex flex-col items-center justify-center p-4">
                       <!-- 视频图标 -->
                       <svg v-if="isVideoFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-20 h-20 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
@@ -4488,18 +4507,18 @@ const checkDataConsistency = () => {
                         {}
                       </div>
                       <!-- 默认文件图标 -->
-                      <svg v-else class="w-20 h-20 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg v-else class="w-20 h-20 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                       </svg>
-                      
+
                       <!-- 扩展名显示 -->
-                      <div class="mt-2 text-xs font-bold uppercase text-gray-500 tracking-wider">
+                      <div class="mt-2 text-xs font-bold uppercase text-base-content/50 tracking-wider">
                         {{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || 'FILE' }}
                       </div>
                     </div>
 
                     <!-- 文件信息 -->
-                    <div class="w-full max-w-sm bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                    <div class="w-full max-w-sm bg-base-100 rounded-lg border border-base-300 p-4 space-y-3">
                       <div class="flex items-center space-x-3">
                         <!-- 小图标 -->
                         <svg v-if="isVideoFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4515,30 +4534,30 @@ const checkDataConsistency = () => {
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
                         </svg>
                         <div v-else-if="isJsonFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '')" class="w-5 h-5 flex items-center justify-center text-yellow-600 font-mono font-bold text-xs">{}</div>
-                        <svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg v-else class="w-5 h-5 text-base-content/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
                         </svg>
-                        <span class="text-sm font-medium text-gray-900 truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
+                        <span class="text-sm font-medium text-base-content truncate">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.name }}</span>
                       </div>
-                      <div class="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                      <div class="border-t border-base-200 pt-3 space-y-2 text-sm">
                         <div class="flex justify-between">
-                          <span class="text-gray-500">类型</span>
-                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension?.toUpperCase() || '未知' }} 文件</span>
+                          <span class="text-base-content/60">类型</span>
+                          <span class="text-base-content">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension?.toUpperCase() || '未知' }} 文件</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">大小</span>
-                          <span class="text-gray-900">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
+                          <span class="text-base-content/60">大小</span>
+                          <span class="text-base-content">{{ formatFileSize(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.size || 0) }}</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">修改日期</span>
-                          <span class="text-gray-900">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
+                          <span class="text-base-content/60">修改日期</span>
+                          <span class="text-base-content">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.modified_time || '未知' }}</span>
                         </div>
                         <div class="flex justify-between">
-                          <span class="text-gray-500">位置</span>
-                          <span class="text-gray-900 truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
+                          <span class="text-base-content/60">位置</span>
+                          <span class="text-base-content truncate max-w-48" :title="parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path">{{ parseFileMetadata(selectedItem.metadata)?.files?.[0]?.path }}</span>
                         </div>
                         <!-- 多文件提示 -->
-                        <div v-if="(parseFileMetadata(selectedItem.metadata)?.file_count || 0) > 1" class="pt-2 mt-2 border-t border-gray-100 text-center text-xs text-blue-600">
+                        <div v-if="(parseFileMetadata(selectedItem.metadata)?.file_count || 0) > 1" class="pt-2 mt-2 border-t border-base-200 text-center text-xs text-primary">
                           包含 {{ parseFileMetadata(selectedItem.metadata)?.file_count }} 个文件
                         </div>
                       </div>
@@ -4549,8 +4568,8 @@ const checkDataConsistency = () => {
               <template v-else>
                 <div class="flex flex-col items-center justify-center space-y-4">
                   <div v-if="!fullImageContent" class="flex flex-col items-center justify-center py-8">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-4"></div>
-                    <p class="text-gray-500 text-sm">Loading full image...</p>
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mb-4"></div>
+                    <p class="text-base-content/60 text-sm">Loading full image...</p>
                   </div>
                   <img
                     v-else
@@ -4559,15 +4578,15 @@ const checkDataConsistency = () => {
                     class="max-w-full max-h-full object-contain rounded-lg shadow-lg"
                   />
                   <!-- 图片元数据显示 -->
-                  <div v-if="selectedItem?.type === 'image' && getImageMetadataText(selectedItem)" class="text-sm text-gray-600 bg-white bg-opacity-80 px-3 py-1 rounded-full border border-gray-200">
+                  <div v-if="selectedItem?.type === 'image' && getImageMetadataText(selectedItem)" class="text-sm text-base-content/70 bg-base-100 bg-opacity-80 px-3 py-1 rounded-full border border-base-300">
                     {{ getImageMetadataText(selectedItem) }}
                   </div>
                 </div>
               </template>
             </div>
           </div>
-          <div v-else class="h-full flex flex-col items-center justify-center text-gray-400">
-            <div class="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-3">
+          <div v-else class="h-full flex flex-col items-center justify-center text-base-content/40">
+            <div class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center mb-3">
               <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
               </svg>
@@ -4589,14 +4608,14 @@ const checkDataConsistency = () => {
       @click="showGroupManager = false"
     >
       <div 
-        class="bg-white rounded-lg shadow-xl w-[500px] max-w-[90vw] max-h-[80vh] overflow-hidden"
+        class="dialog-box w-[500px] max-w-[90vw] max-h-[80vh] overflow-hidden"
         @click.stop
       >
-        <div class="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 class="text-lg font-semibold text-gray-900">分组管理</h2>
+        <div class="flex items-center justify-between p-4 border-b border-base-300">
+          <h2 class="text-lg font-semibold text-base-content">分组管理</h2>
           <button
             @click="showGroupManager = false"
-            class="text-gray-500 hover:text-gray-700 transition-colors"
+            class="text-base-content/50 hover:text-base-content transition-colors"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -4608,7 +4627,7 @@ const checkDataConsistency = () => {
           <!-- 添加分组按钮 -->
           <button
             @click="openGroupForm()"
-            class="w-full mb-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
+            class="w-full mb-4 px-4 py-2 btn btn-primary text-sm rounded-lg transition-colors duration-200 flex items-center justify-center space-x-2"
           >
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -4617,9 +4636,9 @@ const checkDataConsistency = () => {
           </button>
           
           <!-- 分组列表 -->
-          <div v-if="groups.length === 0" class="text-center py-8 text-gray-500">
+          <div v-if="groups.length === 0" class="text-center py-8 text-base-content/60">
             <!-- 无分组图标：多个文件夹 -->
-            <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-12 h-12 mx-auto mb-3 text-base-content/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
               <circle cx="8" cy="4" r="1" fill="currentColor"></circle>
               <circle cx="12" cy="4" r="1" fill="currentColor"></circle>
@@ -4633,7 +4652,7 @@ const checkDataConsistency = () => {
             <div
               v-for="group in groups"
               :key="group.id"
-              class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+              class="flex items-center justify-between p-3 bg-base-200 rounded-lg hover:bg-base-300 transition-colors"
             >
               <div class="flex items-center space-x-3">
                 <div 
@@ -4641,14 +4660,14 @@ const checkDataConsistency = () => {
                   :style="{ backgroundColor: group.color }"
                 ></div>
                 <div class="flex items-center space-x-2">
-                  <h3 class="text-sm font-medium text-gray-900">{{ group.name }}</h3>
-                  <span class="text-sm text-gray-500">({{ group.item_count }} 个条目)</span>
+                  <h3 class="text-sm font-medium text-base-content">{{ group.name }}</h3>
+                  <span class="text-sm text-base-content/60">({{ group.item_count }} 个条目)</span>
                 </div>
               </div>
               <div class="flex items-center space-x-2">
                 <button
                   @click="openGroupForm(group)"
-                  class="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                  class="p-1.5 text-base-content/50 hover:text-primary hover:bg-primary/10 rounded transition-colors"
                   title="编辑分组"
                 >
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4657,7 +4676,7 @@ const checkDataConsistency = () => {
                 </button>
                 <button
                   @click="deleteGroup(group)"
-                  class="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  class="p-1.5 text-base-content/50 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded transition-colors"
                   title="删除分组"
                 >
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4678,16 +4697,16 @@ const checkDataConsistency = () => {
       @click="closeGroupForm"
     >
       <div 
-        class="bg-white rounded-lg shadow-xl w-[400px] max-w-[90vw]"
+        class="dialog-box w-[400px] max-w-[90vw]"
         @click.stop
       >
-        <div class="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 class="text-lg font-semibold text-gray-900">
+        <div class="flex items-center justify-between p-4 border-b border-base-300">
+          <h2 class="text-lg font-semibold text-base-content">
             {{ editingGroup ? '编辑分组' : '新建分组' }}
           </h2>
           <button
             @click="closeGroupForm"
-            class="text-gray-500 hover:text-gray-700 transition-colors"
+            class="text-base-content/50 hover:text-base-content transition-colors"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -4697,23 +4716,23 @@ const checkDataConsistency = () => {
         
         <div class="p-4 space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">分组名称</label>
+            <label class="block text-sm font-medium text-base-content mb-2">分组名称</label>
             <input
               v-model="groupForm.name"
               type="text"
               placeholder="请输入分组名称"
-              class="w-full px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              class="input input-sm"
               @keydown.enter="saveGroup"
             />
           </div>
           
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-2">分组颜色</label>
+            <label class="block text-sm font-medium text-base-content mb-2">分组颜色</label>
             <div class="flex items-center space-x-3">
               <input
                 v-model="groupForm.color"
                 type="color"
-                class="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                class="w-12 h-8 border border-base-300 rounded cursor-pointer"
               />
               <div class="flex space-x-2">
                 <button
@@ -4722,23 +4741,23 @@ const checkDataConsistency = () => {
                   @click="groupForm.color = color"
                   class="w-6 h-6 rounded-full border-2 transition-all"
                   :style="{ backgroundColor: color }"
-                  :class="groupForm.color === color ? 'border-gray-800 scale-110' : 'border-gray-300'"
+                  :class="groupForm.color === color ? 'border-base-content scale-110' : 'border-base-300'"
                 ></button>
               </div>
             </div>
           </div>
         </div>
         
-        <div class="flex justify-end space-x-2 p-3 border-t border-gray-200">
+        <div class="flex justify-end space-x-2 p-3 border-t border-base-300">
           <button
             @click="closeGroupForm"
-            class="px-3 py-1 text-sm text-gray-600 bg-gray-100 hover:bg-gray-200 rounded transition-colors"
+            class="btn btn-sm btn-ghost"
           >
             取消
           </button>
           <button
             @click="saveGroup"
-            class="px-3 py-1 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+            class="btn btn-sm btn-primary"
           >
             {{ editingGroup ? '更新' : '创建' }}
           </button>
@@ -4753,14 +4772,14 @@ const checkDataConsistency = () => {
       @click="closeGroupSelector"
     >
       <div 
-        class="bg-white rounded-lg shadow-xl w-[350px] max-w-[90vw]"
+        class="dialog-box w-[350px] max-w-[90vw]"
         @click.stop
       >
-        <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-          <h2 class="text-lg font-semibold text-gray-900">选择分组</h2>
+        <div class="flex items-center justify-between px-4 py-3 border-b border-base-300">
+          <h2 class="text-lg font-semibold text-base-content">选择分组</h2>
           <button
             @click="closeGroupSelector"
-            class="text-gray-500 hover:text-gray-700 transition-colors"
+            class="text-base-content/50 hover:text-base-content transition-colors"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -4770,11 +4789,11 @@ const checkDataConsistency = () => {
         
         <div class="p-4 max-h-[60vh] overflow-y-auto">
           <!-- 分组列表 -->
-          <div v-if="groups.length === 0" class="text-center py-6 text-gray-500">
+          <div v-if="groups.length === 0" class="text-center py-6 text-base-content/60">
             <p>暂无分组</p>
             <button
               @click="closeGroupSelector(); showGroupManager = true"
-              class="mt-2 text-blue-600 hover:text-blue-700 text-sm"
+              class="mt-2 text-primary hover:text-primary/80 text-sm"
             >
               去创建分组
             </button>
@@ -4785,15 +4804,15 @@ const checkDataConsistency = () => {
               v-for="group in groups"
               :key="group.id"
               @click="addItemToGroup(group.id)"
-              class="w-full p-2 text-left bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
+              class="w-full p-2 text-left bg-base-200 hover:bg-base-300 rounded-lg transition-colors flex items-center space-x-3"
             >
               <div 
                 class="w-3 h-3 rounded-full"
                 :style="{ backgroundColor: group.color }"
               ></div>
               <div class="flex items-center justify-between flex-1">
-                <span class="text-sm font-medium text-gray-900">{{ group.name }}</span>
-                <span class="text-sm text-gray-500">{{ group.item_count }} 个条目</span>
+                <span class="text-sm font-medium text-base-content">{{ group.name }}</span>
+                <span class="text-sm text-base-content/60">{{ group.item_count }} 个条目</span>
               </div>
             </button>
           </div>
@@ -4918,10 +4937,10 @@ const checkDataConsistency = () => {
       @click="closeNoteDialog"
     >
       <div 
-        class="bg-white rounded-xl shadow-xl shadow-black/10 p-5 w-80 max-w-[90vw]"
+        class="dialog-box p-5 w-80 max-w-[90vw]"
         @click.stop
       >
-        <h3 class="text-sm font-semibold text-gray-900 mb-4">
+        <h3 class="text-sm font-semibold text-base-content mb-4">
           {{ editingNoteItem?.note ? '编辑备注' : '添加备注' }}
         </h3>
         <input

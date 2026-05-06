@@ -5,9 +5,13 @@ import { save, open } from '@tauri-apps/plugin-dialog'
 import { logger } from '../composables/useLogger'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { getFormattedVersion } from '../config/version'
+import { useTheme, type Theme } from '../composables/useTheme'
 
 // 动态获取版本信息
 const appVersion = ref(getFormattedVersion())
+
+// 主题管理
+const { currentTheme, setTheme, getThemeLabel, getThemeIcon } = useTheme()
 
 interface AppSettings {
   max_history_items: number
@@ -20,6 +24,7 @@ interface AppSettings {
   lan_queue_password: string
   lan_queue_name: string
   lan_queue_member_name: string
+  theme: string
 }
 
 defineProps<{
@@ -44,7 +49,8 @@ const settings = ref<AppSettings>({
   lan_queue_port: 21991,
   lan_queue_password: '',
   lan_queue_name: '',
-  lan_queue_member_name: ''
+  lan_queue_member_name: '',
+  theme: 'system'
 })
 
 // 键盘录制状态
@@ -352,7 +358,10 @@ const handleSubmit = async () => {
   try {
     // 保存设置
     await invoke('save_settings', { settings: settings.value })
-    
+
+    // 应用主题
+    setTheme(settings.value.theme as Theme)
+
     // 更新快捷键
     try {
       await invoke('register_shortcut', { shortcut: settings.value.hotkey })
@@ -361,7 +370,7 @@ const handleSubmit = async () => {
       emit('show-toast', { type: 'error', title, message, duration: 8000 }) // 显示8秒，让用户有时间阅读
       return // 如果快捷键注册失败，不继续
     }
-    
+
     // 更新自启动设置
     try {
       await invoke('set_auto_start', { enable: settings.value.auto_start })
@@ -374,12 +383,12 @@ const handleSubmit = async () => {
         duration: 6000
       })
     }
-    
+
     // 所有操作成功
     emit('show-toast', { type: 'success', title: '保存设置', message: '所有设置已成功保存！', duration: 3000 })
     emit('save-settings', settings.value)
     emit('update:show', false)
-    
+
   } catch (error) {
     console.error('Failed to save settings:', error)
     emit('show-toast', {
@@ -396,17 +405,17 @@ const handleSubmit = async () => {
 <template>
   <Transition name="dialog">
     <div v-if="show" class="dialog-overlay" @click.self="$emit('update:show', false)">
-      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+      <div class="dialog-box w-full max-w-md max-h-[90vh] flex flex-col">
         <!-- Header -->
-        <div class="px-5 py-4 border-b border-gray-100 flex-shrink-0">
+        <div class="dialog-header flex-shrink-0">
           <div class="flex items-center gap-3">
-            <div class="w-9 h-9 bg-primary-100 rounded-xl flex items-center justify-center">
-              <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div class="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center">
+              <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
               </svg>
             </div>
-            <h2 class="text-base font-semibold text-gray-900">设置</h2>
+            <h2 class="dialog-title">设置</h2>
           </div>
         </div>
 
@@ -415,12 +424,12 @@ const handleSubmit = async () => {
           <form @submit.prevent="handleSubmit" class="space-y-6" id="settings-form">
             <!-- General Settings Section -->
             <div class="space-y-4">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">通用设置</h3>
-              
+              <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">通用设置</h3>
+
               <!-- 最大历史记录数和时间 - 一行两列 -->
               <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-700">最大历史记录数</label>
+                  <label class="block text-sm font-medium text-base-content">最大历史记录数</label>
                   <input
                     v-model.number="settings.max_history_items"
                     type="number"
@@ -429,7 +438,7 @@ const handleSubmit = async () => {
                   />
                 </div>
                 <div class="space-y-1.5">
-                  <label class="block text-sm font-medium text-gray-700">历史保留天数</label>
+                  <label class="block text-sm font-medium text-base-content">历史保留天数</label>
                   <input
                     v-model.number="settings.max_history_time"
                     type="number"
@@ -441,7 +450,7 @@ const handleSubmit = async () => {
 
               <!-- 快捷键 -->
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-700">全局热键</label>
+                <label class="block text-sm font-medium text-base-content">全局热键</label>
                 <div class="relative">
                   <input
                     ref="hotkeyInputRef"
@@ -466,28 +475,52 @@ const handleSubmit = async () => {
                     {{ isRecording ? '停止' : '录制' }}
                   </button>
                 </div>
-                <p v-if="isRecording && getRecordingPreview()" class="text-xs text-primary-600">
+                <p v-if="isRecording && getRecordingPreview()" class="text-xs text-primary">
                   预览: {{ getRecordingPreview() }}
                 </p>
               </div>
 
               <!-- 开机自启动 -->
-              <label class="flex items-center justify-between p-3 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors duration-200">
-                <span class="text-sm font-medium text-gray-700">开机自启动</span>
+              <label class="flex items-center justify-between p-3 bg-base-200 rounded-xl cursor-pointer hover:bg-base-300 transition-colors duration-200">
+                <span class="text-sm font-medium text-base-content">开机自启动</span>
                 <input
                   v-model="settings.auto_start"
                   type="checkbox"
                   class="toggle-modern"
                 />
               </label>
+
+              <!-- 主题选择 -->
+              <div class="space-y-1.5">
+                <label class="block text-sm font-medium text-base-content">外观主题</label>
+                <div class="grid grid-cols-3 gap-2">
+                  <button
+                    v-for="themeOption in (['light', 'dark', 'system'] as Theme[])"
+                    :key="themeOption"
+                    type="button"
+                    @click="settings.theme = themeOption"
+                    :class="[
+                      'flex flex-col items-center gap-1.5 p-3 rounded-xl border-2 transition-all duration-200',
+                      settings.theme === themeOption
+                        ? 'border-primary bg-primary/10'
+                        : 'border-base-300 hover:border-base-400 hover:bg-base-200'
+                    ]"
+                  >
+                    <span class="text-xl">{{ getThemeIcon(themeOption) }}</span>
+                    <span class="text-xs font-medium" :class="settings.theme === themeOption ? 'text-primary' : 'text-base-content/60'">
+                      {{ getThemeLabel(themeOption) }}
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div class="space-y-4">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">局域网队列</h3>
-              <div class="p-3 bg-gray-50 rounded-xl flex items-center justify-between">
+              <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">局域网队列</h3>
+              <div class="p-3 bg-base-200 rounded-xl flex items-center justify-between">
                 <div>
-                  <p class="text-sm font-medium text-gray-700">队列管理</p>
-                  <p class="text-xs text-gray-500">打开独立的局域网队列管理页面</p>
+                  <p class="text-sm font-medium text-base-content">队列管理</p>
+                  <p class="text-xs text-base-content/60">打开独立的局域网队列管理页面</p>
                 </div>
                 <button
                   type="button"
@@ -501,7 +534,7 @@ const handleSubmit = async () => {
 
             <!-- 数据管理 Section -->
             <div class="space-y-4">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">数据管理</h3>
+              <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">数据管理</h3>
 
               <div class="grid grid-cols-2 gap-3">
                 <!-- 导出按钮 -->
@@ -531,20 +564,20 @@ const handleSubmit = async () => {
                 </button>
               </div>
 
-              <div class="p-3 bg-primary-50 rounded-xl">
+              <div class="p-3 bg-primary/10 rounded-xl">
                 <div class="flex items-start gap-2">
-                  <svg class="w-4 h-4 text-primary-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg class="w-4 h-4 text-primary mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                   </svg>
-                  <p class="text-xs text-primary-700">导出数据将包含所有历史记录、分组、收藏和图片。可用于在不同电脑之间迁移数据。</p>
+                  <p class="text-xs text-primary">导出数据将包含所有历史记录、分组、收藏和图片。可用于在不同电脑之间迁移数据。</p>
                 </div>
               </div>
             </div>
 
             <!-- Log Management Section -->
             <div class="space-y-4">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">日志管理</h3>
-              
+              <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">日志管理</h3>
+
               <div class="grid grid-cols-2 gap-3">
                 <!-- Open Log Folder -->
                 <button
@@ -583,19 +616,19 @@ const handleSubmit = async () => {
 
             <!-- 版本信息 -->
             <div class="space-y-4">
-              <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">关于</h3>
+              <h3 class="text-xs font-semibold text-base-content/50 uppercase tracking-wider">关于</h3>
               
-              <div class="p-4 bg-gray-50 rounded-xl">
+              <div class="p-4 bg-base-200 rounded-xl">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3">
-                    <div class="w-10 h-10 bg-primary-100 rounded-xl flex items-center justify-center">
-                      <svg class="w-5 h-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div class="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center">
+                      <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
                       </svg>
                     </div>
                     <div>
-                      <p class="text-sm font-medium text-gray-900">剪贴板管理器</p>
-                      <p class="text-xs text-gray-500">版本 {{ appVersion }}</p>
+                      <p class="text-sm font-medium text-base-content">剪贴板管理器</p>
+                      <p class="text-xs text-base-content/60">版本 {{ appVersion }}</p>
                     </div>
                   </div>
                 </div>
@@ -605,7 +638,7 @@ const handleSubmit = async () => {
         </div>
 
         <!-- Footer -->
-        <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+        <div class="px-5 py-4 bg-base-200 border-t border-base-300 flex justify-end gap-2 flex-shrink-0">
           <button
             type="button"
             class="btn btn-sm btn-ghost"
@@ -654,7 +687,7 @@ const handleSubmit = async () => {
   <!-- 导入模式选择弹窗 -->
   <Transition name="dialog">
     <div v-if="showImportModeDialog" class="dialog-overlay" @click.self="showImportModeDialog = false">
-      <div class="bg-white rounded-2xl shadow-xl shadow-black/10 w-80 max-w-[90vw] overflow-hidden">
+      <div class="dialog-box w-80 max-w-[90vw]">
         <!-- Header -->
         <div class="px-5 pt-5 pb-4">
           <div class="flex items-center gap-3">
@@ -663,16 +696,16 @@ const handleSubmit = async () => {
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
               </svg>
             </div>
-            <h3 class="text-base font-semibold text-gray-900">导入数据</h3>
+            <h3 class="text-base font-semibold text-base-content">导入数据</h3>
           </div>
-          <p class="mt-3 text-sm text-gray-600">请选择导入方式：</p>
+          <p class="mt-3 text-sm text-base-content/70">请选择导入方式：</p>
         </div>
 
         <!-- Options -->
         <div class="px-5 pb-5 space-y-3">
           <button
             @click="doImport('merge')"
-            class="w-full p-3 text-left rounded-xl border-2 border-gray-100 hover:border-primary-300 hover:bg-primary-50 transition-all duration-200"
+            class="w-full p-3 text-left rounded-xl border-2 border-base-200 hover:border-primary hover:bg-primary/10 transition-all duration-200"
           >
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -681,15 +714,15 @@ const handleSubmit = async () => {
                 </svg>
               </div>
               <div>
-                <p class="text-sm font-medium text-gray-900">合并数据</p>
-                <p class="text-xs text-gray-500">保留现有数据，自动跳过重复项</p>
+                <p class="text-sm font-medium text-base-content">合并数据</p>
+                <p class="text-xs text-base-content/60">保留现有数据，自动跳过重复项</p>
               </div>
             </div>
           </button>
 
           <button
             @click="doImport('replace')"
-            class="w-full p-3 text-left rounded-xl border-2 border-gray-100 hover:border-red-300 hover:bg-red-50 transition-all duration-200"
+            class="w-full p-3 text-left rounded-xl border-2 border-base-200 hover:border-red-300 hover:bg-red-50 dark:hover:bg-red-900/30 transition-all duration-200"
           >
             <div class="flex items-center gap-3">
               <div class="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -698,15 +731,15 @@ const handleSubmit = async () => {
                 </svg>
               </div>
               <div>
-                <p class="text-sm font-medium text-gray-900">替换数据</p>
-                <p class="text-xs text-gray-500">清空现有数据，使用导入数据</p>
+                <p class="text-sm font-medium text-base-content">替换数据</p>
+                <p class="text-xs text-base-content/60">清空现有数据，使用导入数据</p>
               </div>
             </div>
           </button>
         </div>
 
         <!-- Cancel -->
-        <div class="px-5 py-3 bg-gray-50 border-t border-gray-100">
+        <div class="px-5 py-3 bg-base-200 border-t border-base-300">
           <button
             @click="showImportModeDialog = false"
             class="btn btn-sm btn-ghost w-full"

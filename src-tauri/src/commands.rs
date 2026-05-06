@@ -1068,6 +1068,7 @@ pub async fn cleanup_history(app: AppHandle) -> Result<(), String> {
         lan_queue_password: String::new(),
         lan_queue_name: "LAN Queue".to_string(),
         lan_queue_member_name: String::new(),
+        theme: "light".to_string(),
     });
     
     cleanup_expired_data(&app, &settings).await

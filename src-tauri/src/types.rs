@@ -24,6 +24,12 @@ pub struct AppSettings {
     pub lan_queue_name: String,
     #[serde(default)]
     pub lan_queue_member_name: String,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "light".to_string()
 }
 
 fn default_lan_queue_role() -> String {
