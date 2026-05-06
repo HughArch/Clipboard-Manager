@@ -11,7 +11,7 @@ import { useTheme, type Theme } from '../composables/useTheme'
 const appVersion = ref(getFormattedVersion())
 
 // 主题管理
-const { currentTheme, setTheme, getThemeLabel, getThemeIcon } = useTheme()
+const { setTheme, getThemeLabel, getThemeIcon } = useTheme()
 
 interface AppSettings {
   max_history_items: number
