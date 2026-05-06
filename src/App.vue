@@ -21,11 +21,12 @@ interface SourceAppInfo {
   bundle_id?: string
 }
 import Database from '@tauri-apps/plugin-sql'
-import { 
-  onTextUpdate, 
+import {
+  onTextUpdate,
   onImageUpdate,
   onFilesUpdate,
   startListening,
+  stopMonitor,
   writeText
 } from 'tauri-plugin-clipboard-api'
 
@@ -238,6 +239,7 @@ let unlistenClipboardImage: (() => void) | null = null
 let unlistenClipboardFiles: (() => void) | null = null
 let unlistenClipboard: (() => Promise<void>) | null = null
 let unlistenLanClipboard: (() => void) | null = null
+let unlistenToggleMonitoring: (() => void) | null = null
 let memoryCleanupInterval: ReturnType<typeof setInterval> | null = null
 let historyCleanupInterval: ReturnType<typeof setInterval> | null = null
 
@@ -2786,18 +2788,12 @@ onMounted(async () => {
     unlistenClipboard = await startListening()
     logger.info('剪贴板监听器已启动（无内存泄漏版本）')
 
-    // 监听 LAN 剪贴板广播
-    unlistenLanClipboard = await listen<LanClipboardItem>('lan-clipboard-item', async (event) => {
-      await handleLanClipboardItem(event.payload)
-    })
-
-    // 启动后按上次状态自动恢复 LAN 队列（主机/客户端）
-    await restoreLanQueueOnStartup()
-
-    // 注册剪贴板文本变化监听器
+    // 注册剪贴板监听器的函数（可复用于恢复监听）
+    const registerClipboardListeners = async () => {
+      // 注册剪贴板文本变化监听器
     unlistenClipboardText = await onTextUpdate(async (newText: string) => {
       try {
-        logger.debug('检测到文本剪贴板变化', { length: newText.length })
+        logger.info(`[文本监听] 收到文本变化事件, unlistenClipboardText=${!!unlistenClipboardText}, length=${newText.length}`)
 
         // 如果是主动复制操作（如粘贴图片），跳过监听器处理
         if (isManualCopy) {
@@ -3237,6 +3233,50 @@ onMounted(async () => {
         isProcessingClipboard = false
       }
     })
+    } // end registerClipboardListeners
+
+    // 首次注册剪贴板监听器
+    await registerClipboardListeners()
+
+    // 监听托盘菜单的"停止监听"切换事件
+    logger.info('[监听切换] 注册 toggle-monitoring 事件监听器')
+    unlistenToggleMonitoring = await listen<boolean>('toggle-monitoring', async (event) => {
+      const shouldPause = event.payload
+      logger.info(`[监听切换] 收到 toggle-monitoring 事件, payload=${shouldPause}`)
+      if (shouldPause) {
+        // 停止监听：先清理 JS 事件监听器，再停止底层原生监听线程
+        logger.info('[监听切换] 开始停止监听...')
+        if (unlistenClipboardText) { unlistenClipboardText(); unlistenClipboardText = null; logger.info('[监听切换] unlistenClipboardText 已清理') }
+        if (unlistenClipboardImage) { unlistenClipboardImage(); unlistenClipboardImage = null; logger.info('[监听切换] unlistenClipboardImage 已清理') }
+        if (unlistenClipboardFiles) { unlistenClipboardFiles(); unlistenClipboardFiles = null; logger.info('[监听切换] unlistenClipboardFiles 已清理') }
+        if (unlistenClipboard) { unlistenClipboard(); unlistenClipboard = null; logger.info('[监听切换] unlistenClipboard 已清理') }
+        try {
+          await stopMonitor()
+          logger.info('[监听切换] stopMonitor() 调用成功')
+        } catch (e) {
+          logger.error(`[监听切换] stopMonitor() 调用失败: ${e}`)
+        }
+        logger.info('剪贴板监听已暂停（通过托盘菜单）')
+      } else {
+        // 恢复监听：重新启动原生监听并注册事件处理器
+        logger.info('[监听切换] 开始恢复监听...')
+        try {
+          unlistenClipboard = await startListening()
+          await registerClipboardListeners()
+          logger.info('[监听切换] 剪贴板监听已恢复')
+        } catch (e) {
+          logger.error(`[监听切换] 恢复监听失败: ${e}`)
+        }
+      }
+    })
+
+    // 监听 LAN 剪贴板广播
+    unlistenLanClipboard = await listen<LanClipboardItem>('lan-clipboard-item', async (event) => {
+      await handleLanClipboardItem(event.payload)
+    })
+
+    // 启动后按上次状态自动恢复 LAN 队列（主机/客户端）
+    await restoreLanQueueOnStartup()
 
     window.addEventListener('keydown', handleKeyDown)
     
@@ -3380,6 +3420,11 @@ onUnmounted(() => {
   if (unlistenLanClipboard) {
     unlistenLanClipboard()
     unlistenLanClipboard = null
+  }
+
+  if (unlistenToggleMonitoring) {
+    unlistenToggleMonitoring()
+    unlistenToggleMonitoring = null
   }
   
   // 清理定期内存清理定时器

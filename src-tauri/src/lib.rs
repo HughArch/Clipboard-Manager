@@ -316,8 +316,10 @@ pub fn run() {
 
             // 创建系统托盘菜单
             let show_hide_item = MenuItem::with_id(app, "toggle", "显示/隐藏", true, None::<&str>)?;
+            let is_monitoring_paused = Arc::new(AtomicBool::new(false));
+            let stop_monitor_item = MenuItem::with_id(app, "stop-monitor", "⏸ 停止监听", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_hide_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_hide_item, &stop_monitor_item, &quit_item])?;
 
             // 创建系统托盘
             let _tray = TrayIconBuilder::new()
@@ -327,14 +329,14 @@ pub fn run() {
                 .tooltip("Clipboard Manager")
                 .on_tray_icon_event(|tray, event| {
                     match event {
-                        TrayIconEvent::Click { 
+                        TrayIconEvent::Click {
                             button: tauri::tray::MouseButton::Left,
                             button_state: tauri::tray::MouseButtonState::Up,
                             ..
                         } => {
                             toggle_window_visibility(tray.app_handle());
                         }
-                        TrayIconEvent::DoubleClick { 
+                        TrayIconEvent::DoubleClick {
                             button: tauri::tray::MouseButton::Left,
                             ..
                         } => {
@@ -345,23 +347,38 @@ pub fn run() {
                 })
                 .on_menu_event({
                     let should_stop_clone = should_stop.clone();
+                    let is_paused_clone = is_monitoring_paused.clone();
+                    let stop_item_ref = stop_monitor_item.clone();
                     move |app, event| {
-                        match event.id().as_ref() {
+                        let event_id = event.id().as_ref();
+                        match event_id {
                             "toggle" => {
                                 toggle_window_visibility(app);
+                            }
+                            "stop-monitor" => {
+                                let was_paused = is_paused_clone.load(Ordering::Relaxed);
+                                let new_state = !was_paused;
+                                is_paused_clone.store(new_state, Ordering::Relaxed);
+
+                                // 直接通过引用更新托盘菜单文字
+                                let _ = if new_state {
+                                    stop_item_ref.set_text("▶ 恢复监听")
+                                } else {
+                                    stop_item_ref.set_text("⏸ 停止监听")
+                                };
+
+                                // 通知前端切换监听状态
+                                let _ = app.emit("toggle-monitoring", new_state);
+                                tracing::info!("[tray-menu] stop-monitor: paused={}", new_state);
                             }
                             "quit" => {
                                 let app_handle = app.clone();
                                 tauri::async_runtime::spawn(async move {
                                     let _ = lan_queue::lan_queue_leave(app_handle).await;
                                 });
-                                // 停止剪贴板监听器
                                 should_stop_clone.store(true, Ordering::Relaxed);
                                 tracing::info!("正在停止剪贴板监听器...");
-                                
-                                // 等待一小段时间让监听器线程停止
                                 std::thread::sleep(std::time::Duration::from_millis(100));
-                                
                                 tracing::info!("应用程序正常退出");
                                 app.exit(0);
                             }
