@@ -146,6 +146,7 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const showLanQueueManager = ref(false)
+const isPinned = ref(false) // 置顶状态
 const showShortcutsHelp = ref(false)
 const selectedTabIndex = ref(0)
 const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
@@ -1002,6 +1003,12 @@ const handleWindowFocus = async () => {
 
 // 处理窗口失去焦点事件
 const handleWindowBlur = async () => {
+  // 如果启用了置顶，不隐藏窗口
+  if (isPinned.value) {
+    logger.debug('窗口已置顶，失去焦点时不隐藏')
+    return
+  }
+
   // 当窗口失去焦点时，延迟一小段时间后隐藏窗口
   // 这样可以避免快速切换窗口时的闪烁
   setTimeout(async () => {
@@ -1020,6 +1027,18 @@ const handleWindowBlur = async () => {
       logger.error('失去焦点时隐藏窗口失败', { error: String(error) })
     }
   }, 20)
+}
+
+// 切换置顶状态
+const togglePin = async () => {
+  try {
+    const appWindow = getCurrentWindow()
+    isPinned.value = !isPinned.value
+    await appWindow.setAlwaysOnTop(isPinned.value)
+    logger.info('置顶状态已切换', { isPinned: isPinned.value })
+  } catch (error) {
+    logger.error('切换置顶状态失败', { error: String(error) })
+  }
 }
 
 // 隐藏应用窗口
@@ -4530,6 +4549,21 @@ const checkDataConsistency = () => {
                 title="设置"
               >
                 <Cog6ToothIcon class="w-3 h-3" />
+              </button>
+              <button
+                :class="[
+                  'p-1.5 rounded-md transition-colors duration-200',
+                  isPinned
+                    ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                    : 'text-base-content/60 hover:text-base-content hover:bg-base-200'
+                ]"
+                @click="togglePin"
+                :title="isPinned ? '取消置顶' : '置顶窗口'"
+              >
+                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                  <path v-if="isPinned" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"></path>
+                  <path v-else d="M14 4V2h-4v2H8v2h1v6l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2V6h1V4h-3z" fill="none" stroke="currentColor" stroke-width="1.5"></path>
+                </svg>
               </button>
             </div>
           </div>
