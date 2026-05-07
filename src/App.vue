@@ -2077,6 +2077,20 @@ const handleKeyDown = async (e: KeyboardEvent) => {
     return
   }
 
+  // 处理 Ctrl+1~5 快速粘贴前5条记录
+  const numKey = parseInt(e.key)
+  if (numKey >= 1 && numKey <= 5 && isModifierPressed(e)) {
+    e.preventDefault()
+    // 始终使用全部列表（不受当前标签页筛选影响），保证前5条稳定
+    const topItems = clipboardHistory.value
+    if (topItems.length >= numKey) {
+      const targetItem = topItems[numKey - 1]
+      logger.info('[快捷粘贴] Ctrl+' + numKey, { itemId: targetItem.id, type: targetItem.type })
+      copyToClipboard(targetItem, false, false)
+    }
+    return
+  }
+
   // 处理标签页切换（左右箭头键）
   if (e.key === 'ArrowLeft') {
     e.preventDefault()
@@ -4761,6 +4775,12 @@ const checkDataConsistency = () => {
                         <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Shift</kbd><span class="text-base-content/30">+</span>双击</span>
                       </td>
                       <td class="py-1.5 text-base-content/50">粘贴为富文本</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Ctrl</kbd><kbd class="kbd kbd-xs">1</kbd>~<kbd class="kbd kbd-xs">5</kbd></span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">快速粘贴前5条</td>
                     </tr>
                     <tr class="border-b border-base-200">
                       <td class="py-1.5 pr-2 whitespace-nowrap">
