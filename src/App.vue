@@ -146,6 +146,7 @@ const searchQuery = ref('')
 const selectedItem = ref(clipboardHistory.value[0])
 const showSettings = ref(false)
 const showLanQueueManager = ref(false)
+const showShortcutsHelp = ref(false)
 const selectedTabIndex = ref(0)
 const selectedGroupId = ref<number | null>(null) // 当前选中的分组ID
 const showGroupDropdown = ref(false) // 是否显示分组下拉菜单
@@ -4501,6 +4502,16 @@ const checkDataConsistency = () => {
               </button>
               <button
                 class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded-md transition-colors duration-200"
+                :class="{ 'bg-base-200 text-base-content': showShortcutsHelp }"
+                @click="showShortcutsHelp = !showShortcutsHelp"
+                title="快捷键"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </button>
+              <button
+                class="p-1.5 text-base-content/60 hover:text-base-content hover:bg-base-200 rounded-md transition-colors duration-200"
                 @click="showSettings = !showSettings"
                 title="设置"
               >
@@ -4511,7 +4522,7 @@ const checkDataConsistency = () => {
         </div>
         
         <div class="flex-1 p-4 overflow-y-auto min-h-0">
-          <div v-if="selectedItem" class="h-full">
+          <div v-if="selectedItem" class="h-full relative">
             <div class="bg-base-200 rounded-lg border border-base-300 p-4 min-h-full preview-container">
               <template v-if="selectedItem.type === 'text'">
                 <!-- 富文本 HTML 渲染预览 -->
@@ -4708,18 +4719,122 @@ const checkDataConsistency = () => {
                 </div>
               </template>
             </div>
+
+            <!-- 快捷键覆盖层（选中条目时，点击问号按钮显示） -->
+            <div
+              v-if="showShortcutsHelp"
+              class="absolute inset-0 bg-base-100/95 backdrop-blur-sm rounded-lg z-10 flex flex-col items-center justify-center p-4"
+              @click="showShortcutsHelp = false"
+            >
+              <div class="w-full max-w-[260px]" @click.stop>
+                <div class="text-[10px] uppercase tracking-wider text-base-content/30 font-semibold mb-3 text-center">快捷键</div>
+                <table class="w-full text-xs">
+                  <tbody>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">↑</kbd><kbd class="kbd kbd-xs">↓</kbd></span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">切换选中条目</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2"><kbd class="kbd kbd-xs">Enter</kbd></td>
+                      <td class="py-1.5 text-base-content/50">粘贴为纯文本</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Shift</kbd><kbd class="kbd kbd-xs">Enter</kbd></span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">粘贴为富文本</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Ctrl</kbd><kbd class="kbd kbd-xs">Enter</kbd></span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">粘贴为路径</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap text-base-content/50">双击</td>
+                      <td class="py-1.5 text-base-content/50">粘贴为纯文本</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Shift</kbd><span class="text-base-content/30">+</span>双击</span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">粘贴为富文本</td>
+                    </tr>
+                    <tr class="border-b border-base-200">
+                      <td class="py-1.5 pr-2 whitespace-nowrap">
+                        <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd></span>
+                      </td>
+                      <td class="py-1.5 text-base-content/50">切换标签页</td>
+                    </tr>
+                    <tr>
+                      <td class="py-1.5 pr-2"><kbd class="kbd kbd-xs">Esc</kbd></td>
+                      <td class="py-1.5 text-base-content/50">隐藏窗口</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-          <div v-else class="h-full flex flex-col items-center justify-center text-base-content/40">
-            <div class="w-16 h-16 bg-base-200 rounded-full flex items-center justify-center mb-3">
-              <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div v-else class="h-full flex flex-col items-center justify-center text-base-content/40 px-2">
+            <div class="w-14 h-14 bg-base-200 rounded-full flex items-center justify-center mb-3">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path>
               </svg>
             </div>
-            <p class="text-base font-medium mb-2">暂无剪贴板条目</p>
-            <p class="text-xs text-center max-w-sm">
-              从剪贴板历史中选择任何条目以查看其内容。 
-              双击或按Enter键粘贴它。
-            </p>
+            <p class="text-sm font-medium mb-3">选择条目以预览内容</p>
+
+            <!-- 快捷键说明 -->
+            <div class="w-full max-w-[260px]">
+              <div class="text-[10px] uppercase tracking-wider text-base-content/30 font-semibold mb-2 text-center">快捷键</div>
+              <table class="w-full text-xs">
+                <tbody>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">
+                      <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">↑</kbd><kbd class="kbd kbd-xs">↓</kbd></span>
+                    </td>
+                    <td class="py-1.5 text-base-content/50">切换选中条目</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2"><kbd class="kbd kbd-xs">Enter</kbd></td>
+                    <td class="py-1.5 text-base-content/50">粘贴为纯文本</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">
+                      <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Shift</kbd><kbd class="kbd kbd-xs">Enter</kbd></span>
+                    </td>
+                    <td class="py-1.5 text-base-content/50">粘贴为富文本</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">
+                      <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Ctrl</kbd><kbd class="kbd kbd-xs">Enter</kbd></span>
+                    </td>
+                    <td class="py-1.5 text-base-content/50">粘贴为路径</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap text-base-content/50">双击</td>
+                    <td class="py-1.5 text-base-content/50">粘贴为纯文本</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">
+                      <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">Shift</kbd><span class="text-base-content/30">+</span>双击</span>
+                    </td>
+                    <td class="py-1.5 text-base-content/50">粘贴为富文本</td>
+                  </tr>
+                  <tr class="border-b border-base-200">
+                    <td class="py-1.5 pr-2 whitespace-nowrap">
+                      <span class="inline-flex gap-0.5"><kbd class="kbd kbd-xs">←</kbd><kbd class="kbd kbd-xs">→</kbd></span>
+                    </td>
+                    <td class="py-1.5 text-base-content/50">切换标签页</td>
+                  </tr>
+                  <tr>
+                    <td class="py-1.5 pr-2"><kbd class="kbd kbd-xs">Esc</kbd></td>
+                    <td class="py-1.5 text-base-content/50">隐藏窗口</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
