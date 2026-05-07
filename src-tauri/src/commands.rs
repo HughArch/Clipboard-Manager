@@ -1220,29 +1220,35 @@ fn windows_auto_paste() -> Result<(), String> {
     use rdev::{simulate, EventType, Key, SimulateError};
     use std::thread;
     use std::time::Duration;
-    
+
     tracing::info!("使用 rdev 库执行 Windows 自动粘贴...");
-    
+
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
         let delay = Duration::from_millis(5);
         simulate(event_type)?;
         thread::sleep(delay);
         Ok(())
     }
-    
+
+    // 先释放可能被用户按住的修饰键（Shift），防止干扰 Ctrl+V 模拟
+    send(&EventType::KeyRelease(Key::ShiftLeft))
+        .map_err(|e| format!("释放 Shift 键失败: {:?}", e))?;
+    send(&EventType::KeyRelease(Key::ShiftRight))
+        .map_err(|e| format!("释放 Shift 键失败: {:?}", e))?;
+
     // 模拟 Ctrl+V 按键序列
     send(&EventType::KeyPress(Key::ControlLeft))
         .map_err(|e| format!("按下 Ctrl 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyPress(Key::KeyV))
         .map_err(|e| format!("按下 V 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyRelease(Key::KeyV))
         .map_err(|e| format!("释放 V 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyRelease(Key::ControlLeft))
         .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
-    
+
     tracing::info!("rdev Windows 粘贴操作执行完成");
     Ok(())
 }
@@ -1253,29 +1259,35 @@ fn linux_auto_paste() -> Result<(), String> {
     use rdev::{simulate, EventType, Key, SimulateError};
     use std::thread;
     use std::time::Duration;
-    
+
     tracing::info!("使用 rdev 库执行 Linux 自动粘贴...");
-    
+
     fn send(event_type: &EventType) -> Result<(), SimulateError> {
         let delay = Duration::from_millis(5);
         simulate(event_type)?;
         thread::sleep(delay);
         Ok(())
     }
-    
+
+    // 先释放可能被用户按住的修饰键（Shift），防止干扰 Ctrl+V 模拟
+    send(&EventType::KeyRelease(Key::ShiftLeft))
+        .map_err(|e| format!("释放 Shift 键失败: {:?}", e))?;
+    send(&EventType::KeyRelease(Key::ShiftRight))
+        .map_err(|e| format!("释放 Shift 键失败: {:?}", e))?;
+
     // 模拟 Ctrl+V 按键序列
     send(&EventType::KeyPress(Key::ControlLeft))
         .map_err(|e| format!("按下 Ctrl 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyPress(Key::KeyV))
         .map_err(|e| format!("按下 V 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyRelease(Key::KeyV))
         .map_err(|e| format!("释放 V 键失败: {:?}", e))?;
-    
+
     send(&EventType::KeyRelease(Key::ControlLeft))
         .map_err(|e| format!("释放 Ctrl 键失败: {:?}", e))?;
-    
+
     tracing::info!("rdev Linux 粘贴操作执行完成");
     Ok(())
 }

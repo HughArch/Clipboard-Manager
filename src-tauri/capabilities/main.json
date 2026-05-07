@@ -195,6 +195,7 @@
     "clipboard:allow-write-image-binary",
     "clipboard:allow-read-html",
     "clipboard:allow-write-html",
+    "clipboard:allow-write-html-and-text",
     "clipboard:allow-read-rtf",
     "clipboard:allow-write-rtf",
     "clipboard:allow-read-files",

@@ -27,7 +27,10 @@ import {
   onFilesUpdate,
   startListening,
   stopMonitor,
-  writeText
+  writeText,
+  readHtml,
+  hasHTML,
+  writeHtmlAndText
 } from 'tauri-plugin-clipboard-api'
 
 
@@ -662,6 +665,22 @@ const parseFileMetadata = (metadata: any): { files: Array<{path: string, name: s
     files: metadata.files,
     file_count: metadata.file_count || metadata.files.length
   }
+}
+
+// 解析 metadata 中的 HTML 富文本内容
+const parseHtmlMetadata = (metadata: any): string | null => {
+  if (!metadata) return null
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata)
+    } catch (e) {
+      return null
+    }
+  }
+  if (typeof metadata !== 'object' || typeof metadata.html !== 'string') {
+    return null
+  }
+  return metadata.html
 }
 
 // 获取文件名（从content或metadata中提取）
@@ -1856,11 +1875,11 @@ const resolveImage = (item: any): string | undefined => {
 }
 
 // 复制内容到系统剪贴板并智能粘贴到目标应用
-const copyToClipboard = async (item: any, asPath: boolean = false) => {
+const copyToClipboard = async (item: any, asPath: boolean = false, asRichText: boolean = false) => {
   if (!item) return
 
   const startTime = performance.now()
-  logger.info('开始智能复制和粘贴', { type: item.type, id: item.id, asPath })
+  logger.info('开始智能复制和粘贴', { type: item.type, id: item.id, asPath, asRichText })
 
   try {
     // 设置主动复制标志，防止监听器误触发
@@ -1892,7 +1911,20 @@ const copyToClipboard = async (item: any, asPath: boolean = false) => {
       // 写入系统剪贴板
       (async () => {
         if (item.type === 'text') {
-          await writeText(item.content)
+          // 富文本粘贴：使用 writeHtmlAndText 同时写入 HTML 和纯文本
+          if (asRichText) {
+            const htmlContent = parseHtmlMetadata(item.metadata)
+            logger.info('[富文本粘贴] 尝试富文本粘贴', { asRichText, hasMetadata: !!item.metadata, hasHtml: !!htmlContent, htmlLength: htmlContent?.length })
+            if (htmlContent) {
+              await writeHtmlAndText(htmlContent, item.content)
+              logger.info('[富文本粘贴] writeHtmlAndText 调用成功')
+            } else {
+              logger.warn('[富文本粘贴] 无 HTML 内容，回退到纯文本粘贴')
+              await writeText(item.content)
+            }
+          } else {
+            await writeText(item.content)
+          }
         } else if (item.type === 'file') {
           // 文件处理：
           const metadata = parseFileMetadata(item.metadata)
@@ -2089,9 +2121,12 @@ const handleKeyDown = async (e: KeyboardEvent) => {
     e.preventDefault()
     // 检查是否按下了修饰键 (Ctrl on Win/Linux, Cmd on Mac)
     const asPath = isModifierPressed(e)
+    // Shift+Enter 粘贴富文本
+    const asRichText = e.shiftKey
+    logger.info('[键盘粘贴] Enter 键触发', { asPath, asRichText, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey })
     // 按Enter键复制当前选中的项目到剪贴板
     if (selectedItem.value) {
-      copyToClipboard(selectedItem.value, asPath)
+      copyToClipboard(selectedItem.value, asPath, asRichText)
     }
     return
   }
@@ -2115,7 +2150,9 @@ const handleDoubleClick = (event: MouseEvent, item: any) => {
   // 检查是否按下了修饰键 (Ctrl on Win/Linux, Cmd on Mac)
   // 注意：MouseEvents 有 ctrlKey, metaKey 等属性
   const asPath = isMac() ? event.metaKey : event.ctrlKey
-  copyToClipboard(item, asPath)
+  const asRichText = event.shiftKey
+  logger.info('[双击粘贴] 触发', { asPath, asRichText, shiftKey: event.shiftKey })
+  copyToClipboard(item, asPath, asRichText)
 }
 
 // 处理按钮切换
@@ -2854,6 +2891,29 @@ onMounted(async () => {
           logger.error('获取源应用信息失败', { error: String(error) })
         }
 
+        // 检查剪贴板是否同时包含 HTML 内容（富文本）
+        let htmlContent: string | null = null
+        try {
+          const hasHtml = await hasHTML()
+          logger.info('[HTML捕获] hasHTML 检查结果', { hasHtml, textLength: newText.length })
+          if (hasHtml) {
+            htmlContent = await readHtml()
+            logger.info('[HTML捕获] readHtml 结果', { htmlLength: htmlContent?.length, htmlPreview: htmlContent?.substring(0, 200) })
+            // HTML 与纯文本相同则不是真正的富文本
+            if (htmlContent === newText) {
+              logger.info('[HTML捕获] HTML 与纯文本相同，忽略')
+              htmlContent = null
+            }
+            // 跳过过大的 HTML 内容
+            if (htmlContent && htmlContent.length > 500_000) {
+              logger.warn('HTML content too large, skipping rich text capture', { size: htmlContent.length })
+              htmlContent = null
+            }
+          }
+        } catch (e) {
+          logger.debug('检查HTML内容失败，可能不存在', { error: String(e) })
+        }
+
         const item = {
           content: newText || '',
           type: 'text',
@@ -2861,7 +2921,8 @@ onMounted(async () => {
           isFavorite: false,
           imagePath: null,
           sourceAppName: sourceAppInfo.name || 'Unknown',
-          sourceAppIcon: sourceAppInfo.icon || null
+          sourceAppIcon: sourceAppInfo.icon || null,
+          metadata: htmlContent ? JSON.stringify({ html: htmlContent }) : null
         }
 
         // 确保 content 不为空
@@ -2873,9 +2934,9 @@ onMounted(async () => {
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.metadata]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -3731,6 +3792,7 @@ const checkDataConsistency = () => {
                             <div class="badge badge-xs" :class="item.type === 'text' ? 'badge-success' : item.type === 'file' ? 'badge-info' : 'badge-secondary'">
                               {{ item.type === 'file' ? '文件' : item.type }}
                             </div>
+                            <span v-if="item.type === 'text' && parseHtmlMetadata(item.metadata)" class="badge badge-xs badge-warning" title="包含富文本格式">HTML</span>
                             <span class="text-xs opacity-60">
                               · {{ item.sourceAppName }}
                             </span>
@@ -4417,7 +4479,7 @@ const checkDataConsistency = () => {
                 :class="selectedItem.type === 'text' ? 'bg-green-400' : 'bg-purple-400'"
               ></div>
               <h2 class="text-base font-semibold text-base-content">
-                {{ selectedItem?.type === 'text' ? '文本内容' : selectedItem?.type === 'image' ? '图片预览' : selectedItem?.type === 'file' ? (isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '') ? 'PDF 文档' : '文件信息') : '选择条目' }}
+                {{ selectedItem?.type === 'text' ? (parseHtmlMetadata(selectedItem?.metadata) ? '富文本内容' : '文本内容') : selectedItem?.type === 'image' ? '图片预览' : selectedItem?.type === 'file' ? (isPDFFile(parseFileMetadata(selectedItem.metadata)?.files?.[0]?.extension || '') ? 'PDF 文档' : '文件信息') : '选择条目' }}
               </h2>
             </div>
             <div class="flex items-center space-x-2">
@@ -4452,8 +4514,25 @@ const checkDataConsistency = () => {
           <div v-if="selectedItem" class="h-full">
             <div class="bg-base-200 rounded-lg border border-base-300 p-4 min-h-full preview-container">
               <template v-if="selectedItem.type === 'text'">
-                <div class="prose prose-sm max-w-none preview-content">
-                  <pre class="whitespace-pre-wrap break-words text-base-content font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
+                <!-- 富文本 HTML 渲染预览 -->
+                <template v-if="parseHtmlMetadata(selectedItem.metadata)">
+                  <div
+                    class="prose prose-sm max-w-none preview-content text-sm text-base-content leading-normal overflow-hidden"
+                    v-html="parseHtmlMetadata(selectedItem.metadata)"
+                  ></div>
+                </template>
+                <!-- 纯文本预览 -->
+                <template v-else>
+                  <div class="prose prose-sm max-w-none preview-content">
+                    <pre class="whitespace-pre-wrap break-words text-base-content font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
+                  </div>
+                </template>
+                <!-- 富文本提示 -->
+                <div v-if="parseHtmlMetadata(selectedItem.metadata)" class="mt-3 pt-3 border-t border-base-300 flex items-center gap-2 text-xs text-base-content/60">
+                  <svg class="w-3.5 h-3.5 text-warning flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                  </svg>
+                  <span>包含富文本格式 — 按 Shift+Enter 粘贴为富文本</span>
                 </div>
               </template>
               <template v-else-if="selectedItem.type === 'file'">
