@@ -354,6 +354,7 @@ const addHistoryItemToMemory = (newItem: any) => {
   if (existingIndex === -1) {
     clipboardHistory.value.unshift(newItem)
     triggerRef(clipboardHistory)
+    sortByPinThenTimestamp()
     if (allDataLoaded.value) {
       allHistoryCache.value.unshift(newItem)
       triggerRef(allHistoryCache)
@@ -402,9 +403,9 @@ const handleLanClipboardItem = async (item: LanClipboardItem) => {
     }
     try {
       await db.execute(
-        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.content, entry.type, entry.timestamp, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.metadata]
+        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.content, entry.type, entry.timestamp, 0, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.metadata]
       )
       const rows = await db.select(`SELECT last_insert_rowid() as id`)
       const id = rows[0]?.id || Date.now()
@@ -450,9 +451,9 @@ const handleLanClipboardItem = async (item: LanClipboardItem) => {
 
     try {
       await db.execute(
-        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash, metadata)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [entry.content, entry.type, entry.timestamp, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.dataHash, entry.metadata]
+        `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, data_hash, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [entry.content, entry.type, entry.timestamp, 0, 0, entry.imagePath, entry.sourceAppName, entry.sourceAppIcon, entry.dataHash, entry.metadata]
       )
       const rows = await db.select(`SELECT last_insert_rowid() as id`)
       const id = rows[0]?.id || Date.now()
@@ -526,7 +527,7 @@ const trimMemoryHistory = () => {
     
     // 从后往前遍历（最旧的在后面）
     for (let i = clipboardHistory.value.length - 1; i >= 0 && removed < itemsToRemove; i--) {
-      if (!clipboardHistory.value[i].isFavorite) {
+      if (!clipboardHistory.value[i].isFavorite && !clipboardHistory.value[i].isPinned) {
         clipboardHistory.value.splice(i, 1)
         removed++
       }
@@ -1175,6 +1176,52 @@ const toggleFavorite = async (item: any) => {
   }
 }
 
+const sortByPinThenTimestamp = () => {
+  clipboardHistory.value = [...clipboardHistory.value].sort((a, b) => {
+    if (a.isPinned && !b.isPinned) return -1
+    if (!a.isPinned && b.isPinned) return 1
+    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  })
+  triggerRef(clipboardHistory)
+}
+
+const toggleItemPin = async (item: any) => {
+  try {
+    const newPinStatus = !item.isPinned
+
+    // 更新数据库
+    await db.execute(
+      `UPDATE clipboard_history SET is_pinned = ? WHERE id = ?`,
+      [newPinStatus ? 1 : 0, item.id]
+    )
+
+    // 更新内存中的状态
+    const index = clipboardHistory.value.findIndex(i => i.id === item.id)
+    if (index !== -1) {
+      clipboardHistory.value = clipboardHistory.value.map((historyItem, idx) => {
+        if (idx === index) {
+          return { ...historyItem, isPinned: newPinStatus }
+        }
+        return historyItem
+      })
+
+      // 更新全部数据缓存中的置顶状态
+      if (allDataLoaded.value) {
+        const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
+        if (cacheIndex !== -1) {
+          allHistoryCache.value[cacheIndex] = { ...allHistoryCache.value[cacheIndex], isPinned: newPinStatus }
+          triggerRef(allHistoryCache)
+        }
+      }
+
+      // 置顶排序
+      sortByPinThenTimestamp()
+    }
+  } catch (error) {
+    logger.error('切换置顶状态失败', { itemId: item.id, error: String(error) })
+  }
+}
+
 // 删除条目功能
 const deleteItem = (item: any) => {
   const contentPreview = item.type === 'text' 
@@ -1602,10 +1649,10 @@ const loadGroupData = async (groupId: number) => {
   // 始终从数据库查询分组数据，避免仅使用内存缓存导致展示不全
   try {
     const rows = await db!.select(
-      `SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
+      `SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
        FROM clipboard_history
        WHERE group_id = ?
-       ORDER BY timestamp DESC
+       ORDER BY is_pinned DESC, timestamp DESC
        LIMIT ?`,
       [groupId, MAX_MEMORY_ITEMS]
     )
@@ -1693,6 +1740,9 @@ const handleContextMenuAction = (action: string) => {
       break
     case 'favorite':
       toggleFavorite(item)
+      break
+    case 'pin':
+      toggleItemPin(item)
       break
     case 'delete':
       deleteItem(item)
@@ -1797,7 +1847,8 @@ const moveItemToFront = async (itemId: number) => {
       
       // 触发响应式更新
       triggerRef(clipboardHistory)
-      
+      sortByPinThenTimestamp()
+
       // 如果移动的项目就是当前选中的项目，更新选中项目的引用
       if (selectedItem.value?.id === itemId) {
         selectedItem.value = item
@@ -1816,7 +1867,7 @@ const moveItemToFront = async (itemId: number) => {
     } else {
       // 如果内存中没有找到，从数据库重新加载该条目
       const dbResult = await db.select(
-        'SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, metadata FROM clipboard_history WHERE id = ?',
+        'SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, metadata FROM clipboard_history WHERE id = ?',
         [itemId]
       )
       
@@ -1828,6 +1879,7 @@ const moveItemToFront = async (itemId: number) => {
           type: row.type,
           timestamp: newTimestamp, // 使用新的时间戳
           isFavorite: row.is_favorite === 1,
+          isPinned: row.is_pinned === 1,
           imagePath: row.image_path ?? null,
           sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
@@ -1839,7 +1891,8 @@ const moveItemToFront = async (itemId: number) => {
         // 添加到内存列表的开头
         clipboardHistory.value.unshift(item)
         triggerRef(clipboardHistory)
-        
+        sortByPinThenTimestamp()
+
         // 执行内存清理以防止列表过长
         trimMemoryHistory()
       }
@@ -2421,9 +2474,9 @@ const searchFromDatabase = async () => {
     
     // 构建SQL查询 - 搜索文本类型和文件类型
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
+      SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
       FROM clipboard_history
-      WHERE 
+      WHERE
     `
 
     const params: any[] = []
@@ -2458,7 +2511,7 @@ const searchFromDatabase = async () => {
        sql += " AND type IN ('text', 'file')"
     }
 
-    sql += ' ORDER BY timestamp DESC LIMIT 500' // 限制最多返回500条结果
+    sql += ' ORDER BY is_pinned DESC, timestamp DESC LIMIT 500' // 限制最多返回500条结果
 
     const rows = await db.select(sql, params)
     
@@ -2604,7 +2657,7 @@ const loadMoreHistory = async () => {
     const isGroupTab = selectedTabIndex.value === 4 && selectedGroupId.value !== null
 
     let sql = `
-      SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
+      SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
       FROM clipboard_history
     `
     
@@ -2620,7 +2673,7 @@ const loadMoreHistory = async () => {
       sql += ' WHERE group_id = ?'
     }
     
-    sql += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+    sql += ' ORDER BY is_pinned DESC, timestamp DESC LIMIT ? OFFSET ?'
     
     const params = isGroupTab 
       ? [selectedGroupId.value, 50, currentOffset.value]
@@ -2646,6 +2699,7 @@ const loadMoreHistory = async () => {
           type: row.type,
           timestamp: row.timestamp,
           isFavorite: row.is_favorite === 1,
+          isPinned: row.is_pinned === 1,
           imagePath: row.image_path ?? null,
           sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
@@ -2717,15 +2771,15 @@ const loadRecentHistory = async () => {
     // 对于图片标签页，不加载完整的 content 字段以提高性能
     if (isImagesTab) {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
+        SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, note, group_id, data_hash, metadata
         FROM clipboard_history
         WHERE type = 'image'
-        ORDER BY timestamp DESC LIMIT ?
+        ORDER BY is_pinned DESC, timestamp DESC LIMIT ?
       `
       logger.info('使用优化的图片查询')
     } else {
       sql = `
-        SELECT id, content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
+        SELECT id, content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata
       FROM clipboard_history
     `
     
@@ -2737,7 +2791,7 @@ const loadRecentHistory = async () => {
       sql += ' WHERE group_id = ?'
     }
     
-    sql += ' ORDER BY timestamp DESC LIMIT ?'
+    sql += ' ORDER BY is_pinned DESC, timestamp DESC LIMIT ?'
     }
     
     const dbQueryStart = performance.now()
@@ -2761,6 +2815,7 @@ const loadRecentHistory = async () => {
           type: row.type,
           timestamp: row.timestamp,
           isFavorite: row.is_favorite === 1,
+          isPinned: row.is_pinned === 1,
           imagePath: row.image_path ?? null,
           sourceAppName: row.source_app_name ?? 'Unknown',
           sourceAppIcon: row.source_app_icon ?? null,
@@ -2968,9 +3023,9 @@ onMounted(async () => {
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, metadata)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.metadata]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.metadata]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -2983,7 +3038,8 @@ onMounted(async () => {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
             triggerRef(clipboardHistory)
-            
+            sortByPinThenTimestamp()
+
             // 新数据加入，需要失效缓存
             if (allDataLoaded.value) {
               allHistoryCache.value.unshift(newItem)
@@ -3121,9 +3177,9 @@ onMounted(async () => {
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, data_hash, metadata)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.dataHash, item.metadata]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, data_hash, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.dataHash, item.metadata]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -3136,7 +3192,8 @@ onMounted(async () => {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
             triggerRef(clipboardHistory)
-            
+            sortByPinThenTimestamp()
+
             // 新数据加入，需要失效缓存
             if (allDataLoaded.value) {
               allHistoryCache.value.unshift(newItem)
@@ -3282,9 +3339,9 @@ onMounted(async () => {
         // 插入新记录到数据库
         try {
           await db!.execute(
-            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, metadata)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [item.content, item.type, item.timestamp, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.thumbnailData, item.metadata]
+            `INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [item.content, item.type, item.timestamp, 0, 0, item.imagePath, item.sourceAppName, item.sourceAppIcon, item.thumbnailData, item.metadata]
           )
           const rows = await db!.select(`SELECT last_insert_rowid() as id`)
           const id = rows[0]?.id || Date.now()
@@ -3297,7 +3354,8 @@ onMounted(async () => {
             // 添加到内存列表的开头
             clipboardHistory.value.unshift(newItem)
             triggerRef(clipboardHistory)
-            
+            sortByPinThenTimestamp()
+
             // 新数据加入，需要失效缓存
             if (allDataLoaded.value) {
               allHistoryCache.value.unshift(newItem)
@@ -3789,7 +3847,8 @@ const checkDataConsistency = () => {
                   :data-item-id="item.id"
                   :title="item.note || ''"
                   class="card bg-base-100 border border-base-200 hover:bg-primary/5 cursor-pointer mb-0.5 mx-3 relative group"
-                  :class="{ 
+                  :class="{
+                    'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
                     'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
@@ -3936,6 +3995,17 @@ const checkDataConsistency = () => {
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                       </button>
+                      <!-- 置顶按钮 -->
+                    <button
+                      class="w-3 h-3 hover:bg-blue-500 hover:text-white border rounded flex items-center justify-center"
+                      :class="item.isPinned ? 'bg-blue-100 text-blue-600 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-600' : 'bg-base-200 text-base-content/60 border-base-300'"
+                      @click.stop="toggleItemPin(item)"
+                        title="置顶"
+                    >
+                      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+                      </svg>
+                    </button>
                       <!-- 收藏按钮 -->
                     <button
                       class="w-3 h-3 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
@@ -3990,6 +4060,7 @@ const checkDataConsistency = () => {
                                 :title="item.note || ''"
                                 class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                                 :class="{
+                                  'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
                                   'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                                   'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                                 }"
@@ -4105,6 +4176,7 @@ const checkDataConsistency = () => {
                   :title="item.note || ''"
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
+                    'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
                     'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
@@ -4240,6 +4312,7 @@ const checkDataConsistency = () => {
                   :title="item.note || ''"
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
+                    'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
                     'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
@@ -4391,6 +4464,7 @@ const checkDataConsistency = () => {
                   :title="item.note || ''"
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
+                    'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
                     'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
@@ -5196,6 +5270,17 @@ const checkDataConsistency = () => {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z"></path>
         </svg>
         <span>打开文件位置</span>
+      </button>
+
+      <!-- 置顶选项 -->
+      <button
+        @click="handleContextMenuAction('pin')"
+        class="context-menu-item"
+      >
+        <svg class="context-menu-item-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+        </svg>
+        <span>{{ contextMenuItem?.isPinned ? '取消置顶' : '置顶' }}</span>
       </button>
 
       <!-- 收藏选项 -->

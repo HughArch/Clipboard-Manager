@@ -74,8 +74,8 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     
     // 首先获取需要删除的图片文件路径
     let time_images_query = "
-        SELECT image_path FROM clipboard_history 
-        WHERE timestamp < ? AND is_favorite = 0 AND group_id IS NULL AND image_path IS NOT NULL
+        SELECT image_path FROM clipboard_history
+        WHERE timestamp < ? AND is_favorite = 0 AND is_pinned = 0 AND group_id IS NULL AND image_path IS NOT NULL
     ";
     
     let time_expired_images = match sqlx::query(time_images_query)
@@ -107,8 +107,8 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     }
     
     let time_cleanup_query = "
-        DELETE FROM clipboard_history 
-        WHERE timestamp < ? AND is_favorite = 0 AND group_id IS NULL
+        DELETE FROM clipboard_history
+        WHERE timestamp < ? AND is_favorite = 0 AND is_pinned = 0 AND group_id IS NULL
     ";
     
     match sqlx::query(time_cleanup_query)
@@ -126,7 +126,7 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
     
     // 2. 按数量清理：保留最新的指定数量记录（收藏的和分组的不计入数量限制）
     // 首先获取当前非收藏且非分组记录的总数
-    let count_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE is_favorite = 0 AND group_id IS NULL";
+    let count_query = "SELECT COUNT(*) as count FROM clipboard_history WHERE is_favorite = 0 AND is_pinned = 0 AND group_id IS NULL";
     let count_result = match sqlx::query(count_query)
         .fetch_one(db)
         .await {
@@ -146,15 +146,17 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         
         // 首先获取需要删除的记录的图片路径
         let count_images_query = "
-            SELECT image_path FROM clipboard_history 
-            WHERE is_favorite = 0 
+            SELECT image_path FROM clipboard_history
+            WHERE is_favorite = 0
+            AND is_pinned = 0
             AND group_id IS NULL
             AND image_path IS NOT NULL
             AND id IN (
-                SELECT id FROM clipboard_history 
-                WHERE is_favorite = 0 
+                SELECT id FROM clipboard_history
+                WHERE is_favorite = 0
+                AND is_pinned = 0
                 AND group_id IS NULL
-                ORDER BY timestamp ASC 
+                ORDER BY timestamp ASC
                 LIMIT ?
             )
         ";
@@ -189,14 +191,16 @@ async fn cleanup_expired_data(app: &AppHandle, settings: &AppSettings) -> Result
         
         // 删除最旧的非收藏且非分组记录
         let count_cleanup_query = "
-            DELETE FROM clipboard_history 
-            WHERE is_favorite = 0 
+            DELETE FROM clipboard_history
+            WHERE is_favorite = 0
+            AND is_pinned = 0
             AND group_id IS NULL
             AND id IN (
-                SELECT id FROM clipboard_history 
-                WHERE is_favorite = 0 
+                SELECT id FROM clipboard_history
+                WHERE is_favorite = 0
+                AND is_pinned = 0
                 AND group_id IS NULL
-                ORDER BY timestamp ASC 
+                ORDER BY timestamp ASC
                 LIMIT ?
             )
         ";
@@ -2836,7 +2840,7 @@ pub async fn import_data(app: AppHandle, import_path: String, mode: String) -> R
 
     // === 导入剪贴板记录 ===
     let old_records = sqlx::query(
-        "SELECT content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata FROM clipboard_history ORDER BY id"
+        "SELECT content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata FROM clipboard_history ORDER BY id"
     )
     .fetch_all(&temp_pool)
     .await
@@ -2850,6 +2854,7 @@ pub async fn import_data(app: AppHandle, import_path: String, mode: String) -> R
         let record_type: String = record.try_get("type").unwrap_or_default();
         let timestamp: String = record.try_get("timestamp").unwrap_or_default();
         let is_favorite: i64 = record.try_get("is_favorite").unwrap_or(0);
+        let is_pinned: i64 = record.try_get("is_pinned").unwrap_or(0);
         let old_image_path: Option<String> = record.try_get("image_path").ok().flatten();
         let source_app_name: Option<String> = record.try_get("source_app_name").ok().flatten();
         let source_app_icon: Option<String> = record.try_get("source_app_icon").ok().flatten();
@@ -2899,13 +2904,14 @@ pub async fn import_data(app: AppHandle, import_path: String, mode: String) -> R
         }
 
         sqlx::query(
-            "INSERT INTO clipboard_history (content, type, timestamp, is_favorite, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO clipboard_history (content, type, timestamp, is_favorite, is_pinned, image_path, source_app_name, source_app_icon, thumbnail_data, note, group_id, data_hash, metadata)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&content)
         .bind(&record_type)
         .bind(&timestamp)
         .bind(is_favorite)
+        .bind(is_pinned)
         .bind(&new_image_path)
         .bind(&source_app_name)
         .bind(&source_app_icon)

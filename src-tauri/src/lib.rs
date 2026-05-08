@@ -96,6 +96,11 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await; // 忽略错误，因为字段可能已存在
 
+    // 添加置顶字段（如果不存在）
+    let _ = sqlx::query("ALTER TABLE clipboard_history ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        .execute(&pool)
+        .await; // 忽略错误，因为字段可能已存在
+
     // 创建分组表
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS groups (
@@ -151,9 +156,21 @@ async fn init_database(app: &tauri::AppHandle) -> Result<SqlitePool, String> {
         .execute(&pool)
         .await
         .map_err(|e| format!("无法创建收藏复合索引: {}", e))?;
-    
+
+    // 为置顶字段创建索引
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_history(is_pinned)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建 is_pinned 索引: {}", e))?;
+
+    // 为置顶查询创建复合索引
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_clipboard_pinned_timestamp ON clipboard_history(is_pinned DESC, timestamp DESC)")
+        .execute(&pool)
+        .await
+        .map_err(|e| format!("无法创建置顶复合索引: {}", e))?;
+
     tracing::info!("数据库初始化完成");
-    tracing::info!("已创建数据库索引: type, timestamp, is_favorite, 以及复合索引");
+    tracing::info!("已创建数据库索引: type, timestamp, is_favorite, is_pinned, 以及复合索引");
     Ok(pool)
 }
 
