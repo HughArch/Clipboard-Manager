@@ -1210,6 +1210,12 @@ const toggleItemPin = async (item: any) => {
         const cacheIndex = allHistoryCache.value.findIndex(i => i.id === item.id)
         if (cacheIndex !== -1) {
           allHistoryCache.value[cacheIndex] = { ...allHistoryCache.value[cacheIndex], isPinned: newPinStatus }
+          // 保持缓存按置顶排序
+          allHistoryCache.value = [...allHistoryCache.value].sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1
+            if (!a.isPinned && b.isPinned) return 1
+            return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          })
           triggerRef(allHistoryCache)
         }
       }
@@ -3849,7 +3855,7 @@ const checkDataConsistency = () => {
                   class="card bg-base-100 border border-base-200 hover:bg-primary/5 cursor-pointer mb-0.5 mx-3 relative group"
                   :class="{
                     'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
-                    'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-lg ring-1 ring-blue-300': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -3984,39 +3990,39 @@ const checkDataConsistency = () => {
                         </div>
                       </div>
                     </div>
-                    <div class="card-actions justify-end absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex space-x-1">
+                    <div class="card-actions justify-end absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex gap-0.5">
                       <!-- 删除按钮 -->
                       <button
-                        class="w-3 h-3 bg-red-50 hover:bg-red-500 hover:text-white border border-red-200 text-red-600 rounded flex items-center justify-center"
+                        class="w-4 h-4 bg-base-200 hover:bg-red-500 hover:text-white border border-base-300 text-base-content/60 rounded flex items-center justify-center"
                         @click.stop="deleteItem(item)"
                         title="删除"
                       >
-                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                       </button>
                       <!-- 置顶按钮 -->
                     <button
-                      class="w-3 h-3 hover:bg-blue-500 hover:text-white border rounded flex items-center justify-center"
+                      class="w-4 h-4 hover:bg-blue-500 hover:text-white border rounded flex items-center justify-center"
                       :class="item.isPinned ? 'bg-blue-100 text-blue-600 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-600' : 'bg-base-200 text-base-content/60 border-base-300'"
                       @click.stop="toggleItemPin(item)"
                         title="置顶"
                     >
-                      <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
                       </svg>
                     </button>
                       <!-- 收藏按钮 -->
                     <button
-                      class="w-3 h-3 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
+                      class="w-4 h-4 hover:bg-yellow-500 hover:text-white border rounded flex items-center justify-center"
                       :class="item.isFavorite ? 'bg-yellow-100 text-yellow-600 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-600' : 'bg-base-200 text-base-content/60 border-base-300'"
                       @click.stop="toggleFavorite(item)"
                         title="收藏"
                     >
-                      <svg v-if="!item.isFavorite" class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg v-if="!item.isFavorite" class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
                       </svg>
-                      <svg v-else class="w-2.5 h-2.5 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
+                      <svg v-else class="w-3 h-3 text-yellow-500" fill="currentColor" viewBox="0 0 24 24">
                         <path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path>
                       </svg>
                     </button>
@@ -4061,7 +4067,7 @@ const checkDataConsistency = () => {
                                 class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                                 :class="{
                                   'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
-                                  'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                                  'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-300': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                                   'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                                 }"
                                 @click="selectedItem = item"
@@ -4115,7 +4121,7 @@ const checkDataConsistency = () => {
                         </p>
                       </div>
                     </div>
-                    <div class="flex items-center space-x-1">
+                    <div class="flex items-center gap-0.5">
                       <!-- 删除按钮 -->
                       <button
                         class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
@@ -4123,6 +4129,17 @@ const checkDataConsistency = () => {
                         title="删除"
                       >
                         <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 置顶按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-blue-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100 text-blue-500': item.isPinned }"
+                        @click.stop="toggleItemPin(item)"
+                        title="置顶"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+                        </svg>
                       </button>
                       <!-- 收藏按钮 -->
                       <button
@@ -4177,7 +4194,7 @@ const checkDataConsistency = () => {
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
                     'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-300 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -4251,7 +4268,7 @@ const checkDataConsistency = () => {
                       </div>
                     </div>
                   </div>
-                  <div class="flex items-center space-x-1">
+                  <div class="flex items-center gap-0.5">
                     <!-- 删除按钮 -->
                     <button
                       class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
@@ -4259,6 +4276,17 @@ const checkDataConsistency = () => {
                       title="删除"
                     >
                       <TrashIcon class="w-3.5 h-3.5" />
+                    </button>
+                    <!-- 置顶按钮 -->
+                    <button
+                      class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-blue-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                      :class="{ 'opacity-100 text-blue-500': item.isPinned }"
+                      @click.stop="toggleItemPin(item)"
+                      title="置顶"
+                    >
+                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+                      </svg>
                     </button>
                     <!-- 收藏按钮 -->
                     <button
@@ -4313,7 +4341,7 @@ const checkDataConsistency = () => {
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
                     'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-300 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -4391,7 +4419,7 @@ const checkDataConsistency = () => {
                         </div>
                       </div>
                     </div>
-                    <div class="flex items-center space-x-1">
+                    <div class="flex items-center gap-0.5">
                       <!-- 删除按钮 -->
                       <button
                         class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-red-500 transition-colors duration-200"
@@ -4399,6 +4427,17 @@ const checkDataConsistency = () => {
                         title="删除"
                       >
                         <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 置顶按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-blue-500 transition-colors duration-200"
+                        :class="{ 'text-blue-500': item.isPinned }"
+                        @click.stop="toggleItemPin(item)"
+                        title="置顶"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+                        </svg>
                       </button>
                       <!-- 收藏按钮 -->
                     <button
@@ -4465,7 +4504,7 @@ const checkDataConsistency = () => {
                   class="group px-3 py-2 border-b border-base-200 hover:bg-primary/5 cursor-pointer"
                   :class="{ 
                     'bg-blue-50/70 border-blue-200 dark:bg-blue-900/25 dark:border-blue-800/40': item.isPinned && selectedItem?.id !== item.id,
-                    'bg-blue-100 border-blue-300 shadow-sm ring-1 ring-blue-200 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
+                    'bg-blue-100 border-blue-300 shadow-md ring-1 ring-blue-300 dark:bg-blue-900/30 dark:border-blue-600 dark:ring-blue-700': selectedItem?.id === item.id && selectedItem?.id !== undefined,
                     'hover:bg-base-200': selectedItem?.id !== item.id || selectedItem?.id === undefined
                   }"
                   @click="selectedItem = item"
@@ -4530,7 +4569,7 @@ const checkDataConsistency = () => {
                       </div>
                     </div>
 
-                    <div class="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
+                    <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex-shrink-0">
                       <!-- 删除按钮 -->
                       <button
                         @click.stop="deleteItem(item)"
@@ -4538,6 +4577,17 @@ const checkDataConsistency = () => {
                         title="删除"
                       >
                         <TrashIcon class="w-3.5 h-3.5" />
+                      </button>
+                      <!-- 置顶按钮 -->
+                      <button
+                        class="flex-shrink-0 p-0.5 text-base-content/40 hover:text-blue-500 transition-colors duration-200 opacity-0 group-hover:opacity-100"
+                        :class="{ 'opacity-100 text-blue-500': item.isPinned }"
+                        @click.stop="toggleItemPin(item)"
+                        title="置顶"
+                      >
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 4v2a2 2 0 01-2 2h-1v6a2 2 0 01-2 2 2 2 0 01-2-2V8H8a2 2 0 01-2-2V4h2V2h8v2h2z" />
+                        </svg>
                       </button>
                       <!-- 收藏按钮 -->
                     <button
@@ -5663,4 +5713,3 @@ button {
 }
 
 </style>
-
