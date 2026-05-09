@@ -683,7 +683,10 @@ const parseHtmlMetadata = (metadata: any): string | null => {
   if (typeof metadata !== 'object' || typeof metadata.html !== 'string') {
     return null
   }
+  // 剥离 <style> 和 <script> 标签，防止注入样式/脚本影响父文档 UI
   return metadata.html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
 }
 
 // 获取文件名（从content或metadata中提取）
@@ -844,6 +847,33 @@ watch(selectedItem, async (newItem) => {
 const searchInputRef = ref<HTMLInputElement | null>(null)
 // 历史记录列表容器引用
 const historyListRef = ref<HTMLElement | null>(null)
+const previewScrollRef = ref<HTMLElement | null>(null)
+let _autoScrollRAF = 0
+
+const startPreviewAutoScroll = (e: MouseEvent) => {
+  if (e.buttons !== 1 || !previewScrollRef.value) return
+  const container = previewScrollRef.value
+  const rect = container.getBoundingClientRect()
+  const edge = 30
+  let speed = 0
+  if (e.clientX > rect.right - edge) {
+    speed = Math.min(8, (e.clientX - rect.right + edge) * 0.3)
+  } else if (e.clientX < rect.left + edge) {
+    speed = Math.max(-8, (e.clientX - rect.left - edge) * 0.3)
+  }
+  cancelAnimationFrame(_autoScrollRAF)
+  if (speed !== 0) {
+    const tick = () => {
+      container.scrollLeft += speed
+      _autoScrollRAF = requestAnimationFrame(tick)
+    }
+    _autoScrollRAF = requestAnimationFrame(tick)
+  }
+}
+
+const stopPreviewAutoScroll = () => {
+  cancelAnimationFrame(_autoScrollRAF)
+}
 // 存储Tauri事件监听器的unlisten函数
 const unlistenFocus = ref<(() => void) | null>(null)
 const unlistenPreviousApp = ref<(() => void) | null>(null)
@@ -3532,7 +3562,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   logger.debug('组件卸载，开始清理资源...')
-  
+
+  // 清理预览区自动滚动
+  cancelAnimationFrame(_autoScrollRAF)
+
   // 清理键盘事件监听器
   window.removeEventListener('keydown', handleKeyDown)
   
@@ -4627,7 +4660,7 @@ const checkDataConsistency = () => {
       </div>
 
       <!-- Right Content -->
-      <div class="flex-1 flex flex-col min-h-0 bg-base-100">
+      <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-base-100">
         <div class="px-4 py-3 border-b border-base-200 flex-shrink-0" data-tauri-drag-region>
           <div class="flex items-center justify-between" data-tauri-drag-region>
             <div class="flex items-center space-x-2" data-tauri-drag-region>
@@ -4693,21 +4726,22 @@ const checkDataConsistency = () => {
           </div>
         </div>
         
-        <div class="flex-1 p-4 overflow-y-auto min-h-0">
+        <div ref="previewScrollRef" class="flex-1 p-4 overflow-auto min-h-0" @mousemove="startPreviewAutoScroll" @mouseup="stopPreviewAutoScroll" @mouseleave="stopPreviewAutoScroll">
           <div v-if="selectedItem" class="h-full relative">
-            <div class="bg-base-200 rounded-lg border border-base-300 p-4 min-h-full preview-container">
+            <div class="bg-base-200 rounded-lg border border-base-300 p-4 min-h-full preview-container" style="min-width: 100%; width: max-content;">
               <template v-if="selectedItem.type === 'text'">
                 <!-- 富文本 HTML 渲染预览 -->
                 <template v-if="parseHtmlMetadata(selectedItem.metadata)">
                   <div
-                    class="prose prose-sm max-w-none preview-content text-sm text-base-content leading-normal overflow-hidden"
+                    class="prose prose-sm max-w-none preview-content text-sm text-base-content leading-normal"
+                    style="overflow-wrap: normal; word-break: normal;"
                     v-html="parseHtmlMetadata(selectedItem.metadata)"
                   ></div>
                 </template>
                 <!-- 纯文本预览 -->
                 <template v-else>
                   <div class="prose prose-sm max-w-none preview-content">
-                    <pre class="whitespace-pre-wrap break-words text-base-content font-mono text-xs leading-normal preview-content">{{ formattedPreviewContent }}</pre>
+                    <pre class="whitespace-pre text-base-content font-mono text-xs leading-normal preview-content" style="overflow-x: visible;">{{ formattedPreviewContent }}</pre>
                   </div>
                 </template>
                 <!-- 富文本提示 -->

@@ -64,6 +64,7 @@
     -ms-user-select: text !important;
     user-select: text !important;
     cursor: text !important;
+    contain: layout style;
   }
   
   /* 预览栏容器区域 */
